@@ -1,11 +1,21 @@
 # Fedora workstation VM for running OpenShell demos against an OpenShift cluster.
-# Provider: QEMU via vagrant-qemu (uses macOS Hypervisor.framework).
 #
+# This Vagrantfile is specific to macOS on Intel (x86_64) using QEMU via
+# vagrant-qemu. It will NOT work on Apple Silicon without changes (the box
+# and CLI binaries are x86_64). For other setups, adapt the box, provider,
+# and binary URLs to match your host architecture.
+#
+# Prerequisites:
+#   brew install qemu        # or however you installed QEMU
 #   vagrant plugin install vagrant-qemu
+#
+# Usage:
 #   vagrant up
 #   vagrant ssh
+#   cd /vagrant/base
 #
-# The repo is synced to /vagrant inside the VM. Copy .env there before use.
+# The repo is synced to /vagrant inside the VM. Copy .env separately:
+#   vagrant upload .env /vagrant/.env
 
 Vagrant.configure("2") do |config|
   config.vm.box = "generic/fedora39"

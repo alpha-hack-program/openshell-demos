@@ -17,9 +17,16 @@ editing anything in this folder.
 | OpenShift 4.x cluster | |
 | Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
 
+You can run these tools from any machine that can reach the cluster: your
+laptop, a jump host, a VM, a container. The repo includes a
+[Vagrantfile](../Vagrantfile) that provisions a Fedora VM with everything
+pre-installed if you want a self-contained Linux workstation — see
+[Using the Vagrant VM](#using-the-vagrant-vm) at the bottom. But it's
+entirely optional.
+
 ### Installing the CLI
 
-On Fedora/RHEL x86_64, install the RPM directly from the GitHub release:
+On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
 
 ```bash
 OPENSHELL_VERSION="0.0.97"   # match OPENSHELL_CHART_VERSION in .env
@@ -28,12 +35,20 @@ sudo dnf install -y \
 openshell --version
 ```
 
+On **macOS** (Apple Silicon):
+
+```bash
+curl -sL "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-aarch64-apple-darwin.tar.gz" \
+  | tar xzf - -C /usr/local/bin
+openshell --version
+```
+
+Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
+https://github.com/NVIDIA/OpenShell/releases.
+
 > **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.97`) but the
 > Helm chart version does **not** (`0.0.97`). `OPENSHELL_CHART_VERSION` in
 > `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.97`.
-
-Other assets (macOS, musl tarball, aarch64, `.deb`, `.snap`) are listed at
-https://github.com/NVIDIA/OpenShell/releases.
 
 #### Bash completions
 
@@ -46,9 +61,8 @@ mkdir -p ~/.local/share/bash-completion/completions
 openshell completions bash > ~/.local/share/bash-completion/completions/openshell
 ```
 
-Restart your shell (or `source ~/.bashrc`) to activate. The Vagrantfile
-provisions completions for `openshell`, `oc`, `kubectl`, and `helm`
-automatically.
+Restart your shell (or `source ~/.bashrc`) to activate. Also available for
+`zsh`, `fish`, and `powershell` — run `openshell completions --help`.
 
 ### Installing Agent Sandbox
 
@@ -254,6 +268,54 @@ openshell provider delete deepseek
 | Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' ../.env | xargs)` instead of `source ../.env` |
 | Sandbox pods never schedule at all | Agent Sandbox controller/CRDs not installed before the chart |
 | Outbound call still blocked after adding an endpoint to the policy | The policy enforces a **binary allowlist**. Adding an endpoint alone is not enough — you must also specify which binary is allowed to use it: `openshell policy update <sandbox> --add-endpoint host:port:access:proto:enforce --binary /usr/bin/curl`. Use `readlink -f <binary>` inside the sandbox to find the canonical path if symlinks are involved |
+
+## Using the Vagrant VM (macOS Intel only)
+
+The repo includes a [Vagrantfile](../Vagrantfile) that creates a Fedora VM
+with `oc`, `helm`, `kubectl`, `openshell`, and bash completions pre-installed.
+
+> **This Vagrantfile is specific to macOS on Intel (x86_64)** using QEMU via
+> [vagrant-qemu](https://github.com/ppggff/vagrant-qemu). It will **not**
+> work on Apple Silicon without changes — the Vagrant box and CLI binaries
+> are all x86_64. For other host platforms, adapt the box, provider, and
+> download URLs, or just install the tools directly on your machine.
+
+```bash
+# One-time setup
+brew install qemu
+vagrant plugin install vagrant-qemu
+
+# Start the VM
+vagrant up
+
+# SSH in
+vagrant ssh
+
+# The repo is synced to /vagrant (excluding .git, .env, .vagrant)
+cd /vagrant/base
+```
+
+If you prefer to run commands from outside the VM, set up a shell alias:
+
+```bash
+alias vsh='vagrant ssh -c'
+
+# Then use it like:
+vsh "openshell status"
+vsh "openshell sandbox list"
+```
+
+To copy your `.env` into the VM (it's excluded from rsync for safety):
+
+```bash
+vagrant upload .env /vagrant/.env
+```
+
+After editing files locally, sync them into the VM:
+
+```bash
+vagrant rsync
+```
 
 ## Next steps
 
