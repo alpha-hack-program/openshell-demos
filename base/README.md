@@ -216,6 +216,13 @@ export $(grep -v '^#' ../.env | xargs)
 ./scripts/03-connect-gateway.sh
 ```
 
+By default the scripts use `oc port-forward` to reach the gateway. To use a
+passthrough Route instead (non-official path — see
+[Exposing the gateway via passthrough Route](#exposing-the-gateway-via-passthrough-route)),
+set `OPENSHELL_ROUTE=true` in `.env` before running. The install and connect
+scripts will automatically add the route hostname to the server cert SANs,
+set `allowUnauthenticatedUsers=true`, and create the Route.
+
 ## Exposing the gateway via passthrough Route
 
 By default the install scripts use `oc port-forward` to reach the gateway on
