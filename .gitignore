@@ -1,0 +1,6 @@
+old/
+*.old
+.env
+.vagrant/
+.DS_Store
+*.zip

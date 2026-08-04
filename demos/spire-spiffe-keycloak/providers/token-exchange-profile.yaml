@@ -1,0 +1,28 @@
+# Path B (stretch) — DRAFT ONLY, schema unconfirmed.
+#
+# Providers v2 docs confirm five refresh strategies: static, external,
+# oauth2_refresh_token, oauth2_client_credentials, google_service_account_jwt.
+# token_exchange is NOT among them. The token_grant.grant_type: token_exchange
+# shape below is inferred from NVIDIA/OpenShell issue #1987 design discussion,
+# not from a confirmed schema. Run `openshell provider profile lint -f
+# providers/token-exchange-profile.yaml` and read any validation errors before
+# trusting this file.
+id: customer-token-exchange-api
+display_name: Customer API via SPIFFE token exchange
+category: data
+
+credentials:
+  - name: customer_subject_token
+    env_vars: [CUSTOMER_SUBJECT_TOKEN]
+    required: true
+
+token_grant:                      # [VERIFY] field name and shape
+  grant_type: token_exchange
+  subject_token: customer_subject_token
+
+endpoints:
+  - host: api.yourdownstream.example.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce

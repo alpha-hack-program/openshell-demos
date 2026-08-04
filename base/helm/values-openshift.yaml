@@ -1,0 +1,14 @@
+# OpenShift-compatibility overrides for the OpenShell Helm chart.
+#
+# TLS is left enabled (the chart default). The PKI init job generates server
+# TLS certs, client mTLS certs, and sandbox JWT signing keys. The CLI
+# authenticates via mTLS — no need for allowUnauthenticatedUsers.
+#
+# No OIDC, no SPIFFE token grants — those live in each demo's own
+# helm/values-overlay.yaml and get applied on top of this file, never in it.
+
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null

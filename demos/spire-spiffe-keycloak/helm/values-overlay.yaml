@@ -1,0 +1,21 @@
+# Applied on top of base/helm/values-openshift.yaml:
+#   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+#     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
+#     -f base/helm/values-openshift.yaml \
+#     -f demos/spire-spiffe-keycloak/helm/values-overlay.yaml
+#
+# Only the deltas this demo needs live here.
+
+server:
+  auth:
+    allowUnauthenticatedUsers: false   # real OIDC is configured below — close the base-layer bypass
+  oidc:
+    issuer: "https://<keycloak-host>/realms/openshell"     # fill in from .env
+    audience: "openshell-cli"
+    rolesClaim: "realm_access.roles"
+    adminRole: "openshell-admin"
+    userRole: "openshell-user"
+  providerTokenGrants:
+    spiffe:
+      enabled: true          # Path B (stretch) only — leave false if only doing Path A
+      workloadApiSocketPath: "/spiffe-workload-api/spire-agent.sock"

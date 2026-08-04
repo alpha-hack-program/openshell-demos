@@ -1,0 +1,37 @@
+id: openai
+display_name: OpenAI (compatible)
+description: OpenAI-compatible inference API (works with DeepSeek, etc. via OPENAI_BASE_URL)
+category: inference
+credentials:
+- name: api_key
+  description: OpenAI API key
+  env_vars:
+  - OPENAI_API_KEY
+  required: true
+  auth_style: bearer
+  header_name: authorization
+  query_param: ''
+config:
+- name: base_url
+  description: API base URL override (e.g. https://api.deepseek.com for DeepSeek)
+  env_vars:
+  - OPENAI_BASE_URL
+  required: false
+endpoints:
+- host: api.deepseek.com
+  port: 443
+  protocol: rest
+  access: read-write
+  enforcement: enforce
+- host: api.openai.com
+  port: 443
+  protocol: rest
+  access: read-write
+  enforcement: enforce
+binaries:
+- /usr/bin/curl
+- /usr/local/bin/curl
+inference_capable: true
+discovery:
+  credentials:
+  - api_key

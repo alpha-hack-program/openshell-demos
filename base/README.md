@@ -1,0 +1,261 @@
+# base — OpenShell on OpenShift, generic install + hello world
+
+Demo-agnostic. Installs the OpenShell gateway on OpenShift and proves the
+install works with a minimal sandbox test. No OIDC, no SPIFFE, no external
+identity provider — those are demo-specific and layered on top via a Helm
+values *overlay* in each `demos/<name>/helm/values-overlay.yaml`, never by
+editing anything in this folder.
+
+## Prerequisites
+
+| Tool / access | Notes |
+|---|---|
+| `oc` | Logged into the target cluster, with rights to grant SCCs |
+| `helm` 3.x | |
+| `kubectl` | Compatible with cluster version |
+| `openshell` CLI | See [Installing the CLI](#installing-the-cli) below |
+| OpenShift 4.x cluster | |
+| Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
+
+### Installing the CLI
+
+On Fedora/RHEL x86_64, install the RPM directly from the GitHub release:
+
+```bash
+OPENSHELL_VERSION="0.0.97"   # match OPENSHELL_CHART_VERSION in .env
+sudo dnf install -y \
+  "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
+openshell --version
+```
+
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.97`) but the
+> Helm chart version does **not** (`0.0.97`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.97`.
+
+Other assets (macOS, musl tarball, aarch64, `.deb`, `.snap`) are listed at
+https://github.com/NVIDIA/OpenShell/releases.
+
+#### Bash completions
+
+```bash
+# system-wide (requires root)
+sudo sh -c 'openshell completions bash > /etc/bash_completion.d/openshell'
+
+# or per-user
+mkdir -p ~/.local/share/bash-completion/completions
+openshell completions bash > ~/.local/share/bash-completion/completions/openshell
+```
+
+Restart your shell (or `source ~/.bashrc`) to activate. The Vagrantfile
+provisions completions for `openshell`, `oc`, `kubectl`, and `helm`
+automatically.
+
+### Installing Agent Sandbox
+
+The Agent Sandbox controller and CRDs come from the
+[kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+project. Install them **before** the OpenShell Helm chart:
+
+```bash
+# Latest
+kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml
+
+# Or pin a version
+VERSION="v0.5.4"
+kubectl apply -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSION}/sandbox.yaml"
+```
+
+Verify the controller is running:
+
+```bash
+kubectl -n agent-sandbox-system get pods
+# NAME                                       READY   STATUS    AGE
+# agent-sandbox-controller-xxxxx             1/1     Running   ...
+```
+
+> **Gotcha:** the manifest file is called `sandbox.yaml`, **not**
+> `manifest.yaml`. The release also offers `sandbox-with-extensions.yaml`
+> (adds SandboxTemplate, SandboxClaim, SandboxWarmPool CRDs).
+
+## What this installs
+
+- OpenShell gateway (StatefulSet) in `$OPENSHELL_NAMESPACE`
+- TLS-enabled gateway with mTLS client authentication — the PKI init job
+  generates server certs, client certs, and sandbox JWT signing keys
+  automatically
+
+`helm/values-openshift.yaml`:
+
+```yaml
+podSecurityContext:
+  fsGroup: null
+securityContext:
+  runAsUser: null
+```
+
+The only overrides are `fsGroup` and `runAsUser` set to `null` — OpenShift's
+admission controller must assign these itself. Everything else uses chart
+defaults: TLS enabled, mTLS for client auth, PKI init job generates all
+certificates.
+
+After `helm install`, extract the client mTLS bundle so the CLI can
+authenticate:
+
+```bash
+MTLS_DIR=~/.config/openshell/gateways/openshift/mtls
+mkdir -p "$MTLS_DIR"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+```
+
+> **Why TLS instead of plaintext?** The
+> [official OpenShift install guide](https://docs.nvidia.com/openshell/kubernetes/openshift)
+> sets `server.disableTls=true` because it pairs with Envoy Gateway for TLS
+> termination at the edge (see the
+> [ingress guide](https://docs.nvidia.com/openshell/kubernetes/ingress)).
+> That approach also requires `allowUnauthenticatedUsers=true` (or OIDC)
+> since there's no client certificate path through Envoy.
+>
+> We keep TLS enabled because:
+> - mTLS provides client authentication out of the box — no need for
+>   `allowUnauthenticatedUsers` or OIDC configuration in the base install
+> - Port-forward works (the server cert SANs include `localhost` / `127.0.0.1`)
+> - A passthrough OpenShift Route can expose the gateway externally with
+>   gRPC over HTTP/2 (add the Route hostname to `pkiInitJob.serverDnsNames`)
+>
+> **To follow the official plaintext path instead**, use these values:
+>
+> ```yaml
+> server:
+>   disableTls: true
+>   auth:
+>     allowUnauthenticatedUsers: true
+> podSecurityContext:
+>   fsGroup: null
+> securityContext:
+>   runAsUser: null
+> ```
+>
+> Then register the gateway with `http://` (no mTLS extraction needed):
+>
+> ```bash
+> openshell gateway add http://127.0.0.1:8080 --local --name openshift
+> ```
+
+## Install
+
+The scripts expect environment variables to be **exported**, not just sourced.
+Use the `export` pattern below, or add `set -a` / `set +a` around the source:
+
+```bash
+export $(grep -v '^#' ../.env | xargs)
+
+./scripts/00-prereqs-check.sh
+./scripts/01-namespace-and-scc.sh
+./scripts/02-install-openshell.sh
+./scripts/03-connect-gateway.sh
+```
+
+## Verify: hello-world sandbox
+
+```bash
+./scripts/04-hello-world-sandbox.sh
+```
+
+This mirrors NVIDIA's own quickstart pattern — create a sandbox, confirm an
+outbound call is blocked by the default policy, apply a policy that allows it,
+confirm it now succeeds. No credentials or providers involved; this only
+proves sandbox creation, network isolation, and policy hot-reload all work on
+this cluster.
+
+## Smoke test: provider credential injection
+
+Once the hello-world test passes, this optional step proves that providers
+can inject credentials into sandbox outbound calls. Uses DeepSeek (or any
+OpenAI-compatible API) as the target.
+
+### 1. Import an OpenAI-compatible provider profile
+
+```bash
+openshell provider profile import --file providers/openai-profile.yaml
+```
+
+### 2. Create a provider with your API key
+
+```bash
+export OPENAI_API_KEY=<your-key>
+openshell provider create --name deepseek --type openai \
+  --credential OPENAI_API_KEY \
+  --config base_url=https://api.deepseek.com
+```
+
+### 3. Attach it to the sandbox and allow the endpoint
+
+```bash
+openshell sandbox provider attach hello-world deepseek
+openshell policy update hello-world \
+  --add-endpoint api.deepseek.com:443:read-write:rest:enforce \
+  --binary /usr/bin/curl --wait
+```
+
+### 4. Call the API from inside the sandbox
+
+```bash
+openshell sandbox exec -n hello-world -- \
+  curl -sS https://api.deepseek.com/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"Say hello in one sentence."}],"max_tokens":50}'
+```
+
+You should get a JSON response with a chat completion.
+
+> **How credential injection works:** the provider sets `OPENAI_API_KEY`
+> inside the sandbox to a *resolve placeholder*
+> (`openshell:resolve:env:v168...`), not the real key. When curl puts that
+> placeholder in the `Authorization: Bearer` header, the gateway proxy
+> intercepts it and swaps in the real API key before forwarding to DeepSeek.
+> The actual secret never enters the sandbox. Application code works exactly
+> as it would outside the sandbox — `Authorization: Bearer $OPENAI_API_KEY`
+> — but the key stays on the gateway side.
+
+### 5. Clean up
+
+```bash
+openshell sandbox delete hello-world
+openshell provider delete deepseek
+```
+
+## Definition of done
+
+- [ ] Agent Sandbox controller running in `agent-sandbox-system`
+- [ ] Namespace created, `privileged` SCC granted to the `openshell-sandbox` service account
+- [ ] `helm install` succeeds, `statefulset/openshell` reports ready
+- [ ] Gateway reachable via `oc port-forward`, `openshell status` succeeds
+- [ ] Hello-world sandbox created
+- [ ] Outbound call blocked by the default policy
+- [ ] Policy update applied, the same call now succeeds
+- [ ] (Optional) Provider credential injection smoke test passes
+- [ ] Sandbox deleted, namespace left clean for the next demo
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Sandbox pods stuck `Pending` / SCC admission errors | `privileged` SCC not granted to `openshell-sandbox` service account in `$OPENSHELL_NAMESPACE`. Note: the SA is `openshell-sandbox`, **not** `default` |
+| `helm install` rejects pod security fields | `podSecurityContext.fsGroup` / `securityContext.runAsUser` not nulled out — OpenShift's admission controller needs to assign these itself |
+| Gateway pod stuck in `ContainerCreating`, event says `secret "openshell-jwt-keys" not found` | Do **not** set `pkiInitJob.enabled: false`. The PKI init job generates the sandbox JWT signing keys even when TLS is disabled. Leave it at the default (`true`) |
+| `helm install` says chart `not found` at `oci://ghcr.io/nvidia/openshell/helm-chart` | The chart version must **not** have a `v` prefix. Use `0.0.97`, not `v0.0.97`. The Git tag uses `v0.0.97` but the OCI chart is published as `0.0.97` |
+| `kubectl apply` for Agent Sandbox returns 404 | The manifest file is `sandbox.yaml`, not `manifest.yaml` — see [Installing Agent Sandbox](#installing-agent-sandbox) |
+| Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' ../.env | xargs)` instead of `source ../.env` |
+| Sandbox pods never schedule at all | Agent Sandbox controller/CRDs not installed before the chart |
+| Outbound call still blocked after adding an endpoint to the policy | The policy enforces a **binary allowlist**. Adding an endpoint alone is not enough — you must also specify which binary is allowed to use it: `openshell policy update <sandbox> --add-endpoint host:port:access:proto:enforce --binary /usr/bin/curl`. Use `readlink -f <binary>` inside the sandbox to find the canonical path if symlinks are involved |
+
+## Next steps
+
+Once the above is all green, go to a demo — start with
+[`demos/spire-spiffe-keycloak/README.md`](../demos/spire-spiffe-keycloak/README.md).

@@ -1,0 +1,31 @@
+{
+  "realm": "openshell",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "openshell-admin", "description": "Full OpenShell gateway access" },
+      { "name": "openshell-user", "description": "Standard OpenShell gateway access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "openshell-cli",
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://127.0.0.1:*/callback"],
+      "webOrigins": ["+"]
+    },
+    {
+      "clientId": "openshell-gateway",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "__REPLACE_AT_DEPLOY_TIME__",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "_comment": "Template only — no real secrets. Demo 'customer' users (with offline_access scope, for Path A refresh tokens) and any Path B SPIFFE federated client auth / token-exchange feature configuration are environment-specific and intentionally left out of this template; see the demo README's Open Risks section."
+}

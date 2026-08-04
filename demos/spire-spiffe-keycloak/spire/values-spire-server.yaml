@@ -1,0 +1,5 @@
+# Path B (stretch) only. Draft values — [VERIFY] against
+# `helm show values spiffe/spire-server` for your chart version before using.
+trustDomain: "openshell.demo"
+persistence:
+  enabled: true
