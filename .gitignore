@@ -4,3 +4,4 @@ old/
 .vagrant/
 .DS_Store
 *.zip
+*.token

@@ -57,6 +57,11 @@ source.
 - Providers v2 enabled (`providers_v2_enabled=true`)
 - A per-customer provider profile and onboarding script (Path A)
 - SPIRE, a token-exchange provider profile, and registration entries (Path B, stretch)
+- Two example MCP servers (`mcp-servers/` chart) fronted by an Envoy sidecar
+  that gates access by Keycloak realm role, checked against the customer's
+  existing OAuth access token, and the scripts to deploy and authorize
+  customers against them (stretch,
+  no SPIRE dependency — see [step 6](#6-stretch-mcp-servers-gated-by-keycloak-role))
 
 ## Architecture
 
@@ -128,6 +133,25 @@ authorization-code login for that customer against the `openshell-gateway`
 Keycloak client with `offline_access` in scope. Script your own login flow;
 keep it in this script rather than the shared repo conventions.
 
+> **Before running this**, substitute the real Keycloak host into
+> `providers/customer-refresh-profile.yaml`'s `token_url` (no script does
+> this automatically — unlike `keycloak/realm-export.template.json`, this
+> file isn't named `.template.` and isn't substituted at deploy time) and
+> import/update it:
+> ```bash
+> sed "s|<keycloak-host>|${KEYCLOAK_HOST}|" providers/customer-refresh-profile.yaml \
+>   > /tmp/customer-refresh-profile.resolved.yaml
+> openshell provider profile import -f /tmp/customer-refresh-profile.resolved.yaml
+> ```
+> Per Providers v2, `token_url` is profile-owned and cannot be overridden by
+> `--material` at configure time — confirmed against
+> [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2),
+> which is why it must live under `credentials[].refresh` in the profile, not
+> as a top-level `refresh:` field or as instance material. If you create a
+> provider from this profile *before* the profile has the correct schema, the
+> provider snapshots the broken state — delete and recreate it after fixing
+> the profile, a plain `profile update` isn't enough.
+
 ### 4. Run the demo
 
 ```bash
@@ -159,6 +183,168 @@ On the Keycloak side, Path B additionally requires:
   trust domain's bundle endpoint with Keycloak and map the gateway's SPIFFE
   ID to its Keycloak client identity.
 
+### 6. (Stretch) MCP servers gated by Keycloak role
+
+Two example downstream services (MCP servers) that each validate the
+caller's Bearer token as a **Keycloak-issued OAuth access token** — the same
+token Providers v2 already mints/refreshes per customer in step 3 — and are
+only reachable by customers holding a specific Keycloak realm role. This is
+**entirely this demo's own design**, not part of upstream OpenShell or any
+MCP spec, but unlike an earlier draft of this section it deliberately does
+**not** depend on SPIRE/SPIFFE: nothing in this repo has ever gotten SPIRE
+running (see the Path B risk notes above), while OIDC/Keycloak is already
+deployed and proven working end to end.
+
+**This has been run end to end against real images**
+(`quay.io/atarazana/eligibility-engine-mcp-rs`,
+`quay.io/atarazana/compatibility-engine-mcp-rs`) with a real MCP client
+(Claude Code) and a real LLM (DeepSeek) — see
+[Verified test recipe](#verified-test-recipe-claude-code--deepseek--mcp-tool)
+below. Three real problems were found and fixed along the way, in order:
+
+1. **The server binary hardcodes `127.0.0.1:8001` unless told otherwise** —
+   without any override it's unreachable from any other pod, full stop, no
+   error on either side (the caller just gets `upstream_unreachable`).
+   `BIND_ADDRESS` env var controls it.
+2. **`MCP_DISABLE_HOST_CHECK=true` does *not* affect the bind address**
+   (tested, no effect) — kept anyway since it looked like the intended
+   escape hatch for something else (likely `Host:` header validation).
+3. **The critical one: the server does not actually check the injected
+   token at all.** Confirmed directly — a request with no `Authorization`
+   header, a garbage token, *and* `customer2` reached the tool exactly like
+   a legitimately role-holding customer would. `MCP_OIDC_ISSUER` /
+   `MCP_OIDC_CLIENT_ID` / `MCP_REQUIRED_ROLE` are read into the image's
+   environment (confirmed via `oc exec ... env`) but nothing in the binary
+   appears to use them.
+
+Problem 3 is the one that actually matters — it means the "gated by
+Keycloak role" premise of this whole section was false as originally
+shipped. The fix: an **Envoy sidecar** in front of the app container, doing
+the actual enforcement, with the app itself reverted to loopback-only
+(`127.0.0.1:8001`, no `BIND_ADDRESS` override — the one thing the image
+*did* get right by default). Envoy's `jwt_authn` filter verifies the
+token's signature against Keycloak's JWKS and `iss`; its `rbac` filter then
+requires the decoded `realm_access.roles` claim to contain the
+server-specific role. Only requests that pass both reach the app on
+`127.0.0.1:8001`; the app-level `MCP_OIDC_*` env vars are left in place as
+documentation of intent, not as something to rely on.
+
+```bash
+./scripts/06-deploy-mcp-servers.sh
+```
+
+This deploys `mcp-server-a` and `mcp-server-b` into `$OPENSHELL_NAMESPACE`
+(same namespace as the gateway) as **two-container pods** (`envoy` +
+the app), each with its own ServiceAccount, no SPIRE/CSI dependency. Envoy
+listens on the port the Service targets (`8000`); the app is unreachable
+except from Envoy in the same pod.
+
+Each server has its own Keycloak realm role (`mcp-server-a-user`,
+`mcp-server-b-user` — added to `keycloak/realm-export.template.json`).
+Role gating is **defense in depth, verified at both layers**:
+
+1. **Orchestration-time**, by `07-authorize-mcp-customer.sh`: before
+   granting a customer's sandbox policy permission to reach the server, it
+   checks (via the Keycloak admin API) that the customer actually holds the
+   required realm role. This is *procedural* gating, the same way
+   customer/provider assignment already works elsewhere in this demo (see
+   [Secrets and security notes](#secrets-and-security-notes)) — OpenShell
+   has no native concept of per-endpoint RBAC, so nothing stops you from
+   running this script for an unauthorized customer by hand. **Verified**
+   — ran it for real, granting `customer1` the `mcp-server-a-user` role via
+   the admin API and confirming the script's role check passes/fails
+   correctly.
+2. **At the Envoy sidecar, on every request** — **verified against the
+   live deployment**, all three cases: no `Authorization` header → `401`;
+   a syntactically-valid but garbage token → `401`; a real, correctly
+   signed Keycloak token for a user who does *not* hold
+   `mcp-server-a-user` (tested with `demo-admin`'s own token, which only
+   has `openshell-admin`/`openshell-user`) → `403`; a valid token that
+   *does* hold the role → `200` and a working MCP session. This is the
+   actual enforcement point now, not the app image.
+
+```bash
+# grant the role in Keycloak first (console or admin API), then:
+export KEYCLOAK_ADMIN_TOKEN=...   # your own admin login, see script header
+./scripts/07-authorize-mcp-customer.sh customer1 mcp-server-a
+```
+
+The script assumes a sandbox named `demo-customer1` already exists (i.e.
+you've run `./demo.sh customer1` from step 4) and grants it a policy
+endpoint for the MCP server — it does not create a sandbox itself.
+
+#### Verified test recipe: Claude Code + DeepSeek + MCP tool
+
+This is the actual sequence that produced a real, correct answer end to
+end — Claude Code (pre-installed in the base sandbox image; OpenShell's own
+docs confirm `openshell sandbox create -- claude` as a supported pattern),
+running DeepSeek as its model (reusing the **same** `deepseek` provider
+from `base/`'s smoke test — DeepSeek exposes an Anthropic-compatible
+endpoint specifically for Claude Code, so no separate Anthropic key is
+needed), calling `mcp-server-a`'s one tool
+(`evaluate_unpaid_leave_eligibility`).
+
+Prerequisites beyond steps 1–3 and this section's deploy/authorize steps:
+the `deepseek` provider from `base/`'s smoke test must already be attached
+to the sandbox, and the sandbox's policy must allow `/usr/local/bin/claude`
+(not just `/usr/bin/curl` — Claude Code makes its own HTTP calls, it
+doesn't shell out to curl) to reach both `api.deepseek.com:443` and the MCP
+server:
+
+```bash
+openshell sandbox provider attach demo-customer1 deepseek
+openshell policy update demo-customer1 \
+  --add-endpoint "api.deepseek.com:443:read-write:rest:enforce" \
+  --binary /usr/local/bin/claude \
+  --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
+  --binary /usr/local/bin/claude \
+  --wait
+```
+
+Then, inside the sandbox — `ANTHROPIC_AUTH_TOKEN` is set to the *same*
+resolve-placeholder value already injected as `OPENAI_API_KEY` by the
+`deepseek` provider, per
+[DeepSeek's own Claude Code integration docs](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code):
+
+```bash
+openshell sandbox exec -n demo-customer1 -- bash -c '
+export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+export ANTHROPIC_AUTH_TOKEN=$OPENAI_API_KEY
+export ANTHROPIC_MODEL=deepseek-v4-pro
+export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro
+export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $CUSTOMER_ACCESS_TOKEN\"}}}}"
+claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
+  --mcp-config "$MCP_JSON" \
+  --strict-mcp-config \
+  --permission-mode bypassPermissions \
+  --output-format text
+'
+```
+
+This produced a correct, well-formatted answer citing **Case A —
+Sick/injured family care, 725€/month**, matching the tool's own documented
+eligibility logic — confirming the full chain: Keycloak role → Providers v2
+token injection (both the customer's own token *and* the reused DeepSeek
+credential) → Envoy JWT/role check → the MCP server's protocol handling
+(`initialize` → `notifications/initialized` → `tools/call`, discovered by
+probing the real server, since it requires the full MCP lifecycle rather
+than exposing anything at `/`) → real LLM tool-use reasoning.
+
+**Repeated with `customer2` against `mcp-server-b`** (same recipe, only
+`demo-customer2`/`customer-customer2`/`mcp-server-b` swapped in) to also
+confirm cross-server isolation. `mcp-server-b` ("Compatibility Engine")
+turned out to expose five tools for a fictional jurisdiction "Lysmark"
+(`calc_tax`, `calc_penalty`, `check_housing_grant`, `check_voting`,
+`distribute_waterfall`) — asking *"I live in Lysmark, how much taxes should
+I pay if I make 42345 a year?"* correctly invoked `calc_tax` and returned a
+real bracket-by-bracket breakdown (7,469.00 subtotal + 149.38 surcharge =
+**7,618.38** total). Before running this, confirmed **`customer1`'s token
+against `mcp-server-b` is `403`, and `customer2`'s token against
+`mcp-server-a` is `403`** — role gating is genuinely per-server, not just
+per-customer.
+
 ## Configuration reference
 
 | Variable | Where used | Notes |
@@ -167,8 +353,10 @@ On the Keycloak side, Path B additionally requires:
 | `KEYCLOAK_REALM` | All Keycloak-facing config | `openshell` in this demo |
 | `KEYCLOAK_CLIENT_ID_CLI` | `server.oidc.audience` | must match the Keycloak client ID exactly |
 | `KEYCLOAK_CLIENT_ID_GATEWAY` | Provider refresh material, Path B client auth | confidential client |
-| `KEYCLOAK_CLIENT_SECRET` | Provider refresh material | never commit; inject via `.env` or a secret manager |
+| `KEYCLOAK_CLIENT_SECRET` | Provider refresh material | never commit; inject via `.env` or a secret manager. **Drifts silently** if the `openshell-gateway` client secret is ever regenerated or the realm re-imported — nothing re-syncs `.env` automatically. Before relying on it, verify against the live value (Keycloak admin console → Clients → `openshell-gateway` → Credentials, or the admin REST API) rather than assuming `.env` is current |
 | `SPIRE_TRUST_DOMAIN` | SPIRE server/agent values, Path B | e.g. `openshell.demo` |
+| `MCP_SERVER_A_IMAGE` / `MCP_SERVER_A_TAG` etc. | documentation only | present in `.env.example` for reference, but `mcp-servers/values.yaml` pins the actual images used at deploy time — edit that file, not `.env`, to change them |
+| `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-customer.sh` | short-lived; obtain via your own admin login, never persist to `.env` long-term |
 
 ## Secrets and security notes
 
@@ -188,6 +376,11 @@ On the Keycloak side, Path B additionally requires:
   demo's overlay is applied, real OIDC auth is enforced
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — still evaluation-only, still never expose it to a public network.
+- `KEYCLOAK_CLIENT_SECRET` in `.env` is a point-in-time copy, not a live
+  reference — see the drift warning in
+  [Configuration reference](#configuration-reference). A stale value fails
+  as `unauthorized_client` on the token endpoint, which reads like a
+  permissions problem rather than a stale-secret problem.
 
 ## Definition of done
 
@@ -203,12 +396,26 @@ On the Keycloak side, Path B additionally requires:
 - [ ] (Stretch) Keycloak accepts the gateway's SVID as a client assertion for token exchange
 - [ ] (Stretch) Path B reproduces the upstream demo's flow using a customer-scoped
       subject token instead of a single operator's token
+- [x] (Stretch) `mcp-servers` chart deployed; a customer holding the required
+      Keycloak role can reach their MCP server, a customer lacking it cannot
+      — verified via the Envoy sidecar (401/403/200 cases all tested live)
+- [x] (Stretch) A customer authorized for one MCP server's role does not
+      thereby gain access to the other — verified both directions:
+      `customer1` (`mcp-server-a-user` only) → `mcp-server-b` is `403`;
+      `customer2` (`mcp-server-b-user` only) → `mcp-server-a` is `403`
 
 ## Open risks / things to verify
 
 - **This README is a reconstruction, not a transcription** of NVIDIA's own
   `examples/spiffe-token-grant-demo`. Reconcile every command above against
   the real repo before running it.
+- ~~Path A's provider profile schema is unconfirmed~~ — **verified against
+  [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2)
+  and a live gateway (CLI 0.0.97).** `refresh` (with `token_url`, `scopes`,
+  `strategy`) must nest under the specific entry in `credentials[]`, not as a
+  top-level profile field — a top-level `refresh:` block is silently dropped
+  on import with no error. `providers/customer-refresh-profile.yaml` reflects
+  the correct nesting as of this writing.
 - **Path B's provider profile schema is unconfirmed.** Providers v2 docs
   describe five refresh strategies (`static`, `external`,
   `oauth2_refresh_token`, `oauth2_client_credentials`,
@@ -229,6 +436,38 @@ On the Keycloak side, Path B additionally requires:
 - **Real customer identity federation** (brokering each customer's own IdP
   into Keycloak, rather than demo users in one realm) is a materially bigger
   project than this demo covers.
+- **Resolved: the MCP server images themselves do not enforce the role
+  check at all.** Originally flagged here as unverified; then actually
+  tested — a request with no token, a garbage token, and a valid token for
+  a user *without* the required role (`demo-admin`) all reached the tool
+  exactly like an authorized customer would. Fixed with an Envoy sidecar
+  that does real JWT signature/issuer verification plus a `realm_access.roles`
+  check (see step 6) — confirmed against the live deployment: `401` for
+  no/garbage token, `403` for a valid token lacking the role, `200` only for
+  a valid, role-holding token. **Do not remove the Envoy sidecar** on the
+  assumption the app image checks anything itself — it doesn't.
+- **Still unverified**: (a) `07-authorize-mcp-customer.sh` assumes a
+  sandbox named `demo-<customer-id>` already exists (from
+  `./demo.sh <customer-id>`) — it does not create one; (b) there's no
+  per-server token audience (Keycloak isn't configured with an audience
+  mapper per MCP server), so the realm role claim is the *only* thing
+  distinguishing access to server A from server B — a bug in the shared
+  Envoy config template could leak access between servers, though each
+  server's ConfigMap does encode its own distinct role; (c) the Envoy JWKS
+  TLS connection to Keycloak uses `trust_chain_verification: ACCEPT_UNTRUSTED`
+  (skips CA validation, same reasoning as this demo's `curl -k` everywhere)
+  — fine for evaluation, never for production; (d) `envoyproxy/envoy:v1.31-latest`
+  is a moving tag, not a pinned version — pin an exact patch release before
+  relying on this beyond a demo.
+- **This section was designed once for SPIRE/SPIFFE JWT-SVID validation,
+  then switched to Keycloak JWTs before ever being committed** — nothing in
+  this repo has ever gotten SPIRE running on this cluster (no `spire`
+  namespace, no `csi.spiffe.io` CSI driver present when checked), while
+  OIDC/Keycloak was already deployed and proven working. If you later get
+  SPIRE actually running and want workload-identity-based validation
+  instead, treat this as a rewrite, not a config flag — the two approaches
+  differ in what the MCP server trusts (a bearer token vs. a mTLS-attested
+  workload identity), not just in which env vars get set.
 
 ## References
 

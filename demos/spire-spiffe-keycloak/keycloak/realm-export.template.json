@@ -4,7 +4,9 @@
   "roles": {
     "realm": [
       { "name": "openshell-admin", "description": "Full OpenShell gateway access" },
-      { "name": "openshell-user", "description": "Standard OpenShell gateway access" }
+      { "name": "openshell-user", "description": "Standard OpenShell gateway access" },
+      { "name": "mcp-server-a-user", "description": "Authorized to be onboarded against mcp-server-a (Path B extension)" },
+      { "name": "mcp-server-b-user", "description": "Authorized to be onboarded against mcp-server-b (Path B extension)" }
     ]
   },
   "clients": [

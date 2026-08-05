@@ -1,0 +1,70 @@
+# Path A extension (NOT SPIRE/SPIFFE — see README step 6 for why). Each MCP
+# server validates the caller's Keycloak-issued OAuth access token directly:
+# checks the signature via the realm's JWKS endpoint, confirms `iss`, and
+# requires `requiredRole` to be present in the token's realm_access.roles
+# claim. This is the SAME access token Providers v2 already mints/refreshes
+# per customer in step 3 (see ../providers/customer-refresh-profile.yaml) —
+# no separate workload-identity plane needed.
+
+keycloak:
+  issuer: "https://keycloak.apps.ocp.sandbox2229.opentlc.com/realms/openshell"
+  # Client whose tokens these servers accept, checked against the token's
+  # `azp` (or `aud`, depending on how your images validate it).
+  clientId: "openshell-gateway"
+
+# Envoy sidecar: the actual token/role enforcement point (added after
+# discovering the server images accept ANY bearer token, valid role or not
+# — see README step 6). Envoy's jwt_authn filter verifies the token's
+# signature against Keycloak's JWKS and validates `iss`; its rbac filter
+# then checks the decoded `realm_access.roles` claim contains the
+# server-specific requiredRole. Only requests that pass both reach the app,
+# which now listens on 127.0.0.1 only (loopback, unreachable except from
+# Envoy in the same pod) — see internalPort below.
+envoy:
+  image:
+    repository: "envoyproxy/envoy"
+    tag: "v1.31-latest"   # [VERIFY] pin an exact patch version before real use
+  # Envoy's Keycloak-JWKS TLS connection skips chain validation — this
+  # cluster's Keycloak route uses a certificate not in Envoy's default
+  # trust store, the same reason every curl call in this demo uses -k.
+  # Fine for evaluation, never for production.
+  insecureSkipVerifyJwks: true
+
+# One entry per MCP server. `name` becomes the Deployment/Service/
+# ServiceAccount name and the in-cluster DNS name
+# (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
+# realm role a customer's access token must carry in realm_access.roles —
+# enforced by the server itself on every request, and checked proactively
+# (fail-fast, clearer error) by 07-authorize-mcp-customer.sh before wiring
+# up the sandbox policy.
+#
+# image.repository/tag are pinned directly (real OCI images), read as-is by
+# 06-deploy-mcp-servers.sh's plain `helm upgrade --install`. If you ever
+# need to override one server's image at deploy time instead of editing
+# this file, don't use `helm --set servers[0].image.repository=...` or a
+# second -f file that only sets that one field — Helm does not merge list
+# elements field-by-field, so that silently blanks out servers[0]'s other
+# fields (name, port, requiredRole). Pass a full replacement values file
+# (all fields for that server) instead.
+servers:
+  - name: mcp-server-a
+    image:
+      repository: "quay.io/atarazana/eligibility-engine-mcp-rs"
+      tag: "2.0.2"
+      pullPolicy: IfNotPresent
+    port: 8000              # Envoy listens here; Service targets this
+    internalPort: 8001      # app's own hardcoded default when unconfigured
+                             # (confirmed for this image via testing)
+    requiredRole: "mcp-server-a-user"
+    resources: {}
+  - name: mcp-server-b
+    image:
+      repository: "quay.io/atarazana/compatibility-engine-mcp-rs"
+      tag: "3.1.1"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8001      # [VERIFY] assumed same default as mcp-server-a
+                             # (same author/framework) — not individually
+                             # confirmed for this image
+    requiredRole: "mcp-server-b-user"
+    resources: {}

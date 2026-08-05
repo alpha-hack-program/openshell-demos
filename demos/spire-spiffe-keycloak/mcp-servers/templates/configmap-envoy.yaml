@@ -1,0 +1,119 @@
+{{- $keycloak := .Values.keycloak -}}
+{{- $envoy := .Values.envoy -}}
+{{- $keycloakHost := (urlParse $keycloak.issuer).hostname -}}
+{{- range .Values.servers }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .name }}-envoy
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/part-of: mcp-servers
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9901 }
+    static_resources:
+      listeners:
+        - name: listener_0
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ .port }} }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    codec_type: AUTO
+                    route_config:
+                      name: local_route
+                      virtual_hosts:
+                        - name: backend
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route: { cluster: local_app }
+                    http_filters:
+                      # 1. Verify the bearer token's signature against
+                      #    Keycloak's JWKS and validate `iss`.
+                      - name: envoy.filters.http.jwt_authn
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                          providers:
+                            keycloak:
+                              issuer: "{{ $keycloak.issuer }}"
+                              remote_jwks:
+                                http_uri:
+                                  uri: "{{ $keycloak.issuer }}/protocol/openid-connect/certs"
+                                  cluster: keycloak_jwks
+                                  timeout: 5s
+                                cache_duration: 300s
+                              forward: true
+                              payload_in_metadata: jwt_payload
+                          rules:
+                            - match: { prefix: "/" }
+                              requires: { provider_name: keycloak }
+                      # 2. Require the decoded token's realm_access.roles
+                      #    to contain this server's specific required role.
+                      - name: envoy.filters.http.rbac
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                          rules:
+                            action: ALLOW
+                            policies:
+                              role_check:
+                                permissions:
+                                  - any: true
+                                principals:
+                                  - metadata:
+                                      filter: envoy.filters.http.jwt_authn
+                                      path:
+                                        - key: jwt_payload
+                                        - key: realm_access
+                                        - key: roles
+                                      value:
+                                        list_match:
+                                          one_of:
+                                            string_match:
+                                              exact: "{{ .requiredRole }}"
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: local_app
+          type: STATIC
+          connect_timeout: 2s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http_protocol_options: {}
+          load_assignment:
+            cluster_name: local_app
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: {{ .internalPort }} }
+        - name: keycloak_jwks
+          type: STRICT_DNS
+          connect_timeout: 5s
+          load_assignment:
+            cluster_name: keycloak_jwks
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: "{{ $keycloakHost }}", port_value: 443 }
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              {{- if $envoy.insecureSkipVerifyJwks }}
+              common_tls_context:
+                validation_context:
+                  trust_chain_verification: ACCEPT_UNTRUSTED
+              {{- end }}
+---
+{{- end }}

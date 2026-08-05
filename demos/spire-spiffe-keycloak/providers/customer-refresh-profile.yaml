@@ -12,23 +12,15 @@ credentials:
     required: true
     auth_style: bearer
     header_name: authorization
-
-refresh:
-  strategy: oauth2_refresh_token
-  token_url: "https://<keycloak-host>/realms/openshell/protocol/openid-connect/token"
-  scopes: [openid, offline_access]
-  refresh_before_seconds: 300
-  max_lifetime_seconds: 3600
-  material:
-    - name: client_id
-      required: true
-      secret: false
-    - name: refresh_token
-      required: true
-      secret: true
-    - name: client_secret
-      required: true
-      secret: true
+    # token_url is profile-owned per Providers v2 (refresh material cannot
+    # override it) — this MUST substitute the real keycloak host before
+    # import; no script does this automatically. [VERIFY: confirm against
+    # a fresh `openshell provider profile export` after import.]
+    refresh:
+      strategy: oauth2_refresh_token
+      token_url: "https://<keycloak-host>/realms/openshell/protocol/openid-connect/token"
+      scopes: [openid, offline_access]
+      refresh_before_seconds: 300
 
 endpoints:
   - host: api.yourdownstream.example.com

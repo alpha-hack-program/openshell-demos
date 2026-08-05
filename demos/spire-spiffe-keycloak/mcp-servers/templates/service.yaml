@@ -1,0 +1,17 @@
+{{- range .Values.servers }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .name }}
+  ports:
+    - name: http
+      port: {{ .port }}
+      targetPort: {{ .port }}
+---
+{{- end }}

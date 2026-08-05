@@ -1,0 +1,72 @@
+{{- $keycloak := .Values.keycloak -}}
+{{- $envoy := .Values.envoy -}}
+{{- range .Values.servers }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .name }}
+        app.kubernetes.io/part-of: mcp-servers
+    spec:
+      serviceAccountName: {{ .name }}
+      containers:
+        # Actual token/role enforcement point — see values.yaml's envoy:
+        # comment for why this exists. Listens on the port the Service
+        # targets; the app container (below) is loopback-only and
+        # unreachable except from this sidecar.
+        - name: envoy
+          image: "{{ $envoy.image.repository }}:{{ $envoy.image.tag }}"
+          args: ["-c", "/etc/envoy/envoy.yaml"]
+          ports:
+            - name: http
+              containerPort: {{ .port }}
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+        - name: {{ .name }}
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: internal
+              containerPort: {{ .internalPort }}
+          env:
+            # These are NOT enforced by this image (confirmed: it accepts
+            # any syntactically-valid bearer token regardless of role — see
+            # README step 6). Kept as documentation of intent / in case a
+            # future image version does implement its own check, but the
+            # Envoy sidecar above is the actual enforcement point — do not
+            # rely on these alone.
+            - name: MCP_OIDC_ISSUER
+              value: {{ $keycloak.issuer | quote }}
+            - name: MCP_OIDC_CLIENT_ID
+              value: {{ $keycloak.clientId | quote }}
+            - name: MCP_REQUIRED_ROLE
+              value: {{ .requiredRole | quote }}
+            # No BIND_ADDRESS set here deliberately — the app then defaults
+            # to its own 127.0.0.1:<internalPort> binding, which is exactly
+            # what we want now that Envoy, not the app, is the externally
+            # reachable, authenticating entrypoint in this pod.
+            - name: MCP_DISABLE_HOST_CHECK
+              value: "true"
+            - name: RUST_LOG
+              value: "debug"
+          resources:
+            {{- toYaml (.resources | default dict) | nindent 12 }}
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: {{ .name }}-envoy
+---
+{{- end }}
