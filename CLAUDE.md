@@ -37,7 +37,7 @@ Before running anything against a real cluster:
     └── spire-spiffe-keycloak/
         ├── README.md
         ├── helm/values-overlay.yaml
-        ├── keycloak/ | spire/ | providers/ | policies/
+        ├── keycloak/ | spire/ | providers/ | policies/ | mcp-servers/
         └── scripts/
 ```
 
@@ -46,24 +46,30 @@ Before running anything against a real cluster:
   SPIFFE, no external identity provider). Nothing under `base/` should ever
   assume any particular demo. Changes to `base/` should make sense even if
   every demo folder were deleted.
-- **Each `demos/<NN-name>/` is self-contained.** Own README, own Helm values
-  *overlay*, own scripts, own extra infrastructure (Keycloak, SPIRE, whatever
-  it needs), own provider profiles and policies. A demo never edits
-  `base/helm/values-openshift.yaml` directly — it supplies a second `-f`
-  file, applied on top:
+- **Each `demos/<name>/` is a self-contained, independent OpenShell
+  install.** Own README, own Helm values overlay, own scripts, own extra
+  infrastructure (Keycloak, SPIRE, whatever it needs), own provider profiles
+  and policies, and — critically — its **own namespace**, independent of
+  whatever namespace `base/`'s own install uses on the same cluster. A demo
+  never edits `base/helm/values-openshift.yaml` directly — it supplies a
+  second `-f` file, applied on top, targeting its own `OPENSHELL_NAMESPACE`:
   ```bash
   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
     -f base/helm/values-openshift.yaml \
     -f demos/<name>/helm/values-overlay.yaml
   ```
-- **Order of operations:** finish `base/`'s Definition of Done first. Only
-  then start a demo. A demo's own README states its prerequisites beyond
-  `base/` explicitly — don't assume.
-- **Multiple demos can in principle coexist** on one cluster if their
-  overlays don't conflict. If two demos would need contradictory gateway
-  settings, that has to be stated explicitly in both READMEs, not resolved by
-  silently overwriting one demo's config with another's.
+  Check a demo's own `.env`/README for which namespace it actually targets
+  — don't assume it matches `base/`'s. The gateway, Route, and everything
+  else that command creates belongs entirely to that demo, not to `base/`'s
+  own running install.
+- **Order of operations:** finish `base/`'s Definition of Done first — this
+  proves the chart/cluster combination works at all — before starting a
+  demo. A demo's own README states its prerequisites beyond `base/`
+  explicitly — don't assume.
+- **Multiple demos coexist trivially** on one cluster, since each deploys
+  into its own namespace with its own gateway release — there's no shared
+  gateway config to conflict over.
 
 ## 2. Adding a new demo
 
@@ -93,9 +99,9 @@ where they reflect execution order, not on the folder itself.
 
 ## 4. Demos in this repo
 
-| Name | Adds on top of base |
-|---|---|
-| [`spire-spiffe-keycloak`](demos/spire-spiffe-keycloak/README.md) | Keycloak as OIDC IdP, per-customer dynamic credentials (Providers v2 refresh strategy), and — as a stretch goal — SPIFFE/SPIRE token-exchange grants matching NVIDIA's own `spiffe-token-grant-demo` |
+| Name | Adds on top of base | Status |
+|---|---|---|
+| [`spire-spiffe-keycloak`](demos/spire-spiffe-keycloak/README.md) | Keycloak as OIDC IdP, per-customer dynamic credentials (Providers v2 refresh strategy), MCP servers gated by Keycloak role via an Envoy sidecar, and — as a stretch goal — SPIFFE/SPIRE token-exchange grants matching NVIDIA's own `spiffe-token-grant-demo` | Keycloak/Providers-v2 path and the MCP servers extension verified end to end against a live cluster; SPIRE/SPIFFE has never actually been deployed — see the demo's Open Risks |
 
 ## 5. References (repo-wide)
 
