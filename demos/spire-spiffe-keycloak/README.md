@@ -124,14 +124,116 @@ login against Keycloak instead of `base/`'s unauthenticated fallback.
 
 ### 3. Onboard a customer (Path A)
 
+Customer onboarding is a **two-step process by design**. OpenShell's
+Providers v2 is a pre-provisioning model: it manages the *lifecycle* of a
+credential (refresh, rotate, inject into sandboxes) but deliberately leaves
+the *initial acquisition* of that credential to whatever identity plumbing
+your organization already has. The upstream docs jump straight to
+`--material refresh_token=<value>` and assume you already have it — this
+section explains how to get it.
+
+#### Step 1 — Obtain the customer's refresh token (outside OpenShell)
+
+This is the part OpenShell does not do for you. You need a long-lived
+**offline refresh token** (not a short-lived access token) because the
+gateway will use it to silently mint fresh access tokens on the customer's
+behalf over time, without the customer being logged in.
+
+The token comes from a standard OAuth 2.0 flow against Keycloak's
+`openshell-cli` client with `offline_access` in scope. Two options:
+
+**Option A — Automated (password grant, demo only)**
+
+Only works because you control both sides and know the demo user's password.
+Never viable in production — the operator must never know customer
+credentials.
+
 ```bash
-./scripts/03-onboard-customer.sh cust-42 "<customer-42-refresh-token>"
+source .env
+
+CUSTOMER_USER="customer2"
+CUSTOMER_PASS="${CUSTOMER2_PASSWORD}"
+
+REFRESH_TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+  -d "grant_type=password" \
+  -d "client_id=${KEYCLOAK_CLIENT_ID_CLI}" \
+  -d "username=${CUSTOMER_USER}" \
+  -d "password=${CUSTOMER_PASS}" \
+  -d "scope=openid offline_access" \
+  | jq -r '.refresh_token')
 ```
 
-How you obtain that refresh token is outside OpenShell — a standard
-authorization-code login for that customer against the `openshell-gateway`
-Keycloak client with `offline_access` in scope. Script your own login flow;
-keep it in this script rather than the shared repo conventions.
+**Option B — Browser-based authorization code flow (closer to production)**
+
+The customer authenticates on Keycloak's own login page; the operator never
+sees their password. Start a one-shot listener to catch the callback, then
+open the authorization URL in a browser:
+
+```bash
+source .env
+
+# 1. Start a temporary listener (handles one request, then exits)
+python3 -c '
+import http.server, urllib.parse
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        code = params.get("code", ["(none)"])[0]
+        print(f"\n=== Authorization code:\n{code}\n")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(f"""
+<html><body style="font-family:sans-serif;text-align:center;margin-top:80px">
+<h2>Authorization code received</h2>
+<p style="word-break:break-all;max-width:600px;margin:auto;background:#f0f0f0;
+padding:16px;border-radius:8px"><code>{code}</code></p>
+<p>You can close this tab.</p>
+</body></html>""".encode())
+
+http.server.HTTPServer(("127.0.0.1", 9999), Handler).handle_request()
+' &
+
+# 2. Open this URL in a browser — log in as the customer
+echo "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth?client_id=${KEYCLOAK_CLIENT_ID_CLI}&response_type=code&scope=openid%20offline_access&redirect_uri=http://127.0.0.1:9999/callback"
+```
+
+After the customer logs in, the browser shows the code and the terminal
+prints it. Exchange it for tokens (within ~60 seconds — codes expire fast):
+
+```bash
+AUTH_CODE="<paste-the-code-from-above>"
+
+REFRESH_TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+  -d "grant_type=authorization_code" \
+  -d "client_id=${KEYCLOAK_CLIENT_ID_CLI}" \
+  -d "code=${AUTH_CODE}" \
+  -d "redirect_uri=http://127.0.0.1:9999/callback" \
+  | jq -r '.refresh_token')
+```
+
+**In production** there is no manual copy-paste. Your product's web app (a
+customer portal, onboarding page, etc.) has a "Connect your account" button
+that redirects to the same Keycloak `/auth` URL. After login, Keycloak
+redirects back to your backend, which extracts the code, exchanges it for
+tokens, and stores the refresh token — all automatically. The customer sees
+a success page; the operator sees a new customer appear in their dashboard.
+
+#### Step 2 — Store the refresh token in OpenShell (the part OpenShell owns)
+
+Once you have `$REFRESH_TOKEN` from either option above:
+
+```bash
+./scripts/03-onboard-customer.sh cust-42 "$REFRESH_TOKEN"
+```
+
+From this point forward, the gateway's refresh worker automatically mints
+short-lived access tokens and rotates the refresh token whenever the IdP
+returns a new one. The customer just does `openshell sandbox connect` and
+gets a sandbox with a live credential — they never see a token.
 
 > **Before running this**, substitute the real Keycloak host into
 > `providers/customer-refresh-profile.yaml`'s `token_url` (no script does
