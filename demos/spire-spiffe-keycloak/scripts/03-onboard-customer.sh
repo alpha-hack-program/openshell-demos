@@ -6,17 +6,14 @@ set -euo pipefail
 #
 # Usage: ./03-onboard-customer.sh <customer-id> <customer-refresh-token>
 #
-# How you obtain <customer-refresh-token> is outside OpenShell: a standard
-# authorization-code login for that customer against the openshell-gateway
-# Keycloak client with offline_access in scope. For this demo, script it with
-# curl against Keycloak's token endpoint using a demo user's password grant,
-# or a scripted browser login — keep that logic here, not in the shared repo
-# conventions.
+# The refresh token must have been issued to the public CLI client
+# (openshell-cli) with offline_access scope. Keycloak binds refresh tokens
+# to the client that obtained them, so the refresh material here must use
+# the same client_id — NOT the confidential gateway client.
 
 CUSTOMER_ID="${1:?usage: $0 <customer-id> <customer-refresh-token>}"
 CUSTOMER_REFRESH_TOKEN="${2:?usage: $0 <customer-id> <customer-refresh-token>}"
-: "${KEYCLOAK_CLIENT_ID_GATEWAY:?set in .env}"
-: "${KEYCLOAK_CLIENT_SECRET:?set in .env}"
+: "${KEYCLOAK_CLIENT_ID_CLI:?set in .env}"
 
 HERE="$(dirname "$0")"
 openshell provider profile import -f "$HERE/../providers/customer-refresh-profile.yaml" || true
@@ -29,11 +26,9 @@ openshell provider create \
 openshell provider refresh configure "customer-${CUSTOMER_ID}" \
   --credential-key CUSTOMER_ACCESS_TOKEN \
   --strategy oauth2-refresh-token \
-  --material client_id="${KEYCLOAK_CLIENT_ID_GATEWAY}" \
+  --material client_id="${KEYCLOAK_CLIENT_ID_CLI}" \
   --material refresh_token="${CUSTOMER_REFRESH_TOKEN}" \
-  --material client_secret="${KEYCLOAK_CLIENT_SECRET}" \
-  --secret-material-key refresh_token \
-  --secret-material-key client_secret
+  --secret-material-key refresh_token
 
 openshell provider refresh rotate "customer-${CUSTOMER_ID}" \
   --credential-key CUSTOMER_ACCESS_TOKEN

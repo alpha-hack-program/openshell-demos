@@ -5,47 +5,28 @@ finish `base/`'s Definition of Done first.
 
 ## Purpose
 
-Two things, layered:
+Per-customer credential isolation on OpenShell using Keycloak as the OIDC
+identity provider. Each customer's sandbox gets its own scoped credential
+via Providers v2's `oauth2_refresh_token` refresh strategy — one provider
+instance per customer, each storing that customer's own offline refresh
+token. No SPIRE, no SPIFFE, no token exchange — just standard OIDC.
 
-- **Core demo (reproducing upstream):** OpenShell's SPIFFE-based dynamic token
-  grant flow — a sandbox supervisor proves its identity with a SPIFFE JWT-SVID,
-  and the gateway uses that plus a stored user OIDC token to perform an OAuth
-  token exchange against Keycloak, minting a scoped credential for the
-  sandbox's outbound call.
-- **Extension (design work, not upstream):** the same idea made multi-tenant —
-  each sandbox's outbound credential is scoped to whichever *end customer*
-  that sandbox session belongs to, not one shared operator identity.
-
-Two implementation paths for the extension, in order of maturity:
-
-| Path | Mechanism | Maturity | Needs SPIRE? |
-|---|---|---|---|
-| **A — build first** | Providers v2 `oauth2_refresh_token` refresh strategy, one provider instance per customer, each storing that customer's own refresh token | Documented, stable | No |
-| **B — matches upstream demo** | SPIFFE JWT-SVID token exchange (`token_grant.grant_type: token_exchange`), per-request re-exchange via the sandbox's workload identity | New — design issue is ~6 weeks old as of this writing | Yes |
-
-Get Path A demonstrably working end to end before attempting Path B.
-
-**Before writing or editing anything here, also read the upstream source
-directly:** `git clone https://github.com/NVIDIA/OpenShell` and read
-`examples/spiffe-token-grant-demo/README.md`. This demo folder was assembled
-from NVIDIA's docs site and public GitHub issues, not from that README
-directly — it wasn't fetchable during research. Reconcile step-by-step
-details against the live repo; treat conflicts in favor of the upstream
-source.
+A future direction using SPIFFE JWT-SVID token exchange (matching NVIDIA's
+upstream `spiffe-token-grant-demo`) is sketched in
+[Experimental future work: Path B — SPIRE/SPIFFE token exchange](#experimental-future-work-path-b--spirespiffe-token-exchange)
+at the end of this document. It has never been deployed or tested.
 
 ## Prerequisites beyond base
 
 | Tool / access | Notes |
 |---|---|
-| A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing. **[VERIFY]** minimum version for SPIFFE federated client auth if attempting Path B |
-| SPIRE + SPIFFE CSI driver Helm charts | Path B only — `helm repo add spiffe https://spiffe.github.io/helm-charts-hardened/` |
+| A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
 
 ## What this demo adds on top of base
 
 - `helm/values-overlay.yaml` — sets `server.oidc.*`, flips
-  `server.auth.allowUnauthenticatedUsers` back to `false`, and (Path B only)
-  sets `server.providerTokenGrants.spiffe.enabled=true`. Applied with:
+  `server.auth.allowUnauthenticatedUsers` back to `false`. Applied with:
   ```bash
   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
@@ -55,8 +36,7 @@ source.
 - A Keycloak realm (`keycloak/realm-export.template.json`) with CLI and
   gateway clients, admin/user roles, and (demo-only) a few "customer" users
 - Providers v2 enabled (`providers_v2_enabled=true`)
-- A per-customer provider profile and onboarding script (Path A)
-- SPIRE, a token-exchange provider profile, and registration entries (Path B, stretch)
+- A per-customer provider profile and onboarding script
 - Two example MCP servers (`mcp-servers/` chart) fronted by an Envoy sidecar
   that gates access by Keycloak realm role, checked against the customer's
   existing OAuth access token, and the scripts to deploy and authorize
@@ -79,24 +59,7 @@ flowchart TB
     subgraph OCP["OpenShift cluster"]
         GW
         SB
-        SPIRE["SPIRE server + agent<br/>(Path B only)"]
     end
-    SPIRE -.SPIFFE JWT-SVID.-> SB
-    SPIRE -.SPIFFE JWT-SVID.-> GW
-```
-
-Token exchange sequence for one outbound call (Path B):
-
-```mermaid
-sequenceDiagram
-    participant S as Sandbox supervisor
-    participant G as OpenShell Gateway
-    participant K as Keycloak
-    S->>G: Present SPIFFE JWT-SVID, request provider token
-    G->>G: Validate SVID, derive audience from SVID subject
-    G->>K: Token exchange (RFC 8693)<br/>client_assertion = gateway's own SVID<br/>subject_token = stored customer token
-    K-->>G: Scoped, short-lived access token
-    G-->>S: Inject token into outbound request
 ```
 
 ## Steps
@@ -104,7 +67,7 @@ sequenceDiagram
 ### 1. Keycloak
 
 ```bash
-source .env   # KEYCLOAK_HOST, KEYCLOAK_REALM, KEYCLOAK_CLIENT_SECRET, ...
+source .env   # KEYCLOAK_HOST, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID_CLI, ...
 ./scripts/01-deploy-keycloak.sh
 ```
 
@@ -222,13 +185,56 @@ redirects back to your backend, which extracts the code, exchanges it for
 tokens, and stores the refresh token — all automatically. The customer sees
 a success page; the operator sees a new customer appear in their dashboard.
 
+**Option C — `onboard` utility (wraps both steps into one command)**
+
+The `onboard` CLI tool in [`util/onboard/`](../../util/onboard/) automates
+the full flow: opens the browser for the customer to log in, listens for the
+callback, exchanges the code for a refresh token, and calls the OpenShell
+CLI to create and configure the provider — all in one command:
+
+```bash
+source .env
+
+# Build once (if not already built)
+cd ../../util/onboard && cargo build --release && cd -
+
+# Onboard customer2 — opens a browser, waits for login, creates the provider
+../../util/onboard/target/release/onboard -c customer2
+```
+
+Or use the shell wrapper (sources `.env` automatically):
+
+```bash
+../../util/onboard/onboard.sh -c customer2
+```
+
+Useful flags:
+- `--token-only` — stop after obtaining the refresh token, print it to
+  stdout, do not call the OpenShell CLI (useful for debugging or piping
+  into `03-onboard-customer.sh` manually)
+- `--no-browser` — don't try to open a browser, just print the URL
+  (for headless / SSH sessions)
+- `--dry-run` — show the OpenShell CLI commands that would be run without
+  executing them
+- `--timeout <secs>` — how long to wait for the customer to log in
+  (default 120s)
+
+See `onboard --help` for all options. The tool reads `KEYCLOAK_HOST`,
+`KEYCLOAK_REALM`, and `KEYCLOAK_CLIENT_ID_CLI` from the environment (or
+from flags). No gateway client secret is needed — the refresh token is
+bound to the public CLI client that issued it.
+
 #### Step 2 — Store the refresh token in OpenShell (the part OpenShell owns)
 
-Once you have `$REFRESH_TOKEN` from either option above:
+If you used **Option A or B** above, you still need to store the token
+manually:
 
 ```bash
 ./scripts/03-onboard-customer.sh cust-42 "$REFRESH_TOKEN"
 ```
+
+If you used **Option C** (`onboard`), this step is already done — the tool
+calls the OpenShell CLI for you.
 
 From this point forward, the gateway's refresh worker automatically mints
 short-lived access tokens and rotates the refresh token whenever the IdP
@@ -265,27 +271,7 @@ hello-world test, extended to confirm the allowed call is scoped to customer
 42's own identity. Repeat with a second customer id while the first sandbox
 is still running to confirm isolation.
 
-### 5. (Stretch) Path B — SPIRE and SPIFFE token exchange
-
-Only attempt after step 4 works. Every command in these two scripts is
-**[VERIFY]** — see [Open risks](#open-risks--things-to-verify).
-
-```bash
-./scripts/04-deploy-spire.sh
-./scripts/05-register-spire-entries.sh
-```
-
-On the Keycloak side, Path B additionally requires:
-
-- Keycloak's token-exchange feature enabled, with an exchange policy
-  permitting the `openshell-gateway` client to exchange a stored customer
-  token for a narrower-audience token.
-- Federated client authentication configured so Keycloak trusts the
-  gateway's own SPIFFE JWT-SVID as a client assertion — register your SPIRE
-  trust domain's bundle endpoint with Keycloak and map the gateway's SPIFFE
-  ID to its Keycloak client identity.
-
-### 6. (Stretch) MCP servers gated by Keycloak role
+### 5. (Stretch) MCP servers gated by Keycloak role
 
 Two example downstream services (MCP servers) that each validate the
 caller's Bearer token as a **Keycloak-issued OAuth access token** — the same
@@ -454,9 +440,9 @@ per-customer.
 | `KEYCLOAK_HOST` | Helm overlay, provider profiles | e.g. `keycloak.apps.<cluster-domain>` |
 | `KEYCLOAK_REALM` | All Keycloak-facing config | `openshell` in this demo |
 | `KEYCLOAK_CLIENT_ID_CLI` | `server.oidc.audience` | must match the Keycloak client ID exactly |
-| `KEYCLOAK_CLIENT_ID_GATEWAY` | Provider refresh material, Path B client auth | confidential client |
-| `KEYCLOAK_CLIENT_SECRET` | Provider refresh material | never commit; inject via `.env` or a secret manager. **Drifts silently** if the `openshell-gateway` client secret is ever regenerated or the realm re-imported — nothing re-syncs `.env` automatically. Before relying on it, verify against the live value (Keycloak admin console → Clients → `openshell-gateway` → Credentials, or the admin REST API) rather than assuming `.env` is current |
-| `SPIRE_TRUST_DOMAIN` | SPIRE server/agent values, Path B | e.g. `openshell.demo` |
+| `KEYCLOAK_CLIENT_ID_GATEWAY` | Experimental Path B only | confidential client; not used in this demo — see [Experimental future work](#experimental-future-work-path-b--spirespiffe-token-exchange) |
+| `KEYCLOAK_CLIENT_SECRET` | Experimental Path B only | not needed in this demo |
+| `SPIRE_TRUST_DOMAIN` | Experimental Path B only | e.g. `openshell.demo` |
 | `MCP_SERVER_A_IMAGE` / `MCP_SERVER_A_TAG` etc. | documentation only | present in `.env.example` for reference, but `mcp-servers/values.yaml` pins the actual images used at deploy time — edit that file, not `.env`, to change them |
 | `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-customer.sh` | short-lived; obtain via your own admin login, never persist to `.env` long-term |
 
@@ -466,8 +452,10 @@ per-customer.
   secret in git. `keycloak/realm-export.template.json` uses a placeholder that
   `scripts/01-deploy-keycloak.sh` substitutes at deploy time only.
 - `openshell provider refresh configure` supports `--secret-material-key` to
-  mark values as sensitive at the gateway — used for every `client_secret` and
-  `refresh_token` in `scripts/03-onboard-customer.sh`.
+  mark values as sensitive at the gateway — used for `refresh_token` in
+  `scripts/03-onboard-customer.sh`. No `client_secret` is needed for Path A
+  because the refresh token is bound to the public CLI client
+  (`openshell-cli`), which has no secret.
 - Each customer's provider uses a distinct name (`customer-<id>`). Providers
   v2 rejects two providers on one sandbox that expose the same credential
   environment key, which catches naming collisions — but not *misassignment*.
@@ -478,11 +466,9 @@ per-customer.
   demo's overlay is applied, real OIDC auth is enforced
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — still evaluation-only, still never expose it to a public network.
-- `KEYCLOAK_CLIENT_SECRET` in `.env` is a point-in-time copy, not a live
-  reference — see the drift warning in
-  [Configuration reference](#configuration-reference). A stale value fails
-  as `unauthorized_client` on the token endpoint, which reads like a
-  permissions problem rather than a stale-secret problem.
+- `KEYCLOAK_CLIENT_SECRET` in `.env` is only needed for the experimental
+  Path B (see end of document). This demo uses the public CLI client for
+  token refresh, so no gateway secret is involved.
 
 ## Definition of done
 
@@ -494,10 +480,6 @@ per-customer.
 - [ ] Isolation test passes: customer A's sandbox cannot access customer B's data
       even when both sandboxes run concurrently
 - [ ] `demo.sh` runs end to end and matches the expected blocked → allowed transition
-- [ ] (Stretch) SPIRE deployed, gateway and a sandbox supervisor both obtain SVIDs
-- [ ] (Stretch) Keycloak accepts the gateway's SVID as a client assertion for token exchange
-- [ ] (Stretch) Path B reproduces the upstream demo's flow using a customer-scoped
-      subject token instead of a single operator's token
 - [x] (Stretch) `mcp-servers` chart deployed; a customer holding the required
       Keycloak role can reach their MCP server, a customer lacking it cannot
       — verified via the Envoy sidecar (401/403/200 cases all tested live)
@@ -511,30 +493,17 @@ per-customer.
 - **This README is a reconstruction, not a transcription** of NVIDIA's own
   `examples/spiffe-token-grant-demo`. Reconcile every command above against
   the real repo before running it.
-- ~~Path A's provider profile schema is unconfirmed~~ — **verified against
+- ~~Provider profile schema is unconfirmed~~ — **verified against
   [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2)
   and a live gateway (CLI 0.0.97).** `refresh` (with `token_url`, `scopes`,
   `strategy`) must nest under the specific entry in `credentials[]`, not as a
   top-level profile field — a top-level `refresh:` block is silently dropped
   on import with no error. `providers/customer-refresh-profile.yaml` reflects
   the correct nesting as of this writing.
-- **Path B's provider profile schema is unconfirmed.** Providers v2 docs
-  describe five refresh strategies (`static`, `external`,
-  `oauth2_refresh_token`, `oauth2_client_credentials`,
-  `google_service_account_jwt`) — `token_exchange` is not among them. The
-  `token_grant.grant_type: token_exchange` field in
-  `providers/token-exchange-profile.yaml` is inferred from a GitHub design
-  discussion (issue #1987), not a confirmed schema. Run `openshell provider
-  profile lint` against it before trusting it.
 - **`--from-oidc-token` binds to the CLI's own current session**, not an
   arbitrary token you hand it. `scripts/03-onboard-customer.sh` routes around
   this using the general `--credential`/refresh-material mechanism instead —
   confirm this still holds against the CLI version you're running.
-- **Keycloak's SPIFFE federated client authentication is a newer capability.**
-  Confirm your Keycloak version actually has it before committing to Path B.
-- **SPIRE agent SCC requirements on OpenShift are inferred, not confirmed** —
-  `scripts/04-deploy-spire.sh` assumes a service account named `spire-agent`;
-  verify against the actual chart before running.
 - **Real customer identity federation** (brokering each customer's own IdP
   into Keycloak, rather than demo users in one realm) is a materially bigger
   project than this demo covers.
@@ -544,7 +513,7 @@ per-customer.
   a user *without* the required role (`demo-admin`) all reached the tool
   exactly like an authorized customer would. Fixed with an Envoy sidecar
   that does real JWT signature/issuer verification plus a `realm_access.roles`
-  check (see step 6) — confirmed against the live deployment: `401` for
+  check (see step 5) — confirmed against the live deployment: `401` for
   no/garbage token, `403` for a valid token lacking the role, `200` only for
   a valid, role-holding token. **Do not remove the Envoy sidecar** on the
   assumption the app image checks anything itself — it doesn't.
@@ -561,15 +530,95 @@ per-customer.
   — fine for evaluation, never for production; (d) `envoyproxy/envoy:v1.31-latest`
   is a moving tag, not a pinned version — pin an exact patch release before
   relying on this beyond a demo.
-- **This section was designed once for SPIRE/SPIFFE JWT-SVID validation,
-  then switched to Keycloak JWTs before ever being committed** — nothing in
-  this repo has ever gotten SPIRE running on this cluster (no `spire`
-  namespace, no `csi.spiffe.io` CSI driver present when checked), while
-  OIDC/Keycloak was already deployed and proven working. If you later get
-  SPIRE actually running and want workload-identity-based validation
-  instead, treat this as a rewrite, not a config flag — the two approaches
-  differ in what the MCP server trusts (a bearer token vs. a mTLS-attested
-  workload identity), not just in which env vars get set.
+
+## Experimental future work: Path B — SPIRE/SPIFFE token exchange
+
+> **Nothing in this section has ever been deployed or tested.** All commands
+> are **[VERIFY]**. The scripts (`04-deploy-spire.sh`,
+> `05-register-spire-entries.sh`) and the provider profile
+> (`providers/token-exchange-profile.yaml`) exist in the repo but are
+> untested reconstructions from NVIDIA docs and GitHub design discussions.
+
+### What Path B would do differently
+
+Instead of storing a customer's refresh token and having the gateway refresh
+it directly (what this demo does today), Path B uses SPIFFE workload
+identity:
+
+1. SPIRE issues JWT-SVIDs to both the sandbox supervisor and the gateway.
+2. The sandbox presents its SVID to the gateway when requesting a provider
+   token.
+3. The gateway authenticates to Keycloak using its own SVID as a client
+   assertion (RFC 7523) and asks for a token exchange (RFC 8693) — trading
+   the stored customer token for a narrower-scoped, short-lived access
+   token.
+
+This removes the need for a long-lived refresh token per customer but
+requires SPIRE infrastructure and Keycloak's newer SPIFFE federated client
+authentication capability.
+
+### Prerequisites (beyond the current demo)
+
+- SPIRE server + agent deployed on the cluster — `helm repo add spiffe
+  https://spiffe.github.io/helm-charts-hardened/`
+- SPIFFE CSI driver for workload identity injection
+- `server.providerTokenGrants.spiffe.enabled=true` in the Helm overlay
+- Keycloak token-exchange feature enabled, with an exchange policy
+  permitting the `openshell-gateway` client to exchange tokens
+- Keycloak federated client authentication configured to trust the SPIRE
+  trust domain's bundle endpoint
+- `KEYCLOAK_CLIENT_ID_GATEWAY` and `KEYCLOAK_CLIENT_SECRET` set in `.env`
+  (the confidential gateway client is used for the server-to-server
+  exchange)
+- `SPIRE_TRUST_DOMAIN` set in `.env` (e.g. `openshell.demo`)
+
+### Steps (all [VERIFY])
+
+```bash
+./scripts/04-deploy-spire.sh
+./scripts/05-register-spire-entries.sh
+```
+
+On the Keycloak side, Path B additionally requires:
+
+- Keycloak's token-exchange feature enabled, with an exchange policy
+  permitting the `openshell-gateway` client to exchange a stored customer
+  token for a narrower-audience token.
+- Federated client authentication configured so Keycloak trusts the
+  gateway's own SPIFFE JWT-SVID as a client assertion — register your SPIRE
+  trust domain's bundle endpoint with Keycloak and map the gateway's SPIFFE
+  ID to its Keycloak client identity.
+
+### Open risks specific to Path B
+
+- **Provider profile schema is unconfirmed.** Providers v2 docs describe
+  five refresh strategies (`static`, `external`, `oauth2_refresh_token`,
+  `oauth2_client_credentials`, `google_service_account_jwt`) —
+  `token_exchange` is not among them. The `token_grant.grant_type:
+  token_exchange` field in `providers/token-exchange-profile.yaml` is
+  inferred from a GitHub design discussion (issue #1987), not a confirmed
+  schema. Run `openshell provider profile lint` against it before trusting
+  it.
+- **Keycloak's SPIFFE federated client authentication is a newer
+  capability.** Confirm your Keycloak version actually has it before
+  committing to Path B.
+- **SPIRE agent SCC requirements on OpenShift are inferred, not
+  confirmed** — `scripts/04-deploy-spire.sh` assumes a service account
+  named `spire-agent`; verify against the actual chart before running.
+- **Nothing in this repo has ever gotten SPIRE running on this cluster**
+  (no `spire` namespace, no `csi.spiffe.io` CSI driver present when
+  checked). If you get SPIRE actually running and want workload-identity-
+  based validation for the MCP servers (step 5) instead of Keycloak JWTs,
+  treat it as a rewrite, not a config flag — the two approaches differ in
+  what the server trusts (a bearer token vs. a mTLS-attested workload
+  identity), not just in which env vars get set.
+
+### References (Path B specific)
+
+- Dynamic token grant design discussion: https://github.com/NVIDIA/OpenShell/issues/1987
+- Keycloak SPIFFE federated client auth: https://www.keycloak.org/2026/01/federated-client-authentication
+- Keycloak SPIFFE playground demo: https://github.com/keycloak/keycloak-playground/tree/main/federated-client-authentication/spiffe
+- SPIRE Kubernetes quickstart: https://spiffe.io/docs/latest/try/getting-started-k8s/
 
 ## References
 
@@ -578,8 +627,4 @@ per-customer.
 - Providers v2: https://docs.nvidia.com/openshell/sandboxes/providers-v2
 - Manage Providers: https://docs.nvidia.com/openshell/sandboxes/manage-providers
 - Helm chart README: https://github.com/NVIDIA/OpenShell/blob/main/deploy/helm/openshell/README.md
-- Dynamic token grant design discussion: https://github.com/NVIDIA/OpenShell/issues/1987
 - OpenShift SCC restriction discussion: https://github.com/NVIDIA/OpenShell/issues/899
-- Keycloak SPIFFE federated client auth: https://www.keycloak.org/2026/01/federated-client-authentication
-- Keycloak SPIFFE playground demo: https://github.com/keycloak/keycloak-playground/tree/main/federated-client-authentication/spiffe
-- SPIRE Kubernetes quickstart: https://spiffe.io/docs/latest/try/getting-started-k8s/
