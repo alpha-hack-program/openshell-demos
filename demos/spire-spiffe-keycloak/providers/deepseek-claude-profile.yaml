@@ -1,0 +1,50 @@
+id: deepseek-claude
+display_name: DeepSeek (Claude Code compatible)
+description: DeepSeek inference via its Anthropic-compatible endpoint, for Claude Code
+category: inference
+inference_capable: true
+
+credentials:
+  - name: api_key
+    description: DeepSeek API key, injected as ANTHROPIC_API_KEY for Claude Code
+    env_vars: [ANTHROPIC_API_KEY]
+    required: true
+    auth_style: header
+    header_name: x-api-key
+
+config:
+  - name: base_url
+    description: "Anthropic-compatible base URL (e.g. https://api.deepseek.com/anthropic)"
+    env_vars: [ANTHROPIC_BASE_URL]
+    required: false
+  - name: model
+    description: Default model for Claude Code
+    env_vars: [ANTHROPIC_MODEL]
+    required: false
+  - name: opus_model
+    description: Opus model override
+    env_vars: [ANTHROPIC_DEFAULT_OPUS_MODEL]
+    required: false
+  - name: sonnet_model
+    description: Sonnet model override
+    env_vars: [ANTHROPIC_DEFAULT_SONNET_MODEL]
+    required: false
+  - name: haiku_model
+    description: Haiku model override
+    env_vars: [ANTHROPIC_DEFAULT_HAIKU_MODEL]
+    required: false
+
+endpoints:
+  - host: api.deepseek.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+
+binaries:
+  - /usr/local/bin/claude
+  - /usr/bin/claude
+
+discovery:
+  credentials:
+    - api_key

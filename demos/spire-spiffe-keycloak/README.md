@@ -366,42 +366,52 @@ endpoint for the MCP server — it does not create a sandbox itself.
 This is the actual sequence that produced a real, correct answer end to
 end — Claude Code (pre-installed in the base sandbox image; OpenShell's own
 docs confirm `openshell sandbox create -- claude` as a supported pattern),
-running DeepSeek as its model (reusing the **same** `deepseek` provider
-from `base/`'s smoke test — DeepSeek exposes an Anthropic-compatible
-endpoint specifically for Claude Code, so no separate Anthropic key is
-needed), calling `mcp-server-a`'s one tool
+running DeepSeek as its model, calling `mcp-server-a`'s one tool
 (`evaluate_unpaid_leave_eligibility`).
 
 Prerequisites beyond steps 1–3 and this section's deploy/authorize steps:
-the `deepseek` provider from `base/`'s smoke test must already be attached
-to the sandbox, and the sandbox's policy must allow `/usr/local/bin/claude`
-(not just `/usr/bin/curl` — Claude Code makes its own HTTP calls, it
-doesn't shell out to curl) to reach both `api.deepseek.com:443` and the MCP
-server:
+
+1. Import the `deepseek-claude` provider profile and create a provider from
+   it. This profile injects `ANTHROPIC_API_KEY` with `x-api-key` auth — the
+   native format Claude Code expects — instead of the `openai` profile's
+   `OPENAI_API_KEY` with `Authorization: Bearer`. The DeepSeek API key is
+   the same one used by `base/`'s `deepseek` provider, just injected under
+   the right env var name:
+   ```bash
+   openshell provider profile import -f providers/deepseek-claude-profile.yaml
+   openshell provider create --name deepseek-claude --type deepseek-claude \
+     --credential "ANTHROPIC_API_KEY=<your-deepseek-key>" \
+     --config "base_url=https://api.deepseek.com/anthropic" \
+     --config "model=deepseek-v4-pro" \
+     --config "opus_model=deepseek-v4-pro" \
+     --config "sonnet_model=deepseek-v4-pro" \
+     --config "haiku_model=deepseek-v4-flash"
+   ```
+
+2. Attach the provider and grant Claude Code network access to DeepSeek and
+   the MCP server:
+   ```bash
+   openshell sandbox provider attach demo-customer1 deepseek-claude
+   openshell policy update demo-customer1 \
+     --add-endpoint "api.deepseek.com:443:read-write:rest:enforce" \
+     --binary /usr/local/bin/claude \
+     --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
+     --binary /usr/local/bin/claude \
+     --wait
+   ```
+
+Then run the test. The `--env` flags set DeepSeek model routing (non-secret
+config); the API key itself is injected by the provider — no manual
+`export ANTHROPIC_AUTH_TOKEN=...` aliasing needed:
 
 ```bash
-openshell sandbox provider attach demo-customer1 deepseek
-openshell policy update demo-customer1 \
-  --add-endpoint "api.deepseek.com:443:read-write:rest:enforce" \
-  --binary /usr/local/bin/claude \
-  --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
-  --binary /usr/local/bin/claude \
-  --wait
-```
-
-Then, inside the sandbox — `ANTHROPIC_AUTH_TOKEN` is set to the *same*
-resolve-placeholder value already injected as `OPENAI_API_KEY` by the
-`deepseek` provider, per
-[DeepSeek's own Claude Code integration docs](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code):
-
-```bash
-openshell sandbox exec -n demo-customer1 -- bash -c '
-export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-export ANTHROPIC_AUTH_TOKEN=$OPENAI_API_KEY
-export ANTHROPIC_MODEL=deepseek-v4-pro
-export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro
-export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+openshell sandbox exec -n demo-customer1 \
+  --env "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
+  --env "ANTHROPIC_MODEL=deepseek-v4-pro" \
+  --env "ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro" \
+  --env "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro" \
+  --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash" \
+  -- bash -c '
 MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $CUSTOMER_ACCESS_TOKEN\"}}}}"
 claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
   --mcp-config "$MCP_JSON" \
@@ -411,27 +421,32 @@ claude -p "My mother is at the hospital, can I get an aid while I am on unpaid l
 '
 ```
 
+> **Why `--env` instead of provider config vars?** Provider profiles support
+> `config:` fields with `env_vars`, but OpenShell only injects *credentials*
+> as environment variables — config values are stored metadata, not injected
+> into sandbox processes. Model routing and base URL are non-secret config,
+> so `--env` at exec time is the correct mechanism. With a real Anthropic API
+> key (not DeepSeek), none of these `--env` flags are needed at all — Claude
+> Code's built-in `claude-code` provider profile handles everything natively.
+
 This produced a correct, well-formatted answer citing **Case A —
-Sick/injured family care, 725€/month**, matching the tool's own documented
-eligibility logic — confirming the full chain: Keycloak role → Providers v2
-token injection (both the customer's own token *and* the reused DeepSeek
-credential) → Envoy JWT/role check → the MCP server's protocol handling
-(`initialize` → `notifications/initialized` → `tools/call`, discovered by
-probing the real server, since it requires the full MCP lifecycle rather
-than exposing anything at `/`) → real LLM tool-use reasoning.
+Sick/injured family care, 725€/month**, confirming the full chain:
+Keycloak role → Providers v2 token injection (the customer's own token
+via `customer-scoped-api` *and* the DeepSeek credential via
+`deepseek-claude`) → Envoy JWT/role check → MCP tool call → LLM
+reasoning.
 
 **Repeated with `customer2` against `mcp-server-b`** (same recipe, only
 `demo-customer2`/`customer-customer2`/`mcp-server-b` swapped in) to also
 confirm cross-server isolation. `mcp-server-b` ("Compatibility Engine")
-turned out to expose five tools for a fictional jurisdiction "Lysmark"
-(`calc_tax`, `calc_penalty`, `check_housing_grant`, `check_voting`,
-`distribute_waterfall`) — asking *"I live in Lysmark, how much taxes should
-I pay if I make 42345 a year?"* correctly invoked `calc_tax` and returned a
-real bracket-by-bracket breakdown (7,469.00 subtotal + 149.38 surcharge =
-**7,618.38** total). Before running this, confirmed **`customer1`'s token
-against `mcp-server-b` is `403`, and `customer2`'s token against
-`mcp-server-a` is `403`** — role gating is genuinely per-server, not just
-per-customer.
+exposes five tools (`calc_tax`, `calc_penalty`, `check_housing_grant`,
+`check_voting`, `distribute_waterfall`). Asking *"We have a client who is
+15 days late on their contractual obligations. What penalty should we
+charge them?"* correctly invoked `calc_penalty` and returned: 15 days ×
+100/day = 1,500 base, capped at 1,000, + 5% interest = **1,050.00
+total**. Cross-server isolation confirmed: **`customer1`'s token against
+`mcp-server-b` is `403`, and `customer2`'s token against `mcp-server-a`
+is `403`** — role gating is genuinely per-server, not just per-customer.
 
 ## Configuration reference
 
