@@ -301,6 +301,12 @@ usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
+#### 2a. Helm install
+
+The helm values at `helm/values.yaml` contain a `<keycloak-host>` placeholder
+in the OIDC issuer URL. Use `--set` to substitute it with your real Keycloak
+hostname at install time:
+
 ```bash
 source .env
 source ../../.env
@@ -311,40 +317,119 @@ oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAM
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
-  -f helm/values.yaml
-
-oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
-
-openshell settings set --global --key providers_v2_enabled --value true
+  -f helm/values.yaml \
+  --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
 ```
 
-The namespace must exist before `helm install`, and the `openshell-sandbox`
-service account needs the `privileged` SCC — without it, sandbox pods won't
-start. The `helm upgrade` applies the OIDC configuration from
-`helm/values.yaml`, which points the gateway at your Keycloak realm's issuer
-URL and sets `allowUnauthenticatedUsers: false`. The `openshell settings`
-command enables the Providers v2 credential management system.
+Wait for the gateway to come up:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
+```
 
 > **If you already ran the base demo** on the same cluster, the `helm install`
-> will fail because the chart creates a cluster-scoped `ClusterRole`
-> (`openshell-node-reader`) that's already owned by the base demo's release.
-> Either tear down the base demo first (`demos/base/scripts/99-teardown.sh`),
-> or re-label the existing ClusterRole so this release can adopt it:
+> will fail because the chart creates cluster-scoped resources
+> (`openshell-node-reader` ClusterRole **and** ClusterRoleBinding) that are
+> already owned by the base demo's release. Either tear down the base demo
+> first (`demos/base/scripts/99-teardown.sh`), or re-label both resources so
+> this release can adopt them:
 >
 > ```bash
+> # Re-label the ClusterRole
 > oc annotate clusterrole openshell-node-reader \
 >   meta.helm.sh/release-name=openshell \
 >   meta.helm.sh/release-namespace="$OPENSHELL_NAMESPACE" --overwrite
 > oc label clusterrole openshell-node-reader \
 >   app.kubernetes.io/managed-by=Helm --overwrite
+>
+> # Re-label the ClusterRoleBinding
+> oc annotate clusterrolebinding openshell-node-reader \
+>   meta.helm.sh/release-name=openshell \
+>   meta.helm.sh/release-namespace="$OPENSHELL_NAMESPACE" --overwrite
+> oc label clusterrolebinding openshell-node-reader \
+>   app.kubernetes.io/managed-by=Helm --overwrite
 > ```
 >
 > Then re-run the `helm upgrade --install` command above.
 
-Run `openshell status` afterward — the CLI should now perform a real OIDC
-login against Keycloak instead of the default mTLS-only mode.
+#### 2b. Expose the gateway via a passthrough Route
 
-> The script `scripts/02-apply-oidc-overlay.sh` runs these same commands.
+This is the same experimental approach used in the
+[base demo](../base/README.md#exposing-the-gateway-via-passthrough-route) —
+not supported by NVIDIA or Red Hat, but more practical than port-forwarding
+for multi-user demos. See the base demo README for background.
+
+Derive the Route hostname and create the passthrough Route:
+
+```bash
+ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
+
+oc -n "$OPENSHELL_NAMESPACE" create route passthrough openshell \
+  --service=openshell \
+  --port=8080 \
+  --hostname="${ROUTE_HOST}" 2>/dev/null || true
+```
+
+The gateway's TLS cert was generated at install time without this hostname in
+the SANs. Delete the TLS secrets so the gateway regenerates them with the
+Route hostname included:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" delete secret \
+  openshell-server-tls openshell-client-tls openshell-jwt-keys
+
+# Re-deploy so the gateway generates new certs that include the Route hostname
+helm upgrade openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+  --version "$OPENSHELL_CHART_VERSION" \
+  --namespace "$OPENSHELL_NAMESPACE" \
+  -f helm/values.yaml \
+  --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  --set "server.tls.additionalSANs={${ROUTE_HOST}}"
+
+oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
+```
+
+#### 2c. Register the gateway with the CLI
+
+Extract the client mTLS certificates and register the gateway:
+
+```bash
+MTLS_DIR=~/.config/openshell/gateways/openshift/mtls
+mkdir -p "$MTLS_DIR"
+
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+
+openshell gateway remove openshift 2>/dev/null || true
+openshell gateway add "https://${ROUTE_HOST}:443" --local --name openshift
+```
+
+#### 2d. Enable Providers v2
+
+```bash
+openshell settings set --global --key providers_v2_enabled --value true
+```
+
+#### Verify the gateway
+
+```bash
+openshell status
+openshell gateway list
+```
+
+`openshell status` should show the new gateway URL
+(`openshell-<namespace>.apps.…`) and — once OIDC is properly configured —
+prompt for a Keycloak login instead of the mTLS-only mode you saw with the
+base demo.
+
+> The script `scripts/02-apply-oidc-overlay.sh` runs the helm install
+> commands from step 2a. The Route, mTLS, and gateway registration steps
+> (2b–2c) follow the same pattern as the base demo — refer to
+> [`demos/base/README.md`](../base/README.md) for details.
 
 ### 3. Onboard a user
 
