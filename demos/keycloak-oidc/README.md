@@ -208,6 +208,10 @@ The script derives `KEYCLOAK_HOST` from `CLUSTER_APPS_DOMAIN` (in the root
 with the secret substituted and prints all the values you need — **copy them
 into your `.env` file now**.
 
+> **Take note of the realm JSON path** printed by the script (e.g.
+> `/tmp/tmp.XXXXXX`) — you will need it in step 1c to import the realm into
+> Keycloak after it's deployed.
+
 #### 1b. Deploy Keycloak on the cluster
 
 We use the **Red Hat build of Keycloak** (RHBK) Operator, available from
