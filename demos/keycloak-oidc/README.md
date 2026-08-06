@@ -261,6 +261,11 @@ OperatorHub on OpenShift.
    OpenShift Route handles TLS termination — Keycloak itself runs behind the
    Route over plain HTTP.
 
+   > If `keycloak.${CLUSTER_APPS_DOMAIN}` is already taken on your cluster,
+   > change the hostname in the CR above (e.g.
+   > `keycloak-openshell.${CLUSTER_APPS_DOMAIN}`) and update `KEYCLOAK_HOST`
+   > in your `.env` to match.
+
 4. Wait for the pod to become ready:
 
    ```bash
