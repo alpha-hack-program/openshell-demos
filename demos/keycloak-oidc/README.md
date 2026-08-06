@@ -198,17 +198,18 @@ after it runs, so you'll come back and complete your `.env` then.
 ### 1. Deploy Keycloak
 
 ```bash
-source .env
 ./scripts/01-deploy-keycloak.sh
 ```
 
-This prepares the realm JSON (substituting the gateway client secret) and
-prints import instructions. After importing:
+The script derives `KEYCLOAK_HOST` from `CLUSTER_APPS_DOMAIN` (in the root
+`.env`) and generates a random client secret. It prepares the realm JSON with
+the secret substituted and prints all the values you need. After deploying
+Keycloak and importing the realm:
 
-1. Create 2-3 demo users in the `openshell` realm with `offline_access` in
+1. Copy the values printed by the script into your `.env` file.
+2. Create 2-3 demo users in the `openshell` realm with `offline_access` in
    scope — these represent the users you will onboard in step 3.
-2. Assign the `openshell-user` role to each demo user.
-3. Copy the values printed by the script into your `.env` file.
+3. Assign the `openshell-user` role to each demo user.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
