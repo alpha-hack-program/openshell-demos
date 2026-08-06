@@ -29,3 +29,5 @@ install. Once that's green, pick another demo.
 
 See [`CLAUDE.md`](CLAUDE.md) for the full build contract, conventions, and notes
 for Claude Code working in this repo.
+
+Have fun !
