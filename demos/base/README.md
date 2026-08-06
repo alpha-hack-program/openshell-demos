@@ -586,7 +586,9 @@ LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 A **provider profile** is a template that tells OpenShell how a particular
 type of credential works — which environment variables it maps to, how it
 authenticates (Bearer header), and which endpoints it's allowed to reach. This
-demo includes an OpenAI-compatible profile at `providers/openai-profile.yaml`:
+demo includes an OpenAI-compatible profile at `providers/openai-profile.yaml`.
+Importing it registers a profile type called `openai`, which you'll reference
+when creating the `byo-openai` provider instance in the next step:
 
 ```bash
 openshell provider profile import --file providers/openai-profile.yaml
