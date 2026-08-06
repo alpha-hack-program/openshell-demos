@@ -1,14 +1,17 @@
-Review README.md at root. The idea of having one base demo to build on top is not the way we did it. Instead we have a base demo with a smoke test then a SPIRE demo thatś totally unrelated. Fix the README.md to reflect the reality.
+# TODO List
 
-Fix base demo README.md to use the same approach as in demos/spire with regards to creating a claude sandbox with anthrpoic api.
+## Guthub Actions
 
-In the demos/spire README.md is explained the step to generate the refresh token and the reason to do it?
+- [x] Add a github action that compiles util/onboard and checks and add badges that proves it works
+- [x] Complete the compile action with relase management and releasing bins for Linux and macOS
 
-Add a brief explanation the demo flow and use a mermaid diagrams for it because there's an admin flow and a customer flow (one per customer, 1 and 2 actually)
+## General
 
-I'd like to rename the demos/spire demo with a proper name we don't use spire, suggest some names, then apply the select name to the guide and the name of the openshift project.
+- [] Explain the reason for util/onboard
 
-# Priority 1
+## Utils
+
+- [x] Add cargo release and release management makefile as in https://github.com/cvicens/kamaji/blob/main/Makefile
 
 ## Demo Base
 

@@ -1,5 +1,7 @@
 # OpenShell on OpenShift — demos
 
+[![Build onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml)
+
 Everything lives under `demos/`. Each subfolder is a self-contained demo with
 its own README, Helm values, and extra infrastructure. A demo deploys into its
 **own namespace** — check a demo's own `.env`/README for which namespace it

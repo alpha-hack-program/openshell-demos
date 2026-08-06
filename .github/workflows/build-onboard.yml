@@ -7,8 +7,22 @@ on:
   pull_request:
     paths: ['util/onboard/**']
 
+defaults:
+  run:
+    working-directory: util/onboard
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
   build:
+    needs: check
     strategy:
       matrix:
         include:
@@ -24,7 +38,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }} --manifest-path util/onboard/Cargo.toml
+      - run: cargo build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -44,6 +58,7 @@ jobs:
           mv artifacts/onboard-linux-x86_64/onboard onboard-linux-x86_64
           mv artifacts/onboard-macos-aarch64/onboard onboard-macos-aarch64
           chmod +x onboard-linux-x86_64 onboard-macos-aarch64
+        working-directory: .
       - uses: softprops/action-gh-release@v2
         with:
           files: |

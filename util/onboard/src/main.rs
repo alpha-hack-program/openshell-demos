@@ -7,7 +7,10 @@ use clap::Parser;
 use url::Url;
 
 #[derive(Parser)]
-#[command(name = "onboard", about = "Automate OpenShell Providers v2 user onboarding via Keycloak")]
+#[command(
+    name = "onboard",
+    about = "Automate OpenShell Providers v2 user onboarding via Keycloak"
+)]
 struct Cli {
     /// User identifier (e.g. "user2"); provider will be named user-<id>
     #[arg(short = 'u', long)]
@@ -26,7 +29,11 @@ struct Cli {
     client_id: String,
 
     /// Confidential client used for refresh material (not needed for public-client flow)
-    #[arg(long, env = "KEYCLOAK_CLIENT_ID_GATEWAY", default_value = "openshell-gateway")]
+    #[arg(
+        long,
+        env = "KEYCLOAK_CLIENT_ID_GATEWAY",
+        default_value = "openshell-gateway"
+    )]
     gateway_client_id: Option<String>,
 
     /// Confidential client secret (not needed for public-client flow)
@@ -76,7 +83,9 @@ fn log(msg: &str) {
 fn build_http_client(strict_tls: bool) -> reqwest::blocking::Client {
     let accept_invalid = !strict_tls;
     if accept_invalid {
-        eprintln!("[onboard] WARNING: TLS certificate verification is disabled. Use --strict-tls for production.");
+        eprintln!(
+            "[onboard] WARNING: TLS certificate verification is disabled. Use --strict-tls for production."
+        );
     }
     reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(accept_invalid)
@@ -102,9 +111,8 @@ fn open_browser(url: &str) -> bool {
 }
 
 fn success_html(keycloak_host: &str, realm: &str) -> String {
-    let logout_url = format!(
-        "https://{keycloak_host}/realms/{realm}/protocol/openid-connect/logout"
-    );
+    let logout_url =
+        format!("https://{keycloak_host}/realms/{realm}/protocol/openid-connect/logout");
     format!(
         r#"<!DOCTYPE html>
 <html><head><title>Onboard</title></head>
@@ -139,7 +147,12 @@ fn http_response(status: u16, body: &str) -> String {
     )
 }
 
-fn wait_for_callback(port: u16, timeout_secs: u64, keycloak_host: &str, realm: &str) -> Result<String, String> {
+fn wait_for_callback(
+    port: u16,
+    timeout_secs: u64,
+    keycloak_host: &str,
+    realm: &str,
+) -> Result<String, String> {
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
         .map_err(|e| format!("failed to bind 127.0.0.1:{port}: {e}"))?;
     listener
@@ -165,9 +178,7 @@ fn wait_for_callback(port: u16, timeout_secs: u64, keycloak_host: &str, realm: &
         stream
             .set_nonblocking(false)
             .map_err(|e| format!("set_blocking: {e}"))?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
 
         let mut reader = BufReader::new(&stream);
         let mut request_line = String::new();
@@ -276,7 +287,10 @@ fn run_cmd(label: &str, program: &str, args: &[&str], dry_run: bool) -> Result<C
         if lower.contains("already exists") || lower.contains("already imported") {
             return Ok(CmdResult::AlreadyExists);
         }
-        return Err(format!("`{cmd_str}` failed (exit {}): {combined}", output.status));
+        return Err(format!(
+            "`{cmd_str}` failed (exit {}): {combined}",
+            output.status
+        ));
     }
     Ok(CmdResult::Ok)
 }
@@ -369,7 +383,9 @@ fn run() -> Result<(), String> {
         ],
         cli.dry_run,
     )? {
-        CmdResult::AlreadyExists => log(&format!("Provider '{provider_name}' already exists, skipping creation.")),
+        CmdResult::AlreadyExists => log(&format!(
+            "Provider '{provider_name}' already exists, skipping creation."
+        )),
         CmdResult::Ok => {}
     }
 
