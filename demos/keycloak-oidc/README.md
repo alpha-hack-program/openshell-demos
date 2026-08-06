@@ -213,9 +213,15 @@ into your `.env` file now**.
 We use the **Red Hat build of Keycloak** (RHBK) Operator, available from
 OperatorHub on OpenShift.
 
-1. In the OpenShift web console, go to **Operators > OperatorHub**, search
-   for **Keycloak**, and install the **Red Hat build of Keycloak** Operator
-   (accept the defaults — it installs cluster-wide).
+1. Create the namespace first, then install the Operator into it:
+
+   ```bash
+   oc create namespace keycloak 2>/dev/null || true
+   ```
+
+   In the OpenShift web console, go to **Operators > OperatorHub**, search
+   for **Keycloak**, and install the **Red Hat build of Keycloak** Operator.
+   Select **A specific namespace on the cluster** and choose `keycloak`.
 
 2. Wait for the Operator to be ready:
 
@@ -227,8 +233,6 @@ OperatorHub on OpenShift.
 3. Create a Keycloak instance. The Operator manages a `Keycloak` CR:
 
    ```bash
-   oc create namespace keycloak 2>/dev/null || true
-
    oc -n keycloak apply -f - <<'EOF'
    apiVersion: k8s.keycloak.org/v2alpha1
    kind: Keycloak
