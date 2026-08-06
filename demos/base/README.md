@@ -517,11 +517,11 @@ this cluster.
 ### 1. Create a sandbox
 
 ```bash
-openshell sandbox create --name hello-world --wait
+openshell sandbox create --name hello-world
 ```
 
-This creates the sandbox and waits for it to be ready without entering it.
-You'll run commands inside it using `sandbox exec` in the next steps.
+This creates the sandbox without entering it. You'll run commands inside it
+using `sandbox exec` in the next steps.
 
 ### 2. Confirm outbound calls are blocked
 
