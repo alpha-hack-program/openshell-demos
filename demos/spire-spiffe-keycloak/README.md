@@ -285,10 +285,11 @@ deployed and proven working end to end.
 
 **This has been run end to end against real images**
 (`quay.io/atarazana/eligibility-engine-mcp-rs`,
-`quay.io/atarazana/compatibility-engine-mcp-rs`) with a real MCP client
-(Claude Code) and a real LLM (DeepSeek) — see
-[Verified test recipe](#verified-test-recipe-claude-code--deepseek--mcp-tool)
-below. Three real problems were found and fixed along the way, in order:
+`quay.io/atarazana/compatibility-engine-mcp-rs`) with two different MCP
+clients — **Claude Code** and **Codex** — both using DeepSeek as the LLM.
+See [Verified test recipe: Claude Code](#verified-test-recipe-claude-code--deepseek--mcp-tool)
+and [Alternative: Codex](#alternative-codex--deepseek--mcp-tool) below.
+Three real problems were found and fixed along the way, in order:
 
 1. **The server binary hardcodes `127.0.0.1:8001` unless told otherwise** —
    without any override it's unreachable from any other pod, full stop, no
@@ -448,6 +449,120 @@ total**. Cross-server isolation confirmed: **`customer1`'s token against
 `mcp-server-b` is `403`, and `customer2`'s token against `mcp-server-a`
 is `403`** — role gating is genuinely per-server, not just per-customer.
 
+#### Alternative: Codex + DeepSeek + MCP tool
+
+Same MCP servers, same per-customer credential isolation, but using
+**OpenAI Codex CLI** instead of Claude Code. The key architectural
+difference: Codex uses `inference.local` — OpenShell's **privacy router**
+— which strips caller credentials at the proxy boundary and injects the
+real API key server-side. Claude Code goes direct-to-endpoint; Codex goes
+through the router. Both approaches are valid; this section shows the
+second one.
+
+> **Model limitation:** DeepSeek's Responses API (what `inference.local`
+> routes through) currently serves only `deepseek-v4-flash`. For
+> `deepseek-v4-pro`, use the Claude Code path above — DeepSeek's
+> Anthropic-compatible endpoint auto-maps `claude-opus*` → v4-pro.
+
+**Prerequisites:** steps 1–3 (Keycloak, OIDC overlay, customer onboarding)
+and this section's deploy/authorize steps must already be done.
+
+1. Import the `deepseek-codex` provider profile and create both providers.
+   The two-provider pattern is needed because custom profiles cannot drive
+   `inference.local` routing — only type `openai` providers can:
+
+   ```bash
+   # Provider 1 — drives inference.local routing
+   openshell provider create --name deepseek-inference --type openai \
+     --credential "OPENAI_API_KEY=<your-deepseek-key>" \
+     --config "OPENAI_BASE_URL=https://api.deepseek.com/v1"
+
+   # Provider 2 — carries network policy + binary permissions for Codex
+   openshell provider profile import -f providers/deepseek-codex-profile.yaml
+   openshell provider create --name deepseek-codex --type deepseek-codex \
+     --credential "OPENAI_API_KEY=<your-deepseek-key>"
+   ```
+
+2. Configure `inference.local` routing:
+
+   ```bash
+   openshell inference set \
+     --provider deepseek-inference \
+     --model deepseek-chat \
+     --timeout 120
+   ```
+
+3. Create and configure the sandbox. Attach **three** providers: the Codex
+   policy provider, the customer's credential provider, and grant Codex
+   network access to the MCP server:
+
+   ```bash
+   openshell sandbox create --name codex-customer1 \
+     --provider deepseek-codex \
+     --provider customer-customer1 \
+     -- true
+
+   openshell policy update codex-customer1 \
+     --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
+     --binary /usr/bin/codex \
+     --wait
+   ```
+
+4. Write the Codex config inside the sandbox so it uses `inference.local`:
+
+   ```bash
+   openshell sandbox exec -n codex-customer1 --no-tty -- bash -c '
+   mkdir -p ~/.codex && cat > ~/.codex/config.toml << "TOML"
+   model_provider = "openshell-deepseek"
+   model = "deepseek-chat"
+
+   [model_providers.openshell-deepseek]
+   name = "OpenShell DeepSeek Router"
+   base_url = "https://inference.local/v1"
+   env_key = "OPENAI_API_KEY"
+   wire_api = "responses"
+   TOML
+   '
+   ```
+
+5. Run the test — Codex supports MCP via Streamable HTTP, same transport
+   the MCP servers use: [VERIFY]
+
+   ```bash
+   openshell sandbox exec -n codex-customer1 --no-tty -- bash -c '
+   codex mcp add eligibility \
+     --transport http \
+     --url "http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp" \
+     --header "Authorization: Bearer $CUSTOMER_ACCESS_TOKEN"
+
+   codex exec --skip-git-repo-check \
+     "My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+   '
+   ```
+
+**Traffic flow:**
+
+```
+Codex (in sandbox)
+  → inference.local/v1 (model calls)
+    → OpenShell privacy router
+      → strips credentials, injects real DeepSeek key
+      → forwards to api.deepseek.com/v1
+  → mcp-server-a:8000/mcp (tool calls)
+    → Authorization: Bearer $CUSTOMER_ACCESS_TOKEN
+      → supervisor resolves placeholder to real Keycloak token
+      → Envoy checks JWT + realm role → app
+```
+
+> **Two-provider pattern explained:** `deepseek-inference` (type `openai`)
+> exists solely to make `openshell inference set --provider` work — custom
+> profile types can't drive routing. `deepseek-codex` (custom profile)
+> exists solely to contribute network policy (allow `api.deepseek.com`,
+> `inference.local`) and binary permissions (`/usr/bin/codex`) to the
+> sandbox. Neither alone is sufficient; together they cover routing + policy.
+> See the [kamaji reference](https://github.com/cvicens/kamaji/blob/main/docs/openshell.md)
+> for the pattern's origin and a standalone Codex-only walkthrough.
+
 ## Configuration reference
 
 | Variable | Where used | Notes |
@@ -502,6 +617,9 @@ is `403`** — role gating is genuinely per-server, not just per-customer.
       thereby gain access to the other — verified both directions:
       `customer1` (`mcp-server-a-user` only) → `mcp-server-b` is `403`;
       `customer2` (`mcp-server-b-user` only) → `mcp-server-a` is `403`
+- [ ] (Stretch) Codex variant: same MCP servers + customer isolation, but
+      via Codex + `inference.local` privacy router instead of Claude Code
+      + direct endpoint — [VERIFY] against a live cluster
 
 ## Open risks / things to verify
 
