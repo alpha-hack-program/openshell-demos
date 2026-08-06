@@ -7,7 +7,7 @@
 
 ## General
 
-- [] Explain the reason for util/onboard
+- [x] Explain the reason for util/onboard
 
 ## Utils
 
