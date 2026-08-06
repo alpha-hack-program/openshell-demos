@@ -234,10 +234,14 @@ OperatorHub on OpenShift.
    # Should show a row with "Succeeded" for the keycloak-operator
    ```
 
-3. Create a Keycloak instance. The Operator manages a `Keycloak` CR:
+3. Source your root `.env` (for `CLUSTER_APPS_DOMAIN`) and create a Keycloak
+   instance. Note the heredoc uses `<<EOF` (no quotes) so the variable is
+   expanded:
 
    ```bash
-   oc -n keycloak apply -f - <<'EOF'
+   source ../../.env
+
+   oc -n keycloak apply -f - <<EOF
    apiVersion: k8s.keycloak.org/v2beta1
    kind: Keycloak
    metadata:
@@ -246,8 +250,16 @@ OperatorHub on OpenShift.
      instances: 1
      hostname:
        hostname: keycloak.${CLUSTER_APPS_DOMAIN}
+     proxy:
+       headers: xforwarded
+     http:
+       httpEnabled: true
    EOF
    ```
+
+   The `proxy.headers` and `http.httpEnabled` settings are needed because the
+   OpenShift Route handles TLS termination — Keycloak itself runs behind the
+   Route over plain HTTP.
 
 4. Wait for the pod to become ready:
 
