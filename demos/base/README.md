@@ -296,9 +296,38 @@ subsequent steps are identical.
 
 ## Install
 
+### 1. Clone the repo and change to the demo directory
+
+```bash
+git clone https://github.com/alpha-hack-program/openshell-demos.git
+cd openshell-demos/demos/base
+```
+
+### 2. Create your `.env` files
+
+Copy the example files and fill in the real values:
+
+```bash
+# Root .env — cluster-wide variables
+cp ../../.env.example ../../.env
+# Edit ../../.env and set OPENSHELL_CHART_VERSION and CLUSTER_APPS_DOMAIN
+
+# Demo .env — demo-specific variables
+cp .env.example .env
+# Review .env — defaults are fine for most setups
+```
+
+The `.env.example` ships with `OPENSHELL_ROUTE=true` because the **passthrough
+Route is the recommended path** for this demo. It exposes the gateway over the
+network so you don't need an active `oc port-forward` terminal, and it
+preserves HTTP/2 end-to-end for gRPC (see
+[How OpenShell networking works](#how-openshell-networking-works)). If you
+prefer a local-only setup, set `OPENSHELL_ROUTE=false` in your `.env`.
+
+### 3. Run the install scripts
+
 The scripts expect environment variables to be **exported**, not just sourced.
-Source both the local `.env` (for `OPENSHELL_NAMESPACE`, `OPENSHELL_ROUTE`)
-and the root `.env` (for `OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`):
+Source both `.env` files before running:
 
 ```bash
 export $(grep -v '^#' .env | xargs)
@@ -310,19 +339,19 @@ export $(grep -v '^#' ../../.env | xargs)
 ./scripts/03-connect-gateway.sh
 ```
 
-By default the scripts use `oc port-forward` to reach the gateway. To use a
-passthrough Route instead (non-official path — see
-[Exposing the gateway via passthrough Route](#exposing-the-gateway-via-passthrough-route)),
-set `OPENSHELL_ROUTE=true` in `.env` before running. The install and connect
-scripts will automatically add the route hostname to the server cert SANs,
-set `allowUnauthenticatedUsers=true`, and create the Route.
+The install and connect scripts automatically handle the route hostname in the
+server cert SANs, `allowUnauthenticatedUsers=true`, and Route creation when
+`OPENSHELL_ROUTE=true`.
 
 ## Exposing the gateway via passthrough Route
 
-By default the install scripts use `oc port-forward` to reach the gateway on
-`localhost:8080`. This is fine for single-user evaluation but requires an
-active terminal. A **passthrough Route** lets you (and others) reach the
-gateway over the network without a port-forward.
+This is the **recommended path** and the default in `.env.example`
+(`OPENSHELL_ROUTE=true`). A passthrough Route lets you (and others) reach the
+gateway over the network without an active `oc port-forward` terminal. If you
+left the default, the install scripts already handled this for you — the
+manual steps below are only needed if you want to understand what happened or
+if you're upgrading an existing install that was initially deployed without a
+route.
 
 As explained in [How OpenShell networking works](#how-openshell-networking-works),
 gRPC requires HTTP/2 end-to-end, so only a passthrough Route works — it
