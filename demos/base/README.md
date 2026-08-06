@@ -616,6 +616,16 @@ openshell provider create --name byo-openai --type openai \
   --config "base_url=$OPENAI_BASE_URL"
 ```
 
+Confirm the instance was created:
+
+```bash
+openshell provider list
+```
+
+You should see `byo-openai` with type `openai`, one credential key, and one
+config key. The credential (your API key) is stored on the gateway side — it
+won't be visible in the output, only its key name.
+
 ### 4. Attach it to the sandbox and allow the endpoint
 
 ```bash
