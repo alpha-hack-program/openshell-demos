@@ -2,6 +2,7 @@
 name = "onboard"
 version = "0.1.1"
 edition = "2024"
+# test auto-trigger
 
 [[bin]]
 name = "onboard"
