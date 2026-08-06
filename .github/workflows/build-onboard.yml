@@ -1,0 +1,51 @@
+name: Build onboard CLI
+
+on:
+  push:
+    paths: ['util/onboard/**']
+    tags: ['onboard-v*']
+  pull_request:
+    paths: ['util/onboard/**']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: onboard-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: onboard-macos-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }} --manifest-path util/onboard/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: util/onboard/target/${{ matrix.target }}/release/onboard
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/onboard-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: |
+          mv artifacts/onboard-linux-x86_64/onboard onboard-linux-x86_64
+          mv artifacts/onboard-macos-aarch64/onboard onboard-macos-aarch64
+          chmod +x onboard-linux-x86_64 onboard-macos-aarch64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            onboard-linux-x86_64
+            onboard-macos-aarch64

@@ -2,11 +2,11 @@ Build a CLI utility called `onboard` in `util/onboard/` within this repo.
 
 ## What it does
 
-Automates the two-step customer onboarding flow for OpenShell Providers v2:
+Automates the two-step user onboarding flow for OpenShell Providers v2:
 
 1. Runs an OAuth 2.0 authorization code flow against a Keycloak instance to
-   obtain an offline refresh token for a customer.
-2. Calls the OpenShell CLI to create a provider for that customer and
+   obtain an offline refresh token for a user.
+2. Calls the OpenShell CLI to create a provider for that user and
    configure it with the refresh token.
 
 OpenShell deliberately does not handle step 1 — it only manages credential
@@ -18,7 +18,7 @@ lifecycle after you hand it a refresh token. This utility bridges that gap.
    `https://<host>/realms/<realm>/protocol/openid-connect/auth`
    with `client_id`, `response_type=code`, `scope=openid offline_access`,
    `redirect_uri=http://127.0.0.1:<port>/callback`
-2. Try to open the URL in the user's default browser (`xdg-open`, `open`,
+2. Try to open the URL in the default browser (`xdg-open`, `open`,
    or `python -m webbrowser`). If that fails (headless, SSH), print the URL
    to stdout so the user can copy-paste it.
 3. Start an HTTP listener on `127.0.0.1:<port>` waiting for Keycloak's
@@ -30,22 +30,22 @@ lifecycle after you hand it a refresh token. This utility bridges that gap.
    `https://<host>/realms/<realm>/protocol/openid-connect/token`
    with `grant_type=authorization_code`. Extract the `refresh_token`.
    Verify `refresh_expires_in` is 0 (offline token) — warn if not.
-5. Call the OpenShell CLI to onboard the customer:
+5. Call the OpenShell CLI to onboard the user:
    - `openshell provider profile import -f <profile-path>` (idempotent)
-   - `openshell provider create --name customer-<id> --type customer-scoped-api --credential CUSTOMER_ACCESS_TOKEN=pending`
-   - `openshell provider refresh configure customer-<id> --credential-key CUSTOMER_ACCESS_TOKEN --strategy oauth2-refresh-token --material client_id=<cli-client-id> --material refresh_token=<token> --secret-material-key refresh_token`
+   - `openshell provider create --name user-<id> --type user-scoped-api --credential USER_ACCESS_TOKEN=pending`
+   - `openshell provider refresh configure user-<id> --credential-key USER_ACCESS_TOKEN --strategy oauth2-refresh-token --material client_id=<cli-client-id> --material refresh_token=<token> --secret-material-key refresh_token`
    Note: the refresh material uses the public CLI client (`openshell-cli`),
    not the confidential gateway client. Keycloak binds refresh tokens to the
    client that issued them — using a different client_id causes a 400 error.
-   - `openshell provider refresh rotate customer-<id> --credential-key CUSTOMER_ACCESS_TOKEN`
+   - `openshell provider refresh rotate user-<id> --credential-key USER_ACCESS_TOKEN`
    If any step fails, print the error and exit non-zero. If the provider
    already exists, skip creation (idempotent).
 
 ## Parameters
 
 Required:
-- `--customer-id` / `-c` — customer identifier (e.g. `customer2`), used to
-  name the provider `customer-<id>`
+- `--user-id` / `-u` — user identifier (e.g. `user2`), used to
+  name the provider `user-<id>`
 
 Configurable via flags or env vars (flag takes precedence):
 - `--keycloak-host` / `KEYCLOAK_HOST` — e.g. `keycloak.apps.cluster.example.com`
@@ -53,12 +53,11 @@ Configurable via flags or env vars (flag takes precedence):
 - `--client-id` / `KEYCLOAK_CLIENT_ID_CLI` — the public Keycloak client for
   the browser login, default `openshell-cli`
 - `--gateway-client-id` / `KEYCLOAK_CLIENT_ID_GATEWAY` — optional,
-  reserved for Path B (SPIFFE token exchange), not used in the default flow
+  not used in the default flow
 - `--gateway-client-secret` / `KEYCLOAK_CLIENT_SECRET` — optional,
-  reserved for Path B, not used in the default flow
-- `--profile` — path to the provider profile YAML, default
-  `../demos/spire-spiffe-keycloak/providers/customer-refresh-profile.yaml`
-  relative to the script
+  not used in the default flow
+- `--profile` — path to the provider profile YAML (required, e.g.
+  `demos/keycloak-oidc/providers/user-refresh-profile.yaml`)
 - `--port` — local port for the callback listener, default `9999`
 - `--timeout` — seconds to wait for the callback, default `120`
 
@@ -87,7 +86,7 @@ Optional:
 - Add a thin wrapper `util/onboard/onboard.sh` that sources `.env` from the
   demo directory if it exists, exports the vars, and exec's the Rust binary
   (assuming it's been built with `cargo build --release`) — so the user can
-  just `./util/onboard/onboard.sh -c customer2` from anywhere.
+  just `./util/onboard/onboard.sh -u user2` from anywhere.
 - No secrets in code or defaults. `--gateway-client-secret` must come from
   the env or a flag, never a fallback value.
 - Idempotent: safe to re-run. Provider creation should use a

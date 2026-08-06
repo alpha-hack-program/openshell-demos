@@ -3,9 +3,9 @@
 ## How to use this file
 
 This is the orientation document for Claude Code working in this repo. It
-covers repo shape, the contract between `base/` and `demos/`, and cross-repo
+covers repo shape, the conventions shared across demos, and cross-repo
 conventions. It deliberately does **not** duplicate installation steps —
-those live in [`base/README.md`](base/README.md) and each
+those live in [`demos/base/README.md`](demos/base/README.md) and each
 `demos/<name>/README.md`. Read this file first, then the relevant README for
 whatever you're actually building.
 
@@ -21,51 +21,53 @@ Before running anything against a real cluster:
 3. **When a README says [VERIFY], verify it** — don't silently promote an
    inferred command to a confirmed one just because it's already in the file.
 
-## 1. Repo shape and the base/demos contract
+## 1. Repo shape
 
 ```
 .
 ├── CLAUDE.md              # this file
 ├── README.md              # human-facing repo overview + demo index
 ├── .env.example            # cluster-wide variables
-├── base/                   # demo-agnostic OpenShell-on-OpenShift install
-│   ├── README.md
-│   ├── helm/values-openshift.yaml
-│   └── scripts/
 └── demos/
     ├── _template/README.md # copy this when adding a new demo
-    └── spire-spiffe-keycloak/
+    ├── base/               # demo-agnostic OpenShell-on-OpenShift install
+    │   ├── README.md
+    │   ├── .env.example
+    │   ├── helm/values-openshift.yaml
+    │   └── scripts/
+    └── keycloak-oidc/
         ├── README.md
-        ├── helm/values-overlay.yaml
-        ├── keycloak/ | spire/ | providers/ | policies/ | mcp-servers/
+        ├── .env.example
+        ├── helm/values.yaml
+        ├── keycloak/ | providers/ | policies/ | mcp-servers/
         └── scripts/
 ```
 
-- **`base/` is demo-agnostic.** It installs a working OpenShell gateway on
-  OpenShift and proves it with a generic hello-world sandbox (no OIDC, no
-  SPIFFE, no external identity provider). Nothing under `base/` should ever
-  assume any particular demo. Changes to `base/` should make sense even if
-  every demo folder were deleted.
+- **`demos/base/` is the foundational demo.** It installs a working OpenShell
+  gateway on OpenShift and proves it with a generic hello-world sandbox (no
+  OIDC, no SPIFFE, no external identity provider). Nothing under `demos/base/`
+  should ever assume any particular other demo. Changes to `demos/base/`
+  should make sense even if every other demo folder were deleted.
 - **Each `demos/<name>/` is a self-contained, independent OpenShell
-  install.** Own README, own Helm values overlay, own scripts, own extra
-  infrastructure (Keycloak, SPIRE, whatever it needs), own provider profiles
-  and policies, and — critically — its **own namespace**, independent of
-  whatever namespace `base/`'s own install uses on the same cluster. A demo
-  never edits `base/helm/values-openshift.yaml` directly — it supplies a
-  second `-f` file, applied on top, targeting its own `OPENSHELL_NAMESPACE`:
+  install.** Own README, own `.env` / `.env.example`, own Helm values file,
+  own scripts, own extra infrastructure (Keycloak, whatever it
+  needs), own provider profiles and policies, and — critically — its **own
+  namespace** via `OPENSHELL_NAMESPACE` in its own `.env`. Namespace is
+  always per-demo, never shared — it does not live in the root `.env`.
+  Each demo carries a complete `helm/values.yaml` (including the
+  OpenShift-compatibility overrides) so it can be installed with a single
+  `-f`:
   ```bash
   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
-    -f base/helm/values-openshift.yaml \
-    -f demos/<name>/helm/values-overlay.yaml
+    -f demos/<name>/helm/values.yaml
   ```
-  Check a demo's own `.env`/README for which namespace it actually targets
-  — don't assume it matches `base/`'s. The gateway, Route, and everything
-  else that command creates belongs entirely to that demo, not to `base/`'s
-  own running install.
-- **Order of operations:** finish `base/`'s Definition of Done first — this
-  proves the chart/cluster combination works at all — before starting a
-  demo. A demo's own README states its prerequisites beyond `base/`
+  The root `.env` holds only cluster-wide variables
+  (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Check a demo's own
+  `.env`/README for which namespace it targets.
+- **Order of operations:** `demos/base/` is a good first demo — it proves
+  the chart/cluster combination works at all — but each demo is meant to
+  stand on its own. A demo's own README states its prerequisites
   explicitly — don't assume.
 - **Multiple demos coexist trivially** on one cluster, since each deploys
   into its own namespace with its own gateway release — there's no shared
@@ -75,17 +77,22 @@ Before running anything against a real cluster:
 
 Copy [`demos/_template/README.md`](demos/_template/README.md) to
 `demos/<name>/README.md` and keep its section headings — Purpose,
-Prerequisites beyond base, What this demo adds on top of base, Architecture,
+Prerequisites, What this demo deploys, Architecture,
 Steps, Configuration reference, Secrets and security notes, Definition of
 done, Open risks, References. Use a short descriptive name for the folder
-(e.g. `spire-spiffe-keycloak`), **not** a numeric prefix — numerals belong
+(e.g. `keycloak-oidc`), **not** a numeric prefix — numerals belong
 on scripts *inside* a demo folder (`00-prereqs.sh`, `01-deploy.sh`, …)
 where they reflect execution order, not on the folder itself.
+Do **not** place new demos inside `demos/base/` — `base` is a peer demo, not
+a parent directory for others.
 
 ## 3. Cross-repo conventions
 
-- **Secrets:** every `.env.example` lists variable names only. Real values go
-  in a gitignored `.env` (or a secret manager) at the same level, never
+- **Environment variables:** the root `.env` holds cluster-wide variables
+  (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Each demo has its own
+  `.env` with demo-specific variables — at minimum `OPENSHELL_NAMESPACE`.
+  Every `.env.example` lists variable names only. Real values go in a
+  gitignored `.env` (or a secret manager) at the same level, never
   committed. Realm exports / client configs use `.template.` filenames with
   placeholder values, substituted at deploy time by a script.
 - **Script numbering:** `00-`, `01-`, `02-`, ... reflects run order within a
@@ -99,9 +106,10 @@ where they reflect execution order, not on the folder itself.
 
 ## 4. Demos in this repo
 
-| Name | Adds on top of base | Status |
+| Name | What it covers | Status |
 |---|---|---|
-| [`spire-spiffe-keycloak`](demos/spire-spiffe-keycloak/README.md) | Keycloak as OIDC IdP, per-customer dynamic credentials (Providers v2 refresh strategy), MCP servers gated by Keycloak role via an Envoy sidecar, and — as a stretch goal — SPIFFE/SPIRE token-exchange grants matching NVIDIA's own `spiffe-token-grant-demo` | Keycloak/Providers-v2 path and the MCP servers extension verified end to end against a live cluster; SPIRE/SPIFFE has never actually been deployed — see the demo's Open Risks |
+| [`base`](demos/base/README.md) | Demo-agnostic OpenShell-on-OpenShift install + hello-world sandbox verification | Verified end to end |
+| [`keycloak-oidc`](demos/keycloak-oidc/README.md) | Keycloak as OIDC IdP, per-user credential isolation via Providers v2, MCP servers gated by Keycloak role via an Envoy sidecar | Verified end to end against a live cluster |
 
 ## 5. References (repo-wide)
 

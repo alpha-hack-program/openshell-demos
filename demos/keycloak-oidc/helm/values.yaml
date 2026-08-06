@@ -1,14 +1,20 @@
-# Applied on top of base/helm/values-openshift.yaml:
+# Self-contained Helm values for the keycloak-oidc demo on OpenShift.
+#
 #   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 #     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
-#     -f base/helm/values-openshift.yaml \
-#     -f demos/spire-spiffe-keycloak/helm/values-overlay.yaml
-#
-# Only the deltas this demo needs live here.
+#     -f demos/keycloak-oidc/helm/values.yaml
+
+# OpenShift-compatibility overrides — OpenShift's admission controller must
+# assign these itself.
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null
 
 server:
   auth:
-    allowUnauthenticatedUsers: false   # real OIDC is configured below — close the base-layer bypass
+    allowUnauthenticatedUsers: false   # real OIDC is configured below
   oidc:
     issuer: "https://<keycloak-host>/realms/openshell"     # fill in from .env
     audience: "openshell-cli"

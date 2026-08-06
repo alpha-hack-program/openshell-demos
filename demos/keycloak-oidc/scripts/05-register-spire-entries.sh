@@ -3,7 +3,7 @@ set -euo pipefail
 # Path B (stretch). [VERIFY] every selector against a running sandbox pod's
 # actual namespace/service account/labels before trusting this registration.
 : "${SPIRE_TRUST_DOMAIN:?set in .env}"
-: "${OPENSHELL_NAMESPACE:?set in root .env}"
+: "${OPENSHELL_NAMESPACE:?set in .env}"
 
 SPIRE_POD=$(oc -n spire get pod -l app.kubernetes.io/name=spire-server -o jsonpath='{.items[0].metadata.name}')
 

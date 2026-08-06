@@ -1,9 +1,8 @@
 # base — OpenShell on OpenShift, generic install + hello world
 
 Demo-agnostic. Installs the OpenShell gateway on OpenShift and proves the
-install works with a minimal sandbox test. Other demos layered on top via a Helm
-values *overlay* in each `demos/<name>/helm/values-overlay.yaml`, never by
-editing anything in this folder.
+install works with a minimal sandbox test. Other demos carry their own complete `helm/values.yaml` (including these
+same OpenShift overrides) so they can be installed independently.
 
 ## Prerequisites
 
@@ -18,7 +17,7 @@ editing anything in this folder.
 
 You can run these tools from any machine that can reach the cluster: your
 laptop, a jump host, a VM, a container. The repo includes a
-[Vagrantfile](../Vagrantfile) that provisions a Fedora VM with everything
+[Vagrantfile](../../Vagrantfile) that provisions a Fedora VM with everything
 pre-installed if you want a self-contained Linux workstation — see
 [Using the Vagrant VM](#using-the-vagrant-vm) at the bottom. But it's
 entirely optional.
@@ -127,7 +126,7 @@ With both layers active, a request must present a valid client certificate
 **and** a valid JWT. In this base install we use mTLS only and set
 `allowUnauthenticatedUsers=true` to skip the JWT check — the transport is
 still encrypted and client-authenticated, but there's no second token layer.
-The `spire-spiffe-keycloak` demo adds Keycloak as an OIDC provider, enabling
+The `keycloak-oidc` demo adds Keycloak as an OIDC provider, enabling
 the JWT layer as well.
 
 ## What this installs
@@ -205,10 +204,12 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
 ## Install
 
 The scripts expect environment variables to be **exported**, not just sourced.
-Use the `export` pattern below, or add `set -a` / `set +a` around the source:
+Source both the local `.env` (for `OPENSHELL_NAMESPACE`, `OPENSHELL_ROUTE`)
+and the root `.env` (for `OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`):
 
 ```bash
-export $(grep -v '^#' ../.env | xargs)
+export $(grep -v '^#' .env | xargs)
+export $(grep -v '^#' ../../.env | xargs)
 
 ./scripts/00-prereqs-check.sh
 ./scripts/01-namespace-and-scc.sh
@@ -250,7 +251,7 @@ oc -n "$OPENSHELL_NAMESPACE" delete secret \
 
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" -n "$OPENSHELL_NAMESPACE" \
-  -f base/helm/values-openshift.yaml \
+  -f demos/base/helm/values-openshift.yaml \
   --set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}" \
   --set "server.auth.allowUnauthenticatedUsers=true"
 ```
@@ -393,7 +394,7 @@ openshell provider delete deepseek
 | Gateway pod stuck in `ContainerCreating`, event says `secret "openshell-jwt-keys" not found` | Do **not** set `pkiInitJob.enabled: false`. The PKI init job generates the sandbox JWT signing keys even when TLS is disabled. Leave it at the default (`true`) |
 | `helm install` says chart `not found` at `oci://ghcr.io/nvidia/openshell/helm-chart` | The chart version must **not** have a `v` prefix. Use `0.0.97`, not `v0.0.97`. The Git tag uses `v0.0.97` but the OCI chart is published as `0.0.97` |
 | `kubectl apply` for Agent Sandbox returns 404 | The manifest file is `sandbox.yaml`, not `manifest.yaml` — see [Installing Agent Sandbox](#installing-agent-sandbox) |
-| Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' ../.env | xargs)` instead of `source ../.env` |
+| Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' .env | xargs)` and `export $(grep -v '^#' ../../.env | xargs)` instead of plain `source` |
 | Sandbox pods never schedule at all | Agent Sandbox controller/CRDs not installed before the chart |
 | Outbound call still blocked after adding an endpoint to the policy | The policy enforces a **binary allowlist**. Adding an endpoint alone is not enough — you must also specify which binary is allowed to use it: `openshell policy update <sandbox> --add-endpoint host:port:access:proto:enforce --binary /usr/bin/curl`. Use `readlink -f <binary>` inside the sandbox to find the canonical path if symlinks are involved |
 | `openshell status` shows Connected but `Authentication: Failed (missing authorization header)` | The gateway requires a gRPC authorization header even with mTLS. Set `server.auth.allowUnauthenticatedUsers=true` via `--set` at `helm install`/`upgrade` time, or configure OIDC. This is required for the passthrough Route path |
@@ -401,7 +402,7 @@ openshell provider delete deepseek
 
 ## Using the Vagrant VM (macOS Intel only)
 
-The repo includes a [Vagrantfile](../Vagrantfile) that creates a Fedora VM
+The repo includes a [Vagrantfile](../../Vagrantfile) that creates a Fedora VM
 with `oc`, `helm`, `kubectl`, `openshell`, and bash completions pre-installed.
 
 > **This Vagrantfile is specific to macOS on Intel (x86_64)** using QEMU via
@@ -422,7 +423,7 @@ vagrant up
 vagrant ssh
 
 # The repo is synced to /vagrant (excluding .git, .env, .vagrant)
-cd /vagrant/base
+cd /vagrant/demos/base
 ```
 
 If you prefer to run commands from outside the VM, set up a shell alias:
@@ -450,4 +451,4 @@ vagrant rsync
 ## Next steps
 
 Once the above is all green, go to a demo — start with
-[`demos/spire-spiffe-keycloak/README.md`](../demos/spire-spiffe-keycloak/README.md).
+[`demos/keycloak-oidc/README.md`](../keycloak-oidc/README.md).

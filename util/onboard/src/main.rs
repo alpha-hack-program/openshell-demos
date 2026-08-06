@@ -7,11 +7,11 @@ use clap::Parser;
 use url::Url;
 
 #[derive(Parser)]
-#[command(name = "onboard", about = "Automate OpenShell Providers v2 customer onboarding via Keycloak")]
+#[command(name = "onboard", about = "Automate OpenShell Providers v2 user onboarding via Keycloak")]
 struct Cli {
-    /// Customer identifier (e.g. "customer2"); provider will be named customer-<id>
-    #[arg(short, long)]
-    customer_id: String,
+    /// User identifier (e.g. "user2"); provider will be named user-<id>
+    #[arg(short = 'u', long)]
+    user_id: String,
 
     /// Keycloak hostname (e.g. keycloak.apps.cluster.example.com)
     #[arg(long, env = "KEYCLOAK_HOST")]
@@ -33,8 +33,8 @@ struct Cli {
     #[arg(long, env = "KEYCLOAK_CLIENT_SECRET")]
     gateway_client_secret: Option<String>,
 
-    /// Path to the provider profile YAML
-    #[arg(long, default_value = "demos/spire-spiffe-keycloak/providers/customer-refresh-profile.yaml")]
+    /// Path to the provider profile YAML (e.g. demos/keycloak-oidc/providers/user-refresh-profile.yaml)
+    #[arg(long)]
     profile: String,
 
     /// Local port for the OAuth callback listener
@@ -111,7 +111,7 @@ fn success_html(keycloak_host: &str, realm: &str) -> String {
 <body style="font-family:sans-serif;text-align:center;margin-top:4em">
 <h2>Authorization code received</h2>
 <p>You can close this tab, or <a href="{logout_url}">log out of Keycloak</a>
-first so the next customer gets a fresh login prompt.</p>
+first so the next user gets a fresh login prompt.</p>
 </body></html>"#
     )
 }
@@ -284,7 +284,7 @@ fn run_cmd(label: &str, program: &str, args: &[&str], dry_run: bool) -> Result<C
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
-    let provider_name = format!("customer-{}", cli.customer_id);
+    let provider_name = format!("user-{}", cli.user_id);
 
     // Step 1: build auth URL
     log("Building authorization URL...");
@@ -363,9 +363,9 @@ fn run() -> Result<(), String> {
             "--name",
             &provider_name,
             "--type",
-            "customer-scoped-api",
+            "user-scoped-api",
             "--credential",
-            "CUSTOMER_ACCESS_TOKEN=pending",
+            "USER_ACCESS_TOKEN=pending",
         ],
         cli.dry_run,
     )? {
@@ -385,7 +385,7 @@ fn run() -> Result<(), String> {
             "configure",
             &provider_name,
             "--credential-key",
-            "CUSTOMER_ACCESS_TOKEN",
+            "USER_ACCESS_TOKEN",
             "--strategy",
             "oauth2-refresh-token",
             "--material",
@@ -408,12 +408,12 @@ fn run() -> Result<(), String> {
             "rotate",
             &provider_name,
             "--credential-key",
-            "CUSTOMER_ACCESS_TOKEN",
+            "USER_ACCESS_TOKEN",
         ],
         cli.dry_run,
     )?;
 
-    log(&format!("Customer '{provider_name}' onboarded successfully."));
+    log(&format!("User '{provider_name}' onboarded successfully."));
     Ok(())
 }
 

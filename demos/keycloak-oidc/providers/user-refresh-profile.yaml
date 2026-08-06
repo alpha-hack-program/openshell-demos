@@ -1,0 +1,18 @@
+id: user-scoped-api
+display_name: User-scoped API
+description: Per-user OAuth credential, refreshed via each user's own token
+category: data
+inference_capable: false
+
+credentials:
+  - name: user_access_token
+    description: Short-lived access token scoped to one user
+    env_vars: [USER_ACCESS_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    refresh:
+      strategy: oauth2_refresh_token
+      token_url: "https://<keycloak-host>/realms/openshell/protocol/openid-connect/token"
+      scopes: [openid, offline_access]
+      refresh_before_seconds: 300

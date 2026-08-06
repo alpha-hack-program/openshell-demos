@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Stretch extension (Path A, no SPIRE). Deploys two MCP servers, each
-# expected to validate the caller's Keycloak-issued OAuth access token
-# directly. [VERIFY] every value here — this chart and the servers' JWT
-# validation contract are this demo's own design, not provided by upstream
-# OpenShell or NVIDIA.
-: "${OPENSHELL_NAMESPACE:?set in root .env}"
+# Deploys two MCP servers, each expected to validate the caller's
+# Keycloak-issued OAuth access token directly.
+: "${OPENSHELL_NAMESPACE:?set in .env}"
 
 HERE="$(dirname "$0")"
 
@@ -21,5 +18,5 @@ for s in mcp-server-a mcp-server-b; do
   echo "  ${s}.${OPENSHELL_NAMESPACE}.svc.cluster.local:${PORT}"
 done
 echo "Next: grant the relevant Keycloak realm role (mcp-server-a-user /"
-echo "mcp-server-b-user) to a customer, then run"
-echo "  ./07-authorize-mcp-customer.sh <customer-id> <mcp-server-a|mcp-server-b>"
+echo "mcp-server-b-user) to a user, then run"
+echo "  ./07-authorize-mcp-user.sh <user-id> <mcp-server-a|mcp-server-b>"

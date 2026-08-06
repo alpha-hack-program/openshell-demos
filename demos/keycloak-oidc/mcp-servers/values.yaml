@@ -3,7 +3,7 @@
 # checks the signature via the realm's JWKS endpoint, confirms `iss`, and
 # requires `requiredRole` to be present in the token's realm_access.roles
 # claim. This is the SAME access token Providers v2 already mints/refreshes
-# per customer in step 3 (see ../providers/customer-refresh-profile.yaml) —
+# per user in step 3 (see ../providers/user-refresh-profile.yaml) —
 # no separate workload-identity plane needed.
 
 keycloak:
@@ -33,9 +33,9 @@ envoy:
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
-# realm role a customer's access token must carry in realm_access.roles —
+# realm role a user's access token must carry in realm_access.roles —
 # enforced by the server itself on every request, and checked proactively
-# (fail-fast, clearer error) by 07-authorize-mcp-customer.sh before wiring
+# (fail-fast, clearer error) by 07-authorize-mcp-user.sh before wiring
 # up the sandbox policy.
 #
 # image.repository/tag are pinned directly (real OCI images), read as-is by

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Thin wrapper: sources .env from the demo directory if present, then exec's
 # the onboard binary.  Run from anywhere:
-#   ./util/onboard/onboard.sh -c customer2
+#   ./util/onboard/onboard.sh -u user2
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-DEMO_ENV="$REPO_ROOT/demos/spire-spiffe-keycloak/.env"
+DEMO_ENV="$REPO_ROOT/demos/keycloak-oidc/.env"
 if [[ -f "$DEMO_ENV" ]]; then
     set -a
     # shellcheck source=/dev/null
