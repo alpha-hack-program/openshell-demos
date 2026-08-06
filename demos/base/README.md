@@ -389,13 +389,16 @@ creation and network policies.
 
 ## Exposing the gateway via passthrough Route
 
-This is the **recommended path** and the default in `.env.example`
-(`OPENSHELL_ROUTE=true`). A passthrough Route lets you (and others) reach the
-gateway over the network without an active `oc port-forward` terminal. If you
-left the default, the install scripts already handled this for you — the
-manual steps below are only needed if you want to understand what happened or
-if you're upgrading an existing install that was initially deployed without a
-route.
+This is an **experimental path** used in this guide — it is **not officially
+supported** by OpenShell at the time of writing, and likely won't be (the
+official production path uses Envoy Gateway). We use it here because it gives
+a closer-to-reality networking setup than `oc port-forward` — the gateway is
+reachable over the network, multiple users can connect without sharing a
+terminal, and gRPC over HTTP/2 is preserved end-to-end. It is the default in
+`.env.example` (`OPENSHELL_ROUTE=true`). If you left the default, the install
+scripts already handled this for you — the manual steps below are only needed
+if you want to understand what happened or if you're upgrading an existing
+install that was initially deployed without a route.
 
 As explained in [How OpenShell networking works](#how-openshell-networking-works),
 gRPC requires HTTP/2 end-to-end, so only a passthrough Route works — it
