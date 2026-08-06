@@ -264,20 +264,14 @@ OperatorHub on OpenShift.
 
 #### 1c. Import the realm JSON
 
-The script printed the path to the prepared realm JSON (e.g.
-`/tmp/tmp.XXXXXX`). Import it into Keycloak using the **admin console** or
-the CLI:
+Import the realm JSON you saved in step 1a into Keycloak via the admin
+console:
 
-**Admin console:** log in at `https://<KEYCLOAK_HOST>/admin`, click
-**Create realm**, and upload the JSON file.
-
-**CLI (`kcadm.sh`):**
-
-```bash
-kcadm.sh config credentials --server https://<KEYCLOAK_HOST> \
-  --realm master --user admin --password admin
-kcadm.sh create realms -f /tmp/tmp.XXXXXX
-```
+1. Open `https://<KEYCLOAK_HOST>/admin` in your browser (use the admin
+   credentials you extracted in step 1b).
+2. In the top-left dropdown (which shows **master**), click **Create realm**.
+3. Click **Browse**, select the realm JSON file from step 1a (the path
+   printed by the script, e.g. `/tmp/tmp.XXXXXX`), and click **Create**.
 
 The realm template includes two demo users (`user1` / `user2`) with the
 `openshell-user` role and `offline_access` scope — they're created
