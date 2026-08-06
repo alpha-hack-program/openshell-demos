@@ -647,18 +647,22 @@ openshell sandbox exec -n hello-world -- \
 
 You should get a JSON response with a chat completion.
 
-> **How credential injection works:** the provider sets `OPENAI_API_KEY`
-> inside the sandbox to a *resolve placeholder*
-> (`openshell:resolve:env:v168...`), not the real key. When curl puts that
-> placeholder in the `Authorization: Bearer` header, the sandbox's outbound
-> proxy intercepts the request and asks the gateway to resolve the
-> placeholder into the real credential. The gateway looks up the API key it
-> holds for the `byo-openai` provider, replaces the placeholder in the
-> header, and forwards the request to the LLM. The actual secret never
-> enters the sandbox — it travels from the gateway to the upstream API,
-> bypassing the sandbox entirely. Application code works exactly as it
-> would outside the sandbox — `Authorization: Bearer $OPENAI_API_KEY` — but
-> the key stays on the gateway side.
+> **How credential injection works:** the gateway delivers credential
+> material to the sandbox's **supervisor** ahead of time (and refreshes it
+> automatically when it changes). The supervisor holds the real credentials
+> locally — the sandbox process never sees them. Instead, the supervisor
+> injects a *resolve placeholder* (`openshell:resolve:env:...`) into the
+> sandbox's `OPENAI_API_KEY` environment variable.
+>
+> When curl puts that placeholder in the `Authorization: Bearer` header,
+> the supervisor's **policy proxy** intercepts the outbound request,
+> replaces the placeholder with the real API key from its local credential
+> store, and forwards the request to the upstream API. No round-trip to the
+> gateway happens at request time — resolution is entirely local to the
+> supervisor. The actual secret never enters the sandbox. Application code
+> works exactly as it would outside the sandbox —
+> `Authorization: Bearer $OPENAI_API_KEY` — but the key stays on the
+> supervisor side, outside the sandbox boundary.
 
 ### 6. Clean up
 
