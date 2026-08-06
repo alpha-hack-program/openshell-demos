@@ -2,6 +2,17 @@
 
 [![Build onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml)
 
+> **Experimental — not production-ready.**
+> These demos build on top of the
+> [official OpenShell on OpenShift guide](https://docs.nvidia.com/openshell/kubernetes/openshift)
+> but diverge from it in significant ways (OIDC integration, per-user
+> credential isolation, MCP server gating). The goal is to show how
+> OpenShell can help you adopt **secure, isolated execution of AI agents on
+> OpenShift** — and to give you a head start exploring that path. That said,
+> the patterns here are still evolving and should not be treated as
+> production-grade. Use them to learn, experiment, and evaluate — then
+> follow the official documentation when you're ready to deploy for real.
+
 Everything lives under `demos/`. Each subfolder is a self-contained demo with
 its own README, Helm values, and extra infrastructure. A demo deploys into its
 **own namespace** — check a demo's own `.env`/README for which namespace it
