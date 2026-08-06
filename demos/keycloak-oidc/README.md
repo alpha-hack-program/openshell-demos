@@ -210,24 +210,49 @@ into your `.env` file now**.
 
 #### 1b. Deploy Keycloak on the cluster
 
-Deploy Keycloak using your method of choice (Operator, Helm chart, etc.) and
-confirm it's reachable at the URL printed by the script. For example, using
-the Bitnami Helm chart:
+We use the **Red Hat build of Keycloak** (RHBK) Operator, available from
+OperatorHub on OpenShift.
 
-```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm upgrade --install keycloak bitnami/keycloak \
-  --namespace keycloak --create-namespace \
-  --set auth.adminUser=admin \
-  --set auth.adminPassword=admin
-```
+1. In the OpenShift web console, go to **Operators > OperatorHub**, search
+   for **Keycloak**, and install the **Red Hat build of Keycloak** Operator
+   (accept the defaults — it installs cluster-wide).
 
-Wait for the pod to become ready, then expose it via a Route or use
-`oc port-forward` to verify:
+2. Wait for the Operator to be ready:
 
-```bash
-oc -n keycloak get pods
-```
+   ```bash
+   oc get csv -A | grep keycloak
+   # Should show "Succeeded"
+   ```
+
+3. Create a Keycloak instance. The Operator manages a `Keycloak` CR:
+
+   ```bash
+   oc create namespace keycloak 2>/dev/null || true
+
+   oc -n keycloak apply -f - <<'EOF'
+   apiVersion: k8s.keycloak.org/v2alpha1
+   kind: Keycloak
+   metadata:
+     name: keycloak
+   spec:
+     instances: 1
+     hostname:
+       hostname: keycloak.${CLUSTER_APPS_DOMAIN}
+   EOF
+   ```
+
+4. Wait for the pod to become ready and confirm Keycloak is reachable:
+
+   ```bash
+   oc -n keycloak get pods
+   # keycloak-0   1/1   Running
+
+   # Grab the admin credentials created by the Operator
+   oc -n keycloak get secret keycloak-initial-admin \
+     -o jsonpath='{.data.username}' | base64 -d; echo
+   oc -n keycloak get secret keycloak-initial-admin \
+     -o jsonpath='{.data.password}' | base64 -d; echo
+   ```
 
 #### 1c. Import the realm JSON
 
