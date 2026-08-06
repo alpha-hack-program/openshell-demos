@@ -197,19 +197,57 @@ after it runs, so you'll come back and complete your `.env` then.
 
 ### 1. Deploy Keycloak
 
+#### 1a. Prepare the realm JSON
+
 ```bash
 ./scripts/01-deploy-keycloak.sh
 ```
 
 The script derives `KEYCLOAK_HOST` from `CLUSTER_APPS_DOMAIN` (in the root
-`.env`) and generates a random client secret. It prepares the realm JSON with
-the secret substituted and prints all the values you need. After deploying
-Keycloak and importing the realm:
+`.env`) and generates a random client secret. It prepares a realm JSON file
+with the secret substituted and prints all the values you need — **copy them
+into your `.env` file now**.
 
-1. Copy the values printed by the script into your `.env` file.
+#### 1b. Deploy Keycloak on the cluster
 
-The realm template already includes two demo users (`user1` / `user2`) with
-the `openshell-user` role and `offline_access` scope, so they're created
+Deploy Keycloak using your method of choice (Operator, Helm chart, etc.) and
+confirm it's reachable at the URL printed by the script. For example, using
+the Bitnami Helm chart:
+
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm upgrade --install keycloak bitnami/keycloak \
+  --namespace keycloak --create-namespace \
+  --set auth.adminUser=admin \
+  --set auth.adminPassword=admin
+```
+
+Wait for the pod to become ready, then expose it via a Route or use
+`oc port-forward` to verify:
+
+```bash
+oc -n keycloak get pods
+```
+
+#### 1c. Import the realm JSON
+
+The script printed the path to the prepared realm JSON (e.g.
+`/tmp/tmp.XXXXXX`). Import it into Keycloak using the **admin console** or
+the CLI:
+
+**Admin console:** log in at `https://<KEYCLOAK_HOST>/admin`, click
+**Create realm**, and upload the JSON file.
+
+**CLI (`kcadm.sh`):**
+
+```bash
+kcadm.sh config credentials --server https://<KEYCLOAK_HOST> \
+  --realm master --user admin --password admin
+kcadm.sh create realms -f /tmp/tmp.XXXXXX
+```
+
+The realm template includes two demo users (`user1` / `user2`) with the
+`openshell-user` role and `offline_access` scope — they're created
 automatically when you import the realm. Their passwords match their
 usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
