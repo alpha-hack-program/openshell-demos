@@ -249,13 +249,17 @@ OperatorHub on OpenShift.
    EOF
    ```
 
-4. Wait for the pod to become ready and confirm Keycloak is reachable:
+4. Wait for the pod to become ready:
 
    ```bash
    oc -n keycloak get pods
    # keycloak-0   1/1   Running
+   ```
 
-   # Grab the admin credentials created by the Operator
+5. Grab the admin credentials created by the Operator — you'll need them
+   to log into the admin console in the next step:
+
+   ```bash
    oc -n keycloak get secret keycloak-initial-admin \
      -o jsonpath='{.data.username}' | base64 -d; echo
    oc -n keycloak get secret keycloak-initial-admin \
