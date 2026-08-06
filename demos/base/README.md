@@ -368,6 +368,25 @@ The install and connect scripts automatically handle the route hostname in the
 server cert SANs, `allowUnauthenticatedUsers=true`, and Route creation when
 `OPENSHELL_ROUTE=true`.
 
+### 5. Verify the install
+
+Once the scripts finish, confirm the gateway is up and the CLI can talk to it:
+
+```bash
+openshell status
+# Should show Status: Connected and Authentication: Authenticated (mTLS transport)
+
+openshell gateway list
+# Should list the "openshift" gateway with its endpoint
+
+openshell sandbox list
+# Should return an empty list (no sandboxes yet) — confirms the API is responding
+```
+
+If all three commands succeed, the install is working. Continue to
+[Verify: hello-world sandbox](#verify-hello-world-sandbox) to exercise sandbox
+creation and network policies.
+
 ## Exposing the gateway via passthrough Route
 
 This is the **recommended path** and the default in `.env.example`
