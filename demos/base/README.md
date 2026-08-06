@@ -586,16 +586,30 @@ Extract the hostname for the network policy:
 LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 ```
 
-### 2. Import the provider profile and create a provider
+### 2. Import the provider profile
+
+A **provider profile** is a template that tells OpenShell how a particular
+type of credential works — which environment variables it maps to, how it
+authenticates (Bearer header), and which endpoints it's allowed to reach. This
+demo includes an OpenAI-compatible profile at `providers/openai-profile.yaml`:
 
 ```bash
 openshell provider profile import --file providers/openai-profile.yaml
+```
+
+### 3. Create a provider instance
+
+A **provider instance** is a concrete credential tied to a profile. It holds
+your actual API key and configuration. Creating one doesn't expose the key to
+any sandbox yet — that happens when you attach it in the next step:
+
+```bash
 openshell provider create --name byo-openai --type openai \
   --credential OPENAI_API_KEY \
   --config "base_url=$OPENAI_BASE_URL"
 ```
 
-### 3. Attach it to the sandbox and allow the endpoint
+### 4. Attach it to the sandbox and allow the endpoint
 
 ```bash
 openshell sandbox provider attach hello-world byo-openai
@@ -604,7 +618,7 @@ openshell policy update hello-world \
   --binary /usr/bin/curl --wait
 ```
 
-### 4. Call the API from inside the sandbox
+### 5. Call the API from inside the sandbox
 
 ```bash
 openshell sandbox exec -n hello-world -- \
@@ -625,7 +639,7 @@ You should get a JSON response with a chat completion.
 > as it would outside the sandbox — `Authorization: Bearer $OPENAI_API_KEY`
 > — but the key stays on the gateway side.
 
-### 5. Clean up
+### 6. Clean up
 
 ```bash
 openshell sandbox delete hello-world
