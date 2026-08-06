@@ -117,7 +117,26 @@ flowchart TB
     end
 ```
 
-## Environment setup
+## Getting started
+
+### Clone the repo and change to the demo directory
+
+```bash
+git clone https://github.com/alpha-hack-program/openshell-demos.git
+cd openshell-demos/demos/keycloak-oidc
+```
+
+### Log into your OpenShift cluster
+
+Make sure you're logged in with a user that has **cluster-admin** rights (or
+at least the ability to grant SCCs and create namespaces):
+
+```bash
+oc login --server=https://api.<your-cluster>:6443
+oc whoami   # confirm you're logged in
+```
+
+### Set up your `.env` files
 
 This demo uses two `.env` files:
 
@@ -128,26 +147,25 @@ This demo uses two `.env` files:
 
 2. **Demo `.env`** (in this directory) — variables specific to this demo.
 
-Copy the example files and fill in your values:
+Copy the example files and fill in the real values:
 
 ```bash
-# From the repo root:
-cp .env.example .env
+# Root .env — cluster-wide variables
+cp ../../.env.example ../../.env
 ```
 
-Extract `CLUSTER_APPS_DOMAIN` from the cluster (you must be logged in — see
-[step 0](#0-log-into-your-openshift-cluster)):
+Extract `CLUSTER_APPS_DOMAIN` from the cluster:
 
 ```bash
 CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-Edit the root `.env` and set `OPENSHELL_CHART_VERSION` and paste the
+Edit `../../.env` and set `OPENSHELL_CHART_VERSION` and paste the
 `CLUSTER_APPS_DOMAIN` value from above.
 
 ```bash
-# From this demo directory:
+# Demo .env — demo-specific variables
 cp .env.example .env
 # Edit .env — values are listed below
 ```
@@ -166,20 +184,6 @@ The demo `.env` requires these variables:
 The `01-deploy-keycloak.sh` script prints the values you need after it runs.
 
 ## Steps
-
-### 0. Log into your OpenShift cluster
-
-Before running any scripts, make sure you're logged in with a user that has
-**cluster-admin** rights (or at least the ability to grant SCCs and create
-namespaces):
-
-```bash
-oc login --server=https://api.<your-cluster>:6443
-oc whoami   # confirm you're logged in
-```
-
-All scripts in this demo use `oc` and `helm` commands that target this
-cluster. If you're not logged in, they will fail.
 
 ### 1. Deploy Keycloak
 
