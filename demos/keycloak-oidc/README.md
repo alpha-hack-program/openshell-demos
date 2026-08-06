@@ -207,9 +207,11 @@ the secret substituted and prints all the values you need. After deploying
 Keycloak and importing the realm:
 
 1. Copy the values printed by the script into your `.env` file.
-2. Create 2-3 demo users in the `openshell` realm with `offline_access` in
-   scope — these represent the users you will onboard in step 3.
-3. Assign the `openshell-user` role to each demo user.
+
+The realm template already includes two demo users (`user1` / `user2`) with
+the `openshell-user` role and `offline_access` scope, so they're created
+automatically when you import the realm. Their passwords match their
+usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 

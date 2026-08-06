@@ -29,5 +29,18 @@
       "directAccessGrantsEnabled": false
     }
   ],
-  "_comment": "Template only — no real secrets. Demo 'customer' users (with offline_access scope, for Path A refresh tokens) and any Path B SPIFFE federated client auth / token-exchange feature configuration are environment-specific and intentionally left out of this template; see the demo README's Open Risks section."
+  "users": [
+    {
+      "username": "user1",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "user1", "temporary": false }],
+      "realmRoles": ["openshell-user", "offline_access"]
+    },
+    {
+      "username": "user2",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "user2", "temporary": false }],
+      "realmRoles": ["openshell-user", "offline_access"]
+    }
+  ]
 }
