@@ -404,27 +404,21 @@ As explained in [How OpenShell networking works](#how-openshell-networking-works
 gRPC requires HTTP/2 end-to-end, so only a passthrough Route works — it
 forwards raw TLS to the pod, which terminates the connection itself.
 
-### 1. Re-deploy with the route hostname in the server cert
+If you followed the install steps above with `OPENSHELL_ROUTE=true` (the
+default), everything below was already done for you by the scripts. The rest
+of this section explains **what the scripts did** and is useful as a reference
+or if you need to **retrofit a route onto an existing install** that was
+originally deployed without one.
+
+### What the scripts do under the hood
 
 The route hostname must be in the server certificate's SANs — without it,
-TLS handshakes will fail because the hostname won't match. Pass it as a
-`--set` override — don't hardcode it in the values file:
+TLS handshakes will fail because the hostname won't match. The install script
+computes the route hostname and passes it as a `--set` override:
 
 ```bash
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
 ```
-
-**If upgrading an existing install**, delete the TLS secrets first so they
-are regenerated with the new SAN:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" delete secret \
-  openshell-server-tls openshell-client-tls openshell-jwt-keys
-```
-
-Then install/upgrade with the route hostname in the SANs. The `--set`
-flag differs depending on whether you use the PKI init job or
-cert-manager:
 
 **PKI init job (default):**
 
@@ -448,10 +442,6 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --set "server.auth.allowUnauthenticatedUsers=true"
 ```
 
-> **Using the scripts?** Set `OPENSHELL_ROUTE=true` (and
-> `CERT_MANAGER=true` if applicable) in `.env` — the install script
-> handles all of this automatically.
-
 > **Why `allowUnauthenticatedUsers`?** As described in
 > [Authentication layers](#authentication-layers), the gateway checks two
 > layers: mTLS (transport) and a JWT authorization header (application).
@@ -459,45 +449,62 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 > to accept requests authenticated by mTLS alone. It does **not** disable
 > TLS or skip client certificate verification.
 
-### 2. Create the passthrough Route
+The connect script then creates the Route and registers the gateway:
 
 ```bash
 oc -n "$OPENSHELL_NAMESPACE" create route passthrough openshell \
   --service=openshell \
   --port=8080 \
   --hostname="${ROUTE_HOST}"
-```
 
-### 3. Re-extract client certs and register the gateway
-
-After cert regeneration, the client mTLS bundle must be refreshed:
-
-```bash
-MTLS_DIR=~/.config/openshell/gateways/openshift/mtls
-mkdir -p "$MTLS_DIR"
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
-
-openshell gateway remove openshift 2>/dev/null || true
 openshell gateway add "https://${ROUTE_HOST}:443" --local --name openshift
-openshell status
 ```
-
-You should see `Status: Connected` and `Authentication: Authenticated (mTLS transport)`.
 
 > **Note:** `--local` tells the CLI to use the mTLS certs from the gateway
 > config directory. Despite the name, it works for any endpoint where you
 > manage the client certs yourself — not just Docker-local gateways.
 
-### 4. Existing sandboxes
+### Retrofitting a route onto an existing install
 
-If you had sandboxes created before regenerating certs, they'll be stuck in
-`Provisioning` because their JWT tokens were signed with the old keys.
-Delete and recreate them.
+If you initially deployed without `OPENSHELL_ROUTE=true` and want to add a
+route later, you need to regenerate the TLS secrets so the new hostname is
+included in the SANs:
+
+1. Delete the existing TLS secrets:
+
+   ```bash
+   oc -n "$OPENSHELL_NAMESPACE" delete secret \
+     openshell-server-tls openshell-client-tls openshell-jwt-keys
+   ```
+
+2. Re-run the helm upgrade with the route hostname (use the commands above).
+
+3. Re-extract the client mTLS bundle (the old certs are no longer valid):
+
+   ```bash
+   MTLS_DIR=~/.config/openshell/gateways/openshift/mtls
+   mkdir -p "$MTLS_DIR"
+   oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+     -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
+   oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+     -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
+   oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+     -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+   ```
+
+4. Re-register the gateway and create the route:
+
+   ```bash
+   openshell gateway remove openshift 2>/dev/null || true
+   openshell gateway add "https://${ROUTE_HOST}:443" --local --name openshift
+   oc -n "$OPENSHELL_NAMESPACE" create route passthrough openshell \
+     --service=openshell --port=8080 --hostname="${ROUTE_HOST}"
+   openshell status
+   ```
+
+5. If you had sandboxes created before regenerating certs, they'll be stuck in
+   `Provisioning` because their JWT tokens were signed with the old keys.
+   Delete and recreate them.
 
 ## Verify: hello-world sandbox
 
