@@ -226,8 +226,8 @@ OperatorHub on OpenShift.
 2. Wait for the Operator to be ready:
 
    ```bash
-   oc get csv -A | grep keycloak
-   # Should show "Succeeded"
+   oc -n keycloak get csv | grep keycloak
+   # Should show a row with "Succeeded" for the keycloak-operator
    ```
 
 3. Create a Keycloak instance. The Operator manages a `Keycloak` CR:
