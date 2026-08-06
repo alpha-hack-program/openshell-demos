@@ -3,6 +3,7 @@ old/
 .env
 .vagrant/
 .DS_Store
+.zed/
 *.zip
 *.token
 target/
