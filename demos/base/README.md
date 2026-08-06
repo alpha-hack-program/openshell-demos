@@ -390,8 +390,8 @@ creation and network policies.
 ## Exposing the gateway via passthrough Route
 
 This is an **experimental path** used in this guide — it is **not officially
-supported** by OpenShell at the time of writing, and likely won't be (the
-official production path uses Envoy Gateway). We use it here because it gives
+supported** by either NVIDIA/OpenShell or Red Hat at the time of writing, and
+likely won't be (the official production path uses Envoy Gateway). We use it here because it gives
 a closer-to-reality networking setup than `oc port-forward` — the gateway is
 reachable over the network, multiple users can connect without sharing a
 terminal, and gRPC over HTTP/2 is preserved end-to-end. It is the default in
