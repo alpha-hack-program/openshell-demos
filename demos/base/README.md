@@ -560,16 +560,11 @@ openshell sandbox exec -n hello-world -- curl -sS https://api.github.com/zen
 You should see a response (a random GitHub zen quote). The same call that
 failed in step 1 now works because the policy was updated.
 
-### 4. Clean up
-
-```bash
-openshell sandbox delete hello-world
-```
-
 ## Smoke test: provider credential injection
 
 Once the hello-world test passes, this optional step proves that providers
-can inject credentials into sandbox outbound calls. Bring any
+can inject credentials into sandbox outbound calls. It reuses the
+`hello-world` sandbox from the previous section. Bring any
 OpenAI-compatible API — you need a base URL and an API key.
 
 ### 1. Set your LLM provider details
