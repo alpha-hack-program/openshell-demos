@@ -325,6 +325,22 @@ start. The `helm upgrade` applies the OIDC configuration from
 URL and sets `allowUnauthenticatedUsers: false`. The `openshell settings`
 command enables the Providers v2 credential management system.
 
+> **If you already ran the base demo** on the same cluster, the `helm install`
+> will fail because the chart creates a cluster-scoped `ClusterRole`
+> (`openshell-node-reader`) that's already owned by the base demo's release.
+> Either tear down the base demo first (`demos/base/scripts/99-teardown.sh`),
+> or re-label the existing ClusterRole so this release can adopt it:
+>
+> ```bash
+> oc annotate clusterrole openshell-node-reader \
+>   meta.helm.sh/release-name=openshell \
+>   meta.helm.sh/release-namespace="$OPENSHELL_NAMESPACE" --overwrite
+> oc label clusterrole openshell-node-reader \
+>   app.kubernetes.io/managed-by=Helm --overwrite
+> ```
+>
+> Then re-run the `helm upgrade --install` command above.
+
 Run `openshell status` afterward — the CLI should now perform a real OIDC
 login against Keycloak instead of the default mTLS-only mode.
 
