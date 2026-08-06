@@ -290,7 +290,7 @@ console:
 
 1. Open `https://<KEYCLOAK_HOST>/admin` in your browser (use the admin
    credentials you extracted in step 1b).
-2. In the top-left dropdown (which shows **master**), click **Create realm**.
+2. In the left sidebar, click **Manage realms**, then click **Create realm**.
 3. Click **Browse**, select the realm JSON file from step 1a (the path
    printed by the script, e.g. `/tmp/tmp.XXXXXX`), and click **Create**.
 
