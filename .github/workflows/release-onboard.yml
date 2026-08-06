@@ -1,11 +1,8 @@
-name: Build onboard CLI
+name: Release onboard CLI
 
 on:
   push:
-    paths: ['util/onboard/**']
     tags: ['onboard-v*']
-  pull_request:
-    paths: ['util/onboard/**']
 
 defaults:
   run:
@@ -46,7 +43,6 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/onboard-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
