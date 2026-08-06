@@ -650,11 +650,15 @@ You should get a JSON response with a chat completion.
 > **How credential injection works:** the provider sets `OPENAI_API_KEY`
 > inside the sandbox to a *resolve placeholder*
 > (`openshell:resolve:env:v168...`), not the real key. When curl puts that
-> placeholder in the `Authorization: Bearer` header, the gateway proxy
-> intercepts it and swaps in the real API key before forwarding to the LLM.
-> The actual secret never enters the sandbox. Application code works exactly
-> as it would outside the sandbox — `Authorization: Bearer $OPENAI_API_KEY`
-> — but the key stays on the gateway side.
+> placeholder in the `Authorization: Bearer` header, the sandbox's outbound
+> proxy intercepts the request and asks the gateway to resolve the
+> placeholder into the real credential. The gateway looks up the API key it
+> holds for the `byo-openai` provider, replaces the placeholder in the
+> header, and forwards the request to the LLM. The actual secret never
+> enters the sandbox — it travels from the gateway to the upstream API,
+> bypassing the sandbox entirely. Application code works exactly as it
+> would outside the sandbox — `Authorization: Bearer $OPENAI_API_KEY` — but
+> the key stays on the gateway side.
 
 ### 6. Clean up
 
