@@ -155,6 +155,20 @@ The `01-deploy-keycloak.sh` script prints the values you need after it runs.
 
 ## Steps
 
+### 0. Log into your OpenShift cluster
+
+Before running any scripts, make sure you're logged in with a user that has
+**cluster-admin** rights (or at least the ability to grant SCCs and create
+namespaces):
+
+```bash
+oc login --server=https://api.<your-cluster>:6443
+oc whoami   # confirm you're logged in
+```
+
+All scripts in this demo use `oc` and `helm` commands that target this
+cluster. If you're not logged in, they will fail.
+
 ### 1. Deploy Keycloak
 
 ```bash

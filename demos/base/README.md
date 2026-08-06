@@ -324,7 +324,20 @@ preserves HTTP/2 end-to-end for gRPC (see
 [How OpenShell networking works](#how-openshell-networking-works)). If you
 prefer a local-only setup, set `OPENSHELL_ROUTE=false` in your `.env`.
 
-### 3. Run the install scripts
+### 3. Log into your OpenShift cluster
+
+Make sure you're logged in with a user that has **cluster-admin** rights (or
+at least the ability to grant SCCs and create namespaces):
+
+```bash
+oc login --server=https://api.<your-cluster>:6443
+oc whoami   # confirm you're logged in
+```
+
+The install scripts use `oc` and `helm` commands that target this cluster. If
+you're not logged in, they will fail.
+
+### 4. Run the install scripts
 
 The scripts expect environment variables to be **exported**, not just sourced.
 Source both `.env` files before running:
