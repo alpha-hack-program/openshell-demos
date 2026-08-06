@@ -179,7 +179,10 @@ cp .env.example .env
 # Edit .env — values are listed below
 ```
 
-The demo `.env` requires these variables:
+The demo `.env` requires these variables. Don't worry about filling them all
+in now — the `01-deploy-keycloak.sh` script in step 1 prints the
+Keycloak-related values (`KEYCLOAK_HOST`, `KEYCLOAK_CLIENT_SECRET`, etc.)
+after it runs, so you'll come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
@@ -189,8 +192,6 @@ The demo `.env` requires these variables:
 | `KEYCLOAK_CLIENT_ID_CLI` | `openshell-cli` | Public client for CLI/browser login |
 | `KEYCLOAK_CLIENT_ID_GATEWAY` | `openshell-gateway` | Confidential gateway client |
 | `KEYCLOAK_CLIENT_SECRET` | *(from Keycloak)* | Gateway client secret — never commit |
-
-The `01-deploy-keycloak.sh` script prints the values you need after it runs.
 
 ## Steps
 
