@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 880" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="880" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1100" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1100" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 3 — User Onboarding (OIDC Mode)</text>
+  <text x="1068" y="36" font-size="12" fill="#94a3b8" text-anchor="end">Admin Flow</text>
+
+  <!-- Actors -->
+  <rect x="40" y="80" width="120" height="36" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="100" y="103" font-size="13" font-weight="600" fill="#1e40af" text-anchor="middle">Admin</text>
+
+  <rect x="260" y="80" width="100" height="36" rx="18" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="310" y="103" font-size="13" font-weight="600" fill="#6b21a8" text-anchor="middle">User</text>
+
+  <rect x="460" y="80" width="120" height="36" rx="18" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+  <text x="520" y="103" font-size="13" font-weight="600" fill="#9d174d" text-anchor="middle">Keycloak</text>
+
+  <rect x="700" y="80" width="160" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="780" y="103" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">OpenShell Gateway</text>
+
+  <rect x="960" y="80" width="110" height="36" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="1015" y="103" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">Provider</text>
+
+  <!-- Lifelines -->
+  <line x1="100" y1="116" x2="100" y2="850" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="310" y1="116" x2="310" y2="850" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="520" y1="116" x2="520" y2="850" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="780" y1="116" x2="780" y2="850" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="1015" y1="116" x2="1015" y2="850" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Phase A header -->
+  <rect x="20" y="136" width="1060" height="22" rx="4" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="0.5"/>
+  <text x="32" y="151" font-size="10" font-weight="700" fill="#9d174d">PHASE A — Obtain the user's refresh token</text>
+
+  <!-- ALT box -->
+  <rect x="30" y="166" width="570" height="250" rx="8" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="30" y="166" width="60" height="20" rx="4" fill="#e2e8f0"/>
+  <text x="60" y="179" font-size="10" font-weight="700" fill="#475569" text-anchor="middle">ALT</text>
+
+  <!-- Option A: Password grant -->
+  <rect x="44" y="194" width="542" height="80" rx="6" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="60" y="210" font-size="10" font-weight="700" fill="#854d0e">A  Password grant (demo only)</text>
+  <text x="60" y="226" font-size="9" fill="#a16207">Admin knows user's password — not viable in production</text>
+
+  <!-- Password grant arrow -->
+  <line x1="100" y1="244" x2="508" y2="244" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="140" y="234" width="320" height="20" rx="4" fill="#fffbeb"/>
+  <text x="300" y="248" font-size="10" fill="#92400e" text-anchor="middle">POST /token  grant_type=password  scope=openid offline_access</text>
+
+  <!-- Token response -->
+  <line x1="508" y1="260" x2="112" y2="260" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <rect x="220" y="252" width="140" height="16" rx="4" fill="#fdf2f8"/>
+  <text x="290" y="263" font-size="9" fill="#9d174d" text-anchor="middle">{ refresh_token: "..." }</text>
+
+  <!-- Divider -->
+  <line x1="40" y1="288" x2="590" y2="288" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- Option B: Browser OAuth flow -->
+  <rect x="44" y="296" width="542" height="112" rx="6" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="60" y="312" font-size="10" font-weight="700" fill="#166534">B  Browser-based OAuth flow (onboard tool)</text>
+  <text x="60" y="328" font-size="9" fill="#16a34a">User logs in directly — admin never sees the password</text>
+
+  <!-- Onboard opens browser -->
+  <line x1="100" y1="346" x2="298" y2="346" stroke="#9333ea" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="130" y="336" width="140" height="20" rx="4" fill="#f0fdf4"/>
+  <text x="200" y="350" font-size="10" fill="#6b21a8" text-anchor="middle">Open browser</text>
+
+  <!-- User logs in -->
+  <line x1="310" y1="362" x2="508" y2="362" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="340" y="352" width="140" height="20" rx="4" fill="#f0fdf4"/>
+  <text x="410" y="366" font-size="10" fill="#9d174d" text-anchor="middle">User authenticates</text>
+
+  <!-- Auth code callback -->
+  <line x1="508" y1="378" x2="112" y2="378" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <rect x="180" y="370" width="240" height="16" rx="4" fill="#fdf2f8"/>
+  <text x="300" y="381" font-size="9" fill="#9d174d" text-anchor="middle">Callback with auth code → exchange → refresh_token</text>
+
+  <!-- Phase B header -->
+  <rect x="20" y="430" width="1060" height="22" rx="4" fill="#eef2ff" stroke="#c7d2fe" stroke-width="0.5"/>
+  <text x="32" y="445" font-size="10" font-weight="700" fill="#3730a3">PHASE B — Store the token in OpenShell (Providers v2)</text>
+
+  <!-- Step 1: Import profile -->
+  <line x1="100" y1="472" x2="768" y2="472" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="240" y="462" width="340" height="20" rx="4" fill="#f8fafc"/>
+  <text x="410" y="476" font-size="11" fill="#4f46e5" text-anchor="middle">1. openshell provider profile import -f &lt;profile&gt;</text>
+
+  <!-- Profile detail box -->
+  <rect x="700" y="494" width="240" height="72" rx="6" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="820" y="512" font-size="10" font-weight="600" fill="#3730a3" text-anchor="middle">user-refresh-profile.yaml</text>
+  <text x="715" y="528" font-size="9" fill="#4338ca">strategy: oauth2_refresh_token</text>
+  <text x="715" y="542" font-size="9" fill="#4338ca">token_url: Keycloak token endpoint</text>
+  <text x="715" y="556" font-size="9" fill="#4338ca">scopes: openid, offline_access</text>
+
+  <!-- Step 2: Create provider -->
+  <line x1="100" y1="584" x2="1003" y2="584" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="280" y="574" width="440" height="20" rx="4" fill="#f8fafc"/>
+  <text x="500" y="588" font-size="11" fill="#16a34a" text-anchor="middle">2. openshell provider create --name user-&lt;id&gt; --type user-scoped-api</text>
+
+  <!-- Step 3: Configure refresh -->
+  <line x1="100" y1="624" x2="1003" y2="624" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="220" y="610" width="500" height="28" rx="4" fill="#f8fafc"/>
+  <text x="470" y="626" font-size="11" fill="#16a34a" text-anchor="middle">3. openshell provider refresh configure user-&lt;id&gt;</text>
+  <text x="470" y="640" font-size="9" fill="#64748b" text-anchor="middle">--material refresh_token=$REFRESH_TOKEN  --secret-material-key refresh_token</text>
+
+  <!-- Step 4: Initial rotation -->
+  <line x1="100" y1="666" x2="1003" y2="666" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="280" y="656" width="440" height="20" rx="4" fill="#f8fafc"/>
+  <text x="500" y="670" font-size="11" fill="#16a34a" text-anchor="middle">4. openshell provider refresh rotate user-&lt;id&gt;</text>
+
+  <!-- Provider calls Keycloak to verify -->
+  <line x1="1003" y1="690" x2="532" y2="690" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="620" y="680" width="280" height="20" rx="4" fill="#fdf2f8"/>
+  <text x="760" y="694" font-size="10" fill="#9d174d" text-anchor="middle">POST /token grant_type=refresh_token</text>
+
+  <!-- Keycloak returns access token -->
+  <line x1="532" y1="710" x2="1003" y2="710" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <rect x="620" y="702" width="280" height="16" rx="4" fill="#fdf2f8"/>
+  <text x="760" y="713" font-size="9" fill="#9d174d" text-anchor="middle">{ access_token, refresh_token (rotated) }</text>
+
+  <!-- Provider stores -->
+  <rect x="940" y="734" width="150" height="36" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="1015" y="748" font-size="9" font-weight="600" fill="#166534" text-anchor="middle">Provider user-&lt;id&gt;</text>
+  <text x="1015" y="762" font-size="9" fill="#16a34a" text-anchor="middle">Stores both tokens</text>
+
+  <!-- Result -->
+  <rect x="40" y="784" width="1020" height="54" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="550" y="806" font-size="12" font-weight="600" fill="#166534" text-anchor="middle">Result: User onboarded — gateway refresh worker now automatically rotates tokens</text>
+  <text x="550" y="824" font-size="10" fill="#15803d" text-anchor="middle">User just runs "openshell sandbox connect" — they never see or manage a token</text>
+</svg>

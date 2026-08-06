@@ -5,7 +5,8 @@
 # authenticates via mTLS — no need for allowUnauthenticatedUsers.
 #
 # No OIDC, no SPIFFE token grants — those live in each demo's own
-# helm/values-overlay.yaml and get applied on top of this file, never in it.
+# helm/values.yaml. Other demos include these same OpenShift overrides in
+# their own values file rather than layering on top of this one.
 
 podSecurityContext:
   fsGroup: null

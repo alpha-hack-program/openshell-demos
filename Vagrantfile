@@ -12,7 +12,7 @@
 # Usage:
 #   vagrant up
 #   vagrant ssh
-#   cd /vagrant/base
+#   cd /vagrant/demos/base
 #
 # The repo is synced to /vagrant inside the VM. Copy .env separately:
 #   vagrant upload .env /vagrant/.env

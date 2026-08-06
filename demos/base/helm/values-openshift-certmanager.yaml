@@ -1,0 +1,33 @@
+# OpenShift-compatibility overrides + cert-manager for TLS.
+#
+# Use this instead of values-openshift.yaml when the OpenShift cert-manager
+# Operator is installed and you want cert-manager to manage server and client
+# TLS certificates. The PKI init job still runs in JWT-only mode to generate
+# the Ed25519 sandbox signing keys — do NOT set pkiInitJob.enabled: false.
+#
+# You do NOT need to edit this file. The install script (02-install-openshell.sh)
+# infers all DNS names from your .env variables (OPENSHELL_NAMESPACE,
+# CLUSTER_APPS_DOMAIN) and appends them via --set overrides automatically.
+
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null
+
+certManager:
+  enabled: true
+  caSecretName: openshell-ca-tls
+  clientCaFromServerTlsSecret: true
+  certificateDuration: 8760h       # 1 year
+  certificateRenewBefore: 720h     # 30 days
+  serverDnsNames:
+    - openshell
+    - "127.0.0.1"
+    # The install script automatically appends (via --set) based on your .env:
+    #   [2] openshell.$OPENSHELL_NAMESPACE.svc
+    #   [3] openshell.$OPENSHELL_NAMESPACE.svc.cluster.local
+    #   [4] openshell-$OPENSHELL_NAMESPACE.$CLUSTER_APPS_DOMAIN  (when OPENSHELL_ROUTE=true)
+    #
+    # If running helm manually (not via the script), you must add these yourself —
+    # especially the route FQDN, without which TLS handshakes will fail.

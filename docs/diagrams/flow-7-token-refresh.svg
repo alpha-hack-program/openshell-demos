@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 740" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1060" height="740" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1060" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1060" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 7 — Credential Injection &amp; Token Refresh</text>
+  <text x="1028" y="36" font-size="12" fill="#94a3b8" text-anchor="end">Automatic (OIDC only)</text>
+
+  <!-- ===== TOP: Refresh cycle ===== -->
+  <rect x="20" y="72" width="1020" height="22" rx="4" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="0.5"/>
+  <text x="32" y="87" font-size="10" font-weight="700" fill="#9d174d">REFRESH CYCLE — runs continuously in the background</text>
+
+  <!-- Actors for refresh -->
+  <rect x="40" y="108" width="160" height="36" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="120" y="131" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">Refresh Worker</text>
+
+  <rect x="340" y="108" width="160" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="420" y="131" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">Provider Store</text>
+
+  <rect x="660" y="108" width="120" height="36" rx="18" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+  <text x="720" y="131" font-size="13" font-weight="600" fill="#9d174d" text-anchor="middle">Keycloak</text>
+
+  <!-- Refresh lifelines -->
+  <line x1="120" y1="144" x2="120" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="420" y1="144" x2="420" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="720" y1="144" x2="720" y2="360" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Step 1: Check expiry -->
+  <line x1="120" y1="170" x2="408" y2="170" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="160" y="160" width="200" height="20" rx="4" fill="#f8fafc"/>
+  <text x="260" y="174" font-size="11" fill="#4f46e5" text-anchor="middle">1. Check token expiry</text>
+
+  <!-- Provider profile config -->
+  <rect x="830" y="110" width="200" height="66" rx="6" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="930" y="128" font-size="10" font-weight="600" fill="#3730a3" text-anchor="middle">Provider profile config</text>
+  <text x="845" y="144" font-size="9" fill="#4f46e5">strategy: oauth2_refresh_token</text>
+  <text x="845" y="158" font-size="9" fill="#4f46e5">refresh_before_seconds: 300</text>
+  <text x="845" y="172" font-size="9" fill="#4f46e5">scopes: openid, offline_access</text>
+
+  <!-- Decision -->
+  <rect x="340" y="192" width="160" height="28" rx="4" fill="#fefce8" stroke="#fbbf24" stroke-width="1"/>
+  <text x="420" y="210" font-size="10" fill="#92400e" text-anchor="middle">Expires within 300s?</text>
+
+  <!-- Step 2: Call Keycloak -->
+  <line x1="420" y1="236" x2="708" y2="236" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="440" y="222" width="240" height="28" rx="4" fill="#f8fafc"/>
+  <text x="560" y="238" font-size="11" fill="#db2777" text-anchor="middle">2. POST /token</text>
+  <text x="560" y="252" font-size="9" fill="#64748b" text-anchor="middle">grant_type=refresh_token &amp; stored refresh_token</text>
+
+  <!-- Step 3: Keycloak returns new tokens -->
+  <line x1="708" y1="272" x2="432" y2="272" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <rect x="460" y="264" width="220" height="16" rx="4" fill="#fdf2f8"/>
+  <text x="570" y="275" font-size="9" fill="#9d174d" text-anchor="middle">3. New access_token + rotated refresh_token</text>
+
+  <!-- Step 4: Store both -->
+  <rect x="340" y="296" width="160" height="28" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="420" y="314" font-size="10" fill="#166534" text-anchor="middle">4. Store both tokens</text>
+
+  <!-- Loop indicator -->
+  <rect x="40" y="336" width="180" height="20" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="130" y="350" font-size="9" font-weight="600" fill="#166534" text-anchor="middle">Repeats every refresh cycle</text>
+
+  <!-- ===== DIVIDER ===== -->
+  <line x1="20" y1="376" x2="1040" y2="376" stroke="#94a3b8" stroke-width="2"/>
+
+  <!-- ===== BOTTOM: Credential injection at request time ===== -->
+  <rect x="20" y="392" width="1020" height="22" rx="4" fill="#eef2ff" stroke="#c7d2fe" stroke-width="0.5"/>
+  <text x="32" y="407" font-size="10" font-weight="700" fill="#3730a3">CREDENTIAL INJECTION — happens at request time, per outbound call</text>
+
+  <!-- Actors for injection -->
+  <rect x="40" y="428" width="120" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="100" y="451" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">Sandbox</text>
+
+  <rect x="310" y="428" width="160" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="390" y="451" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">Gateway Proxy</text>
+
+  <rect x="620" y="428" width="160" height="36" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="700" y="451" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">Provider Store</text>
+
+  <rect x="900" y="428" width="120" height="36" rx="18" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="960" y="451" font-size="13" font-weight="600" fill="#475569" text-anchor="middle">Downstream</text>
+
+  <!-- Injection lifelines -->
+  <line x1="100" y1="464" x2="100" y2="700" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="390" y1="464" x2="390" y2="700" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="700" y1="464" x2="700" y2="700" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="960" y1="464" x2="960" y2="700" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- A: App uses env var -->
+  <rect x="30" y="484" width="200" height="36" rx="6" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="130" y="498" font-size="9" font-weight="600" fill="#92400e" text-anchor="middle">$USER_ACCESS_TOKEN =</text>
+  <text x="130" y="512" font-size="8" fill="#a16207" text-anchor="middle">openshell:resolve:env:v168...</text>
+
+  <!-- Step A: Outbound request -->
+  <line x1="100" y1="536" x2="378" y2="536" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="110" y="522" width="240" height="28" rx="4" fill="#f8fafc"/>
+  <text x="230" y="538" font-size="11" fill="#475569" text-anchor="middle">A. Authorization: Bearer $TOKEN</text>
+  <text x="230" y="552" font-size="9" fill="#94a3b8" text-anchor="middle">(contains resolve placeholder)</text>
+
+  <!-- Step B: Proxy recognizes placeholder -->
+  <rect x="310" y="562" width="160" height="28" rx="4" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="390" y="580" font-size="10" fill="#3730a3" text-anchor="middle">B. Detect placeholder</text>
+
+  <!-- Step C: Lookup real token -->
+  <line x1="390" y1="600" x2="688" y2="600" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="440" y="590" width="180" height="20" rx="4" fill="#f8fafc"/>
+  <text x="530" y="604" font-size="11" fill="#16a34a" text-anchor="middle">C. Fetch current token</text>
+
+  <line x1="688" y1="616" x2="402" y2="616" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <rect x="460" y="608" width="160" height="16" rx="4" fill="#dcfce7"/>
+  <text x="540" y="619" font-size="9" fill="#166534" text-anchor="middle">Fresh access token</text>
+
+  <!-- Step D: Forward with real token -->
+  <line x1="390" y1="644" x2="948" y2="644" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="520" y="630" width="280" height="28" rx="4" fill="#dcfce7"/>
+  <text x="660" y="646" font-size="11" fill="#166534" text-anchor="middle">D. Forward: Authorization: Bearer &lt;real-token&gt;</text>
+  <text x="660" y="660" font-size="9" fill="#15803d" text-anchor="middle">Real secret never entered the sandbox</text>
+
+  <!-- Response -->
+  <line x1="948" y1="676" x2="112" y2="676" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <rect x="440" y="668" width="160" height="16" rx="4" fill="#dcfce7"/>
+  <text x="520" y="679" font-size="9" fill="#166534" text-anchor="middle">Response (transparent)</text>
+</svg>

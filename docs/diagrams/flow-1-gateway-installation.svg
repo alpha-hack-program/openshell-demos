@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 820" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1060" height="820" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1060" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1060" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 1 — Gateway Installation (mTLS Base)</text>
+  <text x="1028" y="36" font-size="12" fill="#94a3b8" text-anchor="end">Admin Flow</text>
+
+  <!-- Actors -->
+  <rect x="40" y="80" width="120" height="36" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="100" y="103" font-size="13" font-weight="600" fill="#1e40af" text-anchor="middle">Admin</text>
+
+  <rect x="310" y="80" width="160" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="390" y="103" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">OpenShift Cluster</text>
+
+  <rect x="570" y="80" width="130" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="635" y="103" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">Helm + PKI Job</text>
+
+  <rect x="770" y="80" width="130" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="835" y="103" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">cert-manager</text>
+
+  <rect x="940" y="80" width="90" height="36" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="985" y="103" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">CLI</text>
+
+  <!-- Lifelines -->
+  <line x1="100" y1="116" x2="100" y2="790" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="390" y1="116" x2="390" y2="790" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="635" y1="116" x2="635" y2="790" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="835" y1="116" x2="835" y2="790" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="985" y1="116" x2="985" y2="790" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Step 1: Prereq check -->
+  <rect x="56" y="140" width="88" height="28" rx="4" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="100" y="159" font-size="11" fill="#1e40af" text-anchor="middle">1. Prereqs</text>
+  <text x="100" y="178" font-size="9" fill="#64748b" text-anchor="middle">oc, helm, kubectl, openshell</text>
+
+  <!-- Step 2: Create namespace -->
+  <line x1="100" y1="194" x2="378" y2="194" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="145" y="184" width="190" height="20" rx="4" fill="#f8fafc"/>
+  <text x="240" y="198" font-size="11" fill="#475569" text-anchor="middle">2. oc create namespace</text>
+
+  <!-- Step 3: Grant SCC -->
+  <line x1="100" y1="226" x2="378" y2="226" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="115" y="216" width="230" height="20" rx="4" fill="#f8fafc"/>
+  <text x="230" y="230" font-size="11" fill="#475569" text-anchor="middle">3. add-scc-to-user privileged</text>
+
+  <!-- Step 4: Helm install — arrow spans both Helm+PKI and cert-manager -->
+  <line x1="100" y1="262" x2="823" y2="262" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="230" y="248" width="360" height="28" rx="4" fill="#f8fafc"/>
+  <text x="410" y="266" font-size="11" fill="#4f46e5" text-anchor="middle">4. helm upgrade --install openshell</text>
+  <text x="410" y="278" font-size="9" fill="#64748b" text-anchor="middle">(triggers cert generation via one of two paths)</text>
+
+  <!-- ALT box for cert generation -->
+  <rect x="530" y="290" width="380" height="150" rx="8" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="530" y="290" width="60" height="20" rx="4" fill="#e2e8f0"/>
+  <text x="560" y="303" font-size="10" font-weight="700" fill="#475569" text-anchor="middle">ALT</text>
+
+  <!-- Option A: PKI init job -->
+  <rect x="545" y="318" width="350" height="46" rx="6" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="565" y="332" font-size="10" font-weight="600" fill="#4338ca">A  PKI init job (default)</text>
+  <text x="565" y="346" font-size="9" fill="#6366f1">Generates server cert, client cert, JWT keys</text>
+  <text x="565" y="358" font-size="9" fill="#6366f1">as a Helm pre-install hook</text>
+
+  <!-- Divider -->
+  <line x1="540" y1="374" x2="900" y2="374" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- Option B: cert-manager -->
+  <rect x="545" y="384" width="350" height="46" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+  <text x="565" y="398" font-size="10" font-weight="600" fill="#92400e">B  cert-manager Operator (certManager.enabled: true)</text>
+  <text x="565" y="412" font-size="9" fill="#a16207">Creates Issuer + Certificate CRs for TLS;</text>
+  <text x="565" y="424" font-size="9" fill="#a16207">PKI job still runs in JWT-only mode for JWT keys</text>
+
+  <!-- Both produce same secrets -->
+  <line x1="635" y1="440" x2="402" y2="470" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="835" y1="440" x2="402" y2="470" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <rect x="430" y="460" width="260" height="20" rx="4" fill="#f8fafc"/>
+  <text x="560" y="474" font-size="10" fill="#475569" text-anchor="middle">openshell-server-tls + openshell-client-tls secrets</text>
+
+  <!-- JWT keys (always from PKI job) -->
+  <line x1="635" y1="440" x2="402" y2="496" stroke="#4f46e5" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-blue)"/>
+  <rect x="430" y="486" width="220" height="20" rx="4" fill="#f8fafc"/>
+  <text x="540" y="500" font-size="10" fill="#4f46e5" text-anchor="middle">openshell-jwt-keys (always PKI job)</text>
+
+  <!-- Step 5: Wait for rollout -->
+  <line x1="100" y1="526" x2="378" y2="526" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="115" y="516" width="230" height="20" rx="4" fill="#f8fafc"/>
+  <text x="230" y="530" font-size="11" fill="#475569" text-anchor="middle">5. oc rollout status statefulset</text>
+  <line x1="378" y1="542" x2="112" y2="542" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <text x="240" y="556" font-size="10" fill="#16a34a" text-anchor="middle">Ready</text>
+
+  <!-- Step 6: Extract mTLS bundle -->
+  <line x1="100" y1="576" x2="378" y2="576" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="115" y="566" width="230" height="20" rx="4" fill="#f8fafc"/>
+  <text x="230" y="580" font-size="11" fill="#475569" text-anchor="middle">6. oc get secret openshell-client-tls</text>
+  <line x1="378" y1="592" x2="112" y2="592" stroke="#475569" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="240" y="606" font-size="10" fill="#64748b" text-anchor="middle">ca.crt, tls.crt, tls.key</text>
+
+  <!-- Store to CLI config -->
+  <line x1="100" y1="622" x2="973" y2="622" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="320" y="612" width="380" height="20" rx="4" fill="#f8fafc"/>
+  <text x="510" y="626" font-size="11" fill="#16a34a" text-anchor="middle">Store in ~/.config/openshell/gateways/&lt;name&gt;/mtls/</text>
+
+  <!-- Step 7: Expose gateway -->
+  <rect x="40" y="650" width="440" height="44" rx="6" fill="#fefce8" stroke="#eab308" stroke-width="1"/>
+  <text x="260" y="668" font-size="11" font-weight="600" fill="#854d0e" text-anchor="middle">7. Expose gateway</text>
+  <text x="260" y="684" font-size="10" fill="#a16207" text-anchor="middle">oc port-forward (eval)  or  passthrough Route (network)</text>
+
+  <!-- Step 8: Register gateway -->
+  <line x1="100" y1="714" x2="973" y2="714" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="320" y="704" width="370" height="20" rx="4" fill="#f8fafc"/>
+  <text x="505" y="718" font-size="11" fill="#16a34a" text-anchor="middle">8. openshell gateway add &lt;url&gt; --local --name &lt;name&gt;</text>
+
+  <!-- Step 9: Verify -->
+  <rect x="56" y="746" width="88" height="28" rx="14" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="100" y="764" font-size="11" font-weight="600" fill="#166534" text-anchor="middle">9. Verify</text>
+  <text x="100" y="784" font-size="10" fill="#16a34a" text-anchor="middle">openshell status → Connected</text>
+</svg>

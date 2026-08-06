@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 780" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1060" height="780" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1060" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1060" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 2 — OIDC Overlay (Keycloak)</text>
+  <text x="1028" y="36" font-size="12" fill="#94a3b8" text-anchor="end">Admin Flow</text>
+
+  <!-- Actors -->
+  <rect x="40" y="80" width="120" height="36" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="100" y="103" font-size="13" font-weight="600" fill="#1e40af" text-anchor="middle">Admin</text>
+
+  <rect x="280" y="80" width="120" height="36" rx="18" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+  <text x="340" y="103" font-size="13" font-weight="600" fill="#9d174d" text-anchor="middle">Keycloak</text>
+
+  <rect x="520" y="80" width="160" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="600" y="103" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">OpenShift Cluster</text>
+
+  <rect x="780" y="80" width="160" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="860" y="103" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">OpenShell Gateway</text>
+
+  <!-- Lifelines -->
+  <line x1="100" y1="116" x2="100" y2="750" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="340" y1="116" x2="340" y2="750" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="600" y1="116" x2="600" y2="750" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="860" y1="116" x2="860" y2="750" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Phase label: Deploy Keycloak -->
+  <rect x="20" y="136" width="1020" height="22" rx="4" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="0.5"/>
+  <text x="32" y="151" font-size="10" font-weight="700" fill="#9d174d">PHASE 1 — Deploy Keycloak</text>
+
+  <!-- Step 1: Deploy Keycloak -->
+  <line x1="100" y1="176" x2="588" y2="176" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="166" width="260" height="20" rx="4" fill="#f8fafc"/>
+  <text x="330" y="180" font-size="11" fill="#475569" text-anchor="middle">1. Deploy Keycloak (Helm / Operator)</text>
+
+  <!-- Step 2: Prepare realm JSON -->
+  <rect x="56" y="204" width="88" height="28" rx="4" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="1"/>
+  <text x="100" y="222" font-size="10" fill="#9d174d" text-anchor="middle">2. Prepare</text>
+  <text x="100" y="244" font-size="9" fill="#64748b" text-anchor="middle">Substitute client secret</text>
+  <text x="100" y="254" font-size="9" fill="#64748b" text-anchor="middle">into realm-export.template.json</text>
+
+  <!-- Step 3: Import realm -->
+  <line x1="100" y1="270" x2="328" y2="270" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <rect x="130" y="260" width="160" height="20" rx="4" fill="#f8fafc"/>
+  <text x="210" y="274" font-size="11" fill="#db2777" text-anchor="middle">3. Import realm</text>
+
+  <!-- Realm contents box -->
+  <rect x="260" y="290" width="160" height="90" rx="6" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="340" y="308" font-size="10" font-weight="600" fill="#9d174d" text-anchor="middle">openshell realm</text>
+  <text x="275" y="324" font-size="9" fill="#831843">openshell-cli (public)</text>
+  <text x="275" y="338" font-size="9" fill="#831843">openshell-gateway (confid.)</text>
+  <text x="275" y="354" font-size="9" fill="#831843">Roles: openshell-admin</text>
+  <text x="275" y="368" font-size="9" fill="#831843">            openshell-user</text>
+
+  <!-- Step 4: Create demo users -->
+  <line x1="100" y1="400" x2="328" y2="400" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <rect x="110" y="390" width="200" height="20" rx="4" fill="#f8fafc"/>
+  <text x="210" y="404" font-size="11" fill="#db2777" text-anchor="middle">4. Create users + assign roles</text>
+
+  <text x="340" y="424" font-size="9" fill="#64748b" text-anchor="middle">Each user gets offline_access scope</text>
+  <text x="340" y="436" font-size="9" fill="#64748b" text-anchor="middle">+ openshell-user role</text>
+
+  <!-- Phase label: Apply OIDC overlay -->
+  <rect x="20" y="454" width="1020" height="22" rx="4" fill="#eef2ff" stroke="#c7d2fe" stroke-width="0.5"/>
+  <text x="32" y="469" font-size="10" font-weight="700" fill="#3730a3">PHASE 2 — Apply OIDC overlay to OpenShell</text>
+
+  <!-- Step 5: Helm upgrade -->
+  <line x1="100" y1="496" x2="848" y2="496" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="260" y="482" width="380" height="28" rx="4" fill="#f8fafc"/>
+  <text x="450" y="498" font-size="11" fill="#4f46e5" text-anchor="middle">5. helm upgrade --install -f helm/values.yaml</text>
+  <text x="450" y="512" font-size="9" fill="#64748b" text-anchor="middle">allowUnauthenticatedUsers: false + OIDC issuer, audience, roles</text>
+
+  <!-- OIDC config detail box -->
+  <rect x="740" y="526" width="240" height="86" rx="6" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="860" y="544" font-size="10" font-weight="600" fill="#3730a3" text-anchor="middle">OIDC config applied</text>
+  <text x="755" y="560" font-size="9" fill="#4338ca">issuer: https://&lt;kc-host&gt;/realms/openshell</text>
+  <text x="755" y="574" font-size="9" fill="#4338ca">audience: openshell-cli</text>
+  <text x="755" y="588" font-size="9" fill="#4338ca">rolesClaim: realm_access.roles</text>
+  <text x="755" y="602" font-size="9" fill="#4338ca">adminRole / userRole mapped</text>
+
+  <!-- Step 6: Enable Providers v2 -->
+  <line x1="100" y1="630" x2="848" y2="630" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="260" y="620" width="380" height="20" rx="4" fill="#f8fafc"/>
+  <text x="450" y="634" font-size="11" fill="#4f46e5" text-anchor="middle">6. openshell settings set providers_v2_enabled true</text>
+
+  <!-- Step 7: Verify -->
+  <line x1="100" y1="670" x2="848" y2="670" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="260" y="660" width="380" height="20" rx="4" fill="#f8fafc"/>
+  <text x="450" y="674" font-size="11" fill="#16a34a" text-anchor="middle">7. openshell status → triggers OIDC login</text>
+
+  <!-- Gateway talks to Keycloak -->
+  <line x1="848" y1="686" x2="352" y2="686" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-amber)"/>
+  <rect x="440" y="676" width="260" height="20" rx="4" fill="#f8fafc"/>
+  <text x="570" y="690" font-size="10" fill="#db2777" text-anchor="middle">Gateway validates JWT against Keycloak JWKS</text>
+
+  <!-- Result box -->
+  <rect x="40" y="714" width="980" height="30" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="530" y="734" font-size="12" font-weight="600" fill="#166534" text-anchor="middle">Result: mTLS (transport) + JWT (application) — per-user identity, RBAC enforced, Providers v2 ready</text>
+</svg>

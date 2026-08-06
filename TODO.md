@@ -10,7 +10,11 @@ I'd like to rename the demos/spire demo with a proper name we don't use spire, s
 
 # Priority 1
 
-## Demo SPIRE
+## Demo Base
+
+- [x] Smoke test should be done with Code + OpenAI API KEY
+
+## Demo Kaycloak OIDC
 
 - [x] Script 01-deploy-keycloak.sh should print the values to copy into demo specific .env
 - [x] I want the code of this script ./scripts/02-apply-oidc-overlay.sh used directly not hidden this is a guide to learn

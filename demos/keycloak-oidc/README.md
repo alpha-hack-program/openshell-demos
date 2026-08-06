@@ -170,11 +170,14 @@ prints import instructions. After importing:
 2. Assign the `openshell-user` role to each demo user.
 3. Copy the values printed by the script into your `.env` file.
 
-### 2. Apply the OIDC overlay and enable Providers v2
+### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
 ```bash
 source .env
 source ../../.env
+
+oc create namespace "$OPENSHELL_NAMESPACE" 2>/dev/null || true
+oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAMESPACE"
 
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
@@ -186,10 +189,12 @@ oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 openshell settings set --global --key providers_v2_enabled --value true
 ```
 
-The `helm upgrade` applies the OIDC configuration from `helm/values.yaml`,
-which points the gateway at your Keycloak realm's issuer URL and sets
-`allowUnauthenticatedUsers: false`. The `openshell settings` command enables
-the Providers v2 credential management system.
+The namespace must exist before `helm install`, and the `openshell-sandbox`
+service account needs the `privileged` SCC — without it, sandbox pods won't
+start. The `helm upgrade` applies the OIDC configuration from
+`helm/values.yaml`, which points the gateway at your Keycloak realm's issuer
+URL and sets `allowUnauthenticatedUsers: false`. The `openshell settings`
+command enables the Providers v2 credential management system.
 
 Run `openshell status` afterward — the CLI should now perform a real OIDC
 login against Keycloak instead of the default mTLS-only mode.
@@ -451,33 +456,50 @@ terminal. Confirm:
 - user1 can reach `mcp-server-a` but gets `403` from `mcp-server-b`
 - user2 can reach `mcp-server-b` but gets `403` from `mcp-server-a`
 
-#### Verified test recipe: Claude Code + DeepSeek + MCP tool
+#### Test recipe: Claude Code + BYO LLM + MCP tool
 
 Claude Code (pre-installed in the base sandbox image) calling
-`mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via DeepSeek as
-the LLM.
+`mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via your own
+OpenAI-compatible LLM.
 
-**Prerequisites** beyond steps 1-5 above:
+**Prerequisites** beyond steps 1-5 above — set these in your terminal:
 
-1. Import the `deepseek-claude` provider profile and create a provider:
+```bash
+export OPENAI_API_KEY="<your-key>"
+export OPENAI_BASE_URL="https://<your-provider>/v1"   # e.g. https://api.openai.com/v1
+export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
+LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
+```
+
+1. Generate a Claude Code provider profile for your LLM and import it:
 
    ```bash
-   openshell provider profile import -f providers/deepseek-claude-profile.yaml
-   openshell provider create --name deepseek-claude --type deepseek-claude \
-     --credential "ANTHROPIC_API_KEY=<your-deepseek-key>" \
-     --config "base_url=https://api.deepseek.com/anthropic" \
-     --config "model=deepseek-v4-pro" \
-     --config "opus_model=deepseek-v4-pro" \
-     --config "sonnet_model=deepseek-v4-pro" \
-     --config "haiku_model=deepseek-v4-flash"
+   cat > /tmp/byo-claude-profile.yaml << EOF
+   id: byo-claude
+   display_name: BYO LLM (Claude Code compatible)
+   description: OpenAI-compatible LLM for Claude Code
+   category: inference
+   inference_capable: true
+   credentials:
+     - name: api_key
+       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
+       env_vars: [ANTHROPIC_API_KEY]
+       required: true
+       auth_style: header
+       header_name: x-api-key
+   EOF
+
+   openshell provider profile import -f /tmp/byo-claude-profile.yaml
+   openshell provider create --name byo-claude --type byo-claude \
+     --credential "ANTHROPIC_API_KEY=$OPENAI_API_KEY"
    ```
 
 2. Attach the provider and grant network access:
 
    ```bash
-   openshell sandbox provider attach demo-user1 deepseek-claude
+   openshell sandbox provider attach demo-user1 byo-claude
    openshell policy update demo-user1 \
-     --add-endpoint "api.deepseek.com:443:read-write:rest:enforce" \
+     --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
      --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
@@ -488,11 +510,8 @@ the LLM.
 
    ```bash
    openshell sandbox exec -n demo-user1 \
-     --env "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
-     --env "ANTHROPIC_MODEL=deepseek-v4-pro" \
-     --env "ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro" \
-     --env "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro" \
-     --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash" \
+     --env "ANTHROPIC_BASE_URL=$OPENAI_BASE_URL" \
+     --env "ANTHROPIC_MODEL=$OPENAI_MODEL" \
      -- bash -c '
    MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
    claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
@@ -508,49 +527,68 @@ the LLM.
 > stored metadata, not injected into sandbox processes. Model routing and base
 > URL are non-secret config, so `--env` at exec time is the correct mechanism.
 
-#### Alternative: Codex + DeepSeek + MCP tool
+#### Alternative: Codex + BYO LLM + MCP tool
 
 Same MCP servers, same per-user credential isolation, but using **OpenAI
 Codex CLI** instead of Claude Code. The key architectural difference: Codex
 uses `inference.local` — OpenShell's privacy router — which strips caller
 credentials at the proxy boundary and injects the real API key server-side.
 
-> DeepSeek's Responses API (what `inference.local` routes through) currently
-> serves only `deepseek-v4-flash`. For `deepseek-v4-pro`, use the Claude
-> Code path above.
+**Prerequisites:** steps 1-5 above, plus the same `OPENAI_*` exports.
 
-**Prerequisites:** steps 1-5 above.
-
-1. Import the profile and create both providers (the two-provider pattern is
-   needed because custom profiles cannot drive `inference.local` routing —
-   only type `openai` providers can):
+1. Create the inference provider and configure `inference.local` routing
+   (only type `openai` providers can drive `inference.local`):
 
    ```bash
-   # Provider 1 — drives inference.local routing
-   openshell provider create --name deepseek-inference --type openai \
-     --credential "OPENAI_API_KEY=<your-deepseek-key>" \
-     --config "OPENAI_BASE_URL=https://api.deepseek.com/v1"
+   openshell provider create --name byo-inference --type openai \
+     --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
+     --config "OPENAI_BASE_URL=$OPENAI_BASE_URL"
 
-   # Provider 2 — carries network policy + binary permissions for Codex
-   openshell provider profile import -f providers/deepseek-codex-profile.yaml
-   openshell provider create --name deepseek-codex --type deepseek-codex \
-     --credential "OPENAI_API_KEY=<your-deepseek-key>"
+   openshell inference set \
+     --provider byo-inference \
+     --model "$OPENAI_MODEL" \
+     --timeout 120
    ```
 
-2. Configure `inference.local` routing:
+2. Generate a Codex policy profile and create a second provider for binary
+   permissions:
 
    ```bash
-   openshell inference set \
-     --provider deepseek-inference \
-     --model deepseek-chat \
-     --timeout 120
+   cat > /tmp/byo-codex-profile.yaml << EOF
+   id: byo-codex
+   display_name: BYO LLM (Codex policy)
+   description: Network policy and binary permissions for Codex via inference.local
+   category: inference
+   inference_capable: true
+   credentials:
+     - name: api_key
+       description: LLM API key (injected as OPENAI_API_KEY for Codex)
+       env_vars: [OPENAI_API_KEY]
+       required: true
+       auth_style: bearer
+       header_name: authorization
+   endpoints:
+     - host: inference.local
+       port: 443
+       protocol: rest
+       access: read-write
+       enforcement: enforce
+   binaries:
+     - /usr/bin/codex
+     - /usr/local/bin/codex
+     - /usr/lib/node_modules/@openai/**
+   EOF
+
+   openshell provider profile import -f /tmp/byo-codex-profile.yaml
+   openshell provider create --name byo-codex --type byo-codex \
+     --credential "OPENAI_API_KEY=$OPENAI_API_KEY"
    ```
 
 3. Create and configure the sandbox:
 
    ```bash
    openshell sandbox create --name codex-user1 \
-     --provider deepseek-codex \
+     --provider byo-codex \
      --provider user-user1 \
      -- true
 
@@ -565,11 +603,11 @@ credentials at the proxy boundary and injects the real API key server-side.
    ```bash
    openshell sandbox exec -n codex-user1 --no-tty -- bash -c '
    mkdir -p ~/.codex && cat > ~/.codex/config.toml << "TOML"
-   model_provider = "openshell-deepseek"
-   model = "deepseek-chat"
+   model_provider = "openshell-byo"
+   model = "'"$OPENAI_MODEL"'"
 
-   [model_providers.openshell-deepseek]
-   name = "OpenShell DeepSeek Router"
+   [model_providers.openshell-byo]
+   name = "OpenShell BYO Router"
    base_url = "https://inference.local/v1"
    env_key = "OPENAI_API_KEY"
    wire_api = "responses"
@@ -597,8 +635,8 @@ credentials at the proxy boundary and injects the real API key server-side.
 Codex (in sandbox)
   → inference.local/v1 (model calls)
     → OpenShell privacy router
-      → strips credentials, injects real DeepSeek key
-      → forwards to api.deepseek.com/v1
+      → strips credentials, injects real API key
+      → forwards to your LLM provider
   → mcp-server-a:8000/mcp (tool calls)
     → Authorization: Bearer $USER_ACCESS_TOKEN
       → supervisor resolves placeholder to real Keycloak token

@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 700" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1060" height="700" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1060" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1060" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 4 — MCP Server Deployment &amp; Authorization</text>
+  <text x="1028" y="36" font-size="12" fill="#94a3b8" text-anchor="end">Admin Flow</text>
+
+  <!-- Actors -->
+  <rect x="40" y="80" width="100" height="36" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="90" y="103" font-size="13" font-weight="600" fill="#1e40af" text-anchor="middle">Admin</text>
+
+  <rect x="240" y="80" width="160" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="320" y="103" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">OpenShift Cluster</text>
+
+  <rect x="510" y="80" width="120" height="36" rx="18" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+  <text x="570" y="103" font-size="13" font-weight="600" fill="#9d174d" text-anchor="middle">Keycloak</text>
+
+  <rect x="740" y="80" width="140" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="810" y="103" font-size="13" font-weight="600" fill="#3730a3" text-anchor="middle">OpenShell GW</text>
+
+  <!-- Lifelines -->
+  <line x1="90" y1="116" x2="90" y2="670" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="320" y1="116" x2="320" y2="670" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="570" y1="116" x2="570" y2="670" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="810" y1="116" x2="810" y2="670" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Phase 1: Deploy -->
+  <rect x="20" y="136" width="1020" height="22" rx="4" fill="#fef3c7" stroke="#fde68a" stroke-width="0.5"/>
+  <text x="32" y="151" font-size="10" font-weight="700" fill="#92400e">PHASE 1 — Deploy MCP server pods</text>
+
+  <!-- Step 1: Helm install MCP servers -->
+  <line x1="90" y1="178" x2="308" y2="178" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="100" y="168" width="180" height="20" rx="4" fill="#f8fafc"/>
+  <text x="190" y="182" font-size="11" fill="#475569" text-anchor="middle">1. Deploy mcp-servers chart</text>
+
+  <!-- Pod architecture box -->
+  <rect x="220" y="206" width="340" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="390" y="224" font-size="10" font-weight="700" fill="#475569" text-anchor="middle">Each MCP server pod (x2)</text>
+
+  <!-- Envoy container -->
+  <rect x="236" y="236" width="148" height="76" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+  <text x="310" y="254" font-size="10" font-weight="600" fill="#92400e" text-anchor="middle">Envoy sidecar</text>
+  <text x="310" y="268" font-size="9" fill="#a16207" text-anchor="middle">:8000 (external)</text>
+  <line x1="240" y1="278" x2="380" y2="278" stroke="#fde68a" stroke-width="0.5"/>
+  <text x="310" y="292" font-size="8" fill="#a16207" text-anchor="middle">jwt_authn: verify signature</text>
+  <text x="310" y="304" font-size="8" fill="#a16207" text-anchor="middle">rbac: check realm role</text>
+
+  <!-- Arrow between containers -->
+  <line x1="384" y1="274" x2="396" y2="274" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- App container -->
+  <rect x="400" y="236" width="148" height="76" rx="6" fill="#e0e7ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="474" y="254" font-size="10" font-weight="600" fill="#3730a3" text-anchor="middle">MCP App</text>
+  <text x="474" y="268" font-size="9" fill="#4f46e5" text-anchor="middle">127.0.0.1:8001</text>
+  <line x1="404" y1="278" x2="544" y2="278" stroke="#c7d2fe" stroke-width="0.5"/>
+  <text x="474" y="292" font-size="8" fill="#4f46e5" text-anchor="middle">Loopback only</text>
+  <text x="474" y="304" font-size="8" fill="#4f46e5" text-anchor="middle">No auth of its own</text>
+
+  <!-- Phase 2: Assign roles -->
+  <rect x="20" y="340" width="1020" height="22" rx="4" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="0.5"/>
+  <text x="32" y="355" font-size="10" font-weight="700" fill="#9d174d">PHASE 2 — Assign Keycloak realm roles to users</text>
+
+  <!-- Step 2: Assign roles -->
+  <line x1="90" y1="384" x2="558" y2="384" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="160" y="374" width="300" height="20" rx="4" fill="#f8fafc"/>
+  <text x="310" y="388" font-size="11" fill="#db2777" text-anchor="middle">2. Assign realm roles per user per server</text>
+
+  <!-- Role mapping detail -->
+  <rect x="460" y="408" width="220" height="60" rx="6" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1"/>
+  <text x="570" y="426" font-size="10" font-weight="600" fill="#9d174d" text-anchor="middle">Role mapping</text>
+  <text x="475" y="442" font-size="9" fill="#831843">user1 → mcp-server-a-user</text>
+  <text x="475" y="456" font-size="9" fill="#831843">user2 → mcp-server-b-user</text>
+
+  <!-- Phase 3: Authorize sandbox -->
+  <rect x="20" y="482" width="1020" height="22" rx="4" fill="#eef2ff" stroke="#c7d2fe" stroke-width="0.5"/>
+  <text x="32" y="497" font-size="10" font-weight="700" fill="#3730a3">PHASE 3 — Grant sandbox network access to MCP endpoints</text>
+
+  <!-- Step 3: Verify role -->
+  <line x1="90" y1="526" x2="558" y2="526" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="160" y="516" width="300" height="20" rx="4" fill="#f8fafc"/>
+  <text x="310" y="530" font-size="11" fill="#db2777" text-anchor="middle">3. Verify user holds required role (Admin API)</text>
+
+  <line x1="558" y1="542" x2="102" y2="542" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <rect x="260" y="534" width="160" height="16" rx="4" fill="#fdf2f8"/>
+  <text x="340" y="545" font-size="9" fill="#9d174d" text-anchor="middle">Role confirmed</text>
+
+  <!-- Step 4: Update sandbox policy -->
+  <line x1="90" y1="570" x2="798" y2="570" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="200" y="556" width="440" height="28" rx="4" fill="#f8fafc"/>
+  <text x="420" y="572" font-size="11" fill="#4f46e5" text-anchor="middle">4. openshell policy update demo-&lt;user&gt;</text>
+  <text x="420" y="586" font-size="9" fill="#64748b" text-anchor="middle">--add-endpoint mcp-server-a.$NS.svc.cluster.local:8000  --binary /usr/bin/curl</text>
+
+  <!-- Defense in depth summary -->
+  <rect x="40" y="610" width="980" height="52" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1"/>
+  <text x="530" y="630" font-size="11" font-weight="600" fill="#0369a1" text-anchor="middle">Defense in depth: 4 layers</text>
+  <text x="530" y="648" font-size="10" fill="#0284c7" text-anchor="middle">Sandbox network policy  →  Envoy JWT validation  →  Envoy RBAC (realm role)  →  App on loopback only</text>
+</svg>

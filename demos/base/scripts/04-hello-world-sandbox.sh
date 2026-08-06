@@ -32,4 +32,4 @@ echo "Response: $RESULT"
 echo
 echo "==> Cleaning up sandbox..."
 openshell sandbox delete "$NAME"
-echo "hello-world sandbox deleted. base/ verification complete."
+echo "hello-world sandbox deleted. demos/base/ verification complete."

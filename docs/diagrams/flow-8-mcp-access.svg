@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 680" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="680" rx="12" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1100" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1100" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" fill="#f8fafc">Flow 8 — MCP Server Access (End-to-End RBAC)</text>
+  <text x="1068" y="36" font-size="12" fill="#94a3b8" text-anchor="end">User Flow (OIDC)</text>
+
+  <!-- Actors -->
+  <rect x="30" y="80" width="110" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="85" y="103" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Sandbox</text>
+
+  <rect x="230" y="80" width="140" height="36" rx="18" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="300" y="103" font-size="12" font-weight="600" fill="#3730a3" text-anchor="middle">Gateway Proxy</text>
+
+  <rect x="470" y="80" width="140" height="36" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="540" y="99" font-size="12" font-weight="600" fill="#1e40af" text-anchor="middle">Network</text>
+  <text x="540" y="111" font-size="10" fill="#3b82f6" text-anchor="middle">Policy</text>
+
+  <rect x="700" y="80" width="140" height="36" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="770" y="99" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Envoy</text>
+  <text x="770" y="111" font-size="10" fill="#b45309" text-anchor="middle">Sidecar</text>
+
+  <rect x="930" y="80" width="140" height="36" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="1000" y="103" font-size="12" font-weight="600" fill="#166534" text-anchor="middle">MCP App</text>
+
+  <!-- Lifelines -->
+  <line x1="85" y1="116" x2="85" y2="650" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="300" y1="116" x2="300" y2="650" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="540" y1="116" x2="540" y2="650" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="770" y1="116" x2="770" y2="650" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="1000" y1="116" x2="1000" y2="650" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Checkpoint labels on right -->
+  <rect x="30" y="138" width="14" height="14" rx="7" fill="#4f46e5"/>
+  <text x="37" y="149" font-size="9" font-weight="700" fill="white" text-anchor="middle">1</text>
+  <rect x="30" y="232" width="14" height="14" rx="7" fill="#2563eb"/>
+  <text x="37" y="243" font-size="9" font-weight="700" fill="white" text-anchor="middle">2</text>
+  <rect x="30" y="332" width="14" height="14" rx="7" fill="#d97706"/>
+  <text x="37" y="343" font-size="9" font-weight="700" fill="white" text-anchor="middle">3</text>
+  <rect x="30" y="416" width="14" height="14" rx="7" fill="#d97706"/>
+  <text x="37" y="427" font-size="9" font-weight="700" fill="white" text-anchor="middle">4</text>
+  <rect x="30" y="500" width="14" height="14" rx="7" fill="#16a34a"/>
+  <text x="37" y="511" font-size="9" font-weight="700" fill="white" text-anchor="middle">5</text>
+
+  <!-- Step 1: Sandbox sends request with placeholder -->
+  <line x1="85" y1="148" x2="288" y2="148" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="90" y="134" width="190" height="28" rx="4" fill="#f8fafc"/>
+  <text x="185" y="150" font-size="10" fill="#475569" text-anchor="middle">curl mcp-server-a:8000/mcp</text>
+  <text x="185" y="164" font-size="9" fill="#94a3b8" text-anchor="middle">Bearer $USER_ACCESS_TOKEN</text>
+
+  <!-- Proxy resolves -->
+  <rect x="224" y="176" width="152" height="40" rx="6" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1"/>
+  <text x="300" y="192" font-size="9" font-weight="600" fill="#3730a3" text-anchor="middle">Resolve placeholder</text>
+  <text x="300" y="206" font-size="9" fill="#4f46e5" text-anchor="middle">→ real Keycloak JWT</text>
+
+  <!-- Step 2: Network policy check -->
+  <line x1="300" y1="238" x2="528" y2="238" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="320" y="228" width="180" height="20" rx="4" fill="#f8fafc"/>
+  <text x="410" y="242" font-size="10" fill="#2563eb" text-anchor="middle">Check endpoint allowlist</text>
+
+  <!-- Policy decision box -->
+  <rect x="460" y="260" width="160" height="56" rx="6" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="540" y="278" font-size="10" font-weight="600" fill="#1e40af" text-anchor="middle">Sandbox policy</text>
+  <text x="540" y="294" font-size="9" fill="#2563eb" text-anchor="middle">mcp-server-a:8000 allowed?</text>
+  <text x="540" y="308" font-size="9" fill="#2563eb" text-anchor="middle">/usr/bin/curl allowed?</text>
+
+  <!-- Step 3: Envoy JWT validation -->
+  <line x1="540" y1="340" x2="758" y2="340" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="560" y="330" width="180" height="20" rx="4" fill="#f8fafc"/>
+  <text x="650" y="344" font-size="10" fill="#d97706" text-anchor="middle">Forward to Envoy :8000</text>
+
+  <rect x="694" y="360" width="152" height="44" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+  <text x="770" y="376" font-size="9" font-weight="600" fill="#92400e" text-anchor="middle">jwt_authn filter</text>
+  <text x="770" y="392" font-size="9" fill="#a16207" text-anchor="middle">Verify sig (JWKS) + iss + exp</text>
+
+  <!-- Step 4: Envoy RBAC -->
+  <rect x="694" y="420" width="152" height="56" rx="6" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+  <text x="770" y="438" font-size="9" font-weight="600" fill="#92400e" text-anchor="middle">rbac filter</text>
+  <text x="770" y="454" font-size="9" fill="#a16207" text-anchor="middle">realm_access.roles</text>
+  <text x="770" y="468" font-size="9" fill="#a16207" text-anchor="middle">contains mcp-server-a-user?</text>
+
+  <!-- Step 5: Forward to app -->
+  <line x1="770" y1="506" x2="988" y2="506" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="790" y="496" width="170" height="20" rx="4" fill="#dcfce7"/>
+  <text x="875" y="510" font-size="10" fill="#166534" text-anchor="middle">Forward to 127.0.0.1:8001</text>
+
+  <!-- App processes -->
+  <rect x="930" y="530" width="140" height="28" rx="4" fill="#dcfce7" stroke="#86efac" stroke-width="1"/>
+  <text x="1000" y="548" font-size="10" fill="#166534" text-anchor="middle">MCP tool call</text>
+
+  <!-- Response back -->
+  <line x1="988" y1="576" x2="97" y2="576" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <rect x="420" y="568" width="200" height="16" rx="4" fill="#dcfce7"/>
+  <text x="520" y="579" font-size="9" fill="#166534" text-anchor="middle">200 OK — tool result (user-scoped)</text>
+
+  <!-- Failure paths box -->
+  <rect x="40" y="604" width="1020" height="40" rx="8" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="550" y="620" font-size="10" font-weight="600" fill="#dc2626" text-anchor="middle">Failure at any checkpoint blocks the request</text>
+  <text x="550" y="636" font-size="9" fill="#b91c1c" text-anchor="middle">No policy → blocked  |  Bad/expired JWT → 401  |  Missing realm role → 403  |  Direct to :8001 → unreachable (loopback)</text>
+</svg>
