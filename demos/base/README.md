@@ -514,24 +514,32 @@ confirm it now succeeds. No credentials or providers involved; this only
 proves sandbox creation, network isolation, and policy hot-reload all work on
 this cluster.
 
-### 1. Create a sandbox
+### 1. Create a sandbox and confirm outbound calls are blocked
 
 ```bash
-openshell sandbox create --name hello-world
+openshell sandbox create --name hello-world -- bash
 ```
 
-This creates the sandbox without entering it. You'll run commands inside it
-using `sandbox exec` in the next steps.
-
-### 2. Confirm outbound calls are blocked
+This creates the sandbox and drops you into an interactive shell inside it.
+You're now running commands **inside the sandbox**, not on your host. Try an
+outbound call:
 
 ```bash
-openshell sandbox exec -n hello-world -- curl -sS https://api.github.com/zen
+curl -sS https://api.github.com/zen
 ```
 
-This should fail — the default policy blocks all outbound traffic.
+This should fail — the default policy blocks all outbound traffic. This
+confirms network isolation is working.
 
-### 3. Allow a specific endpoint
+Type `exit` to leave the sandbox shell and return to your host terminal:
+
+```bash
+exit
+```
+
+### 2. Allow a specific endpoint
+
+Back on your host, update the sandbox policy to allow a specific endpoint:
 
 ```bash
 openshell policy update hello-world \
@@ -540,15 +548,19 @@ openshell policy update hello-world \
   --wait
 ```
 
-### 4. Confirm the call now succeeds
+### 3. Confirm the call now succeeds
+
+Now use `sandbox exec` to run the same curl from outside — this sends a
+single command into the sandbox without entering it interactively:
 
 ```bash
 openshell sandbox exec -n hello-world -- curl -sS https://api.github.com/zen
 ```
 
-You should see a response (a random GitHub zen quote).
+You should see a response (a random GitHub zen quote). The same call that
+failed in step 1 now works because the policy was updated.
 
-### 5. Clean up
+### 4. Clean up
 
 ```bash
 openshell sandbox delete hello-world
