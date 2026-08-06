@@ -234,7 +234,7 @@ OperatorHub on OpenShift.
 
    ```bash
    oc -n keycloak apply -f - <<'EOF'
-   apiVersion: k8s.keycloak.org/v2alpha1
+   apiVersion: k8s.keycloak.org/v2beta1
    kind: Keycloak
    metadata:
      name: keycloak
