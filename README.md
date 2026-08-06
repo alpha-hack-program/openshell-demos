@@ -14,9 +14,10 @@
 > follow the official documentation when you're ready to deploy for real.
 
 Everything lives under `demos/`. Each subfolder is a self-contained demo with
-its own README, Helm values, and extra infrastructure. A demo deploys into its
-**own namespace** — check a demo's own `.env`/README for which namespace it
-actually targets.
+its own README, Helm values, and extra infrastructure. Every demo uses the
+same Helm release name (`openshell`) but deploys into its **own namespace**
+(`OPENSHELL_NAMESPACE` in each demo's `.env`) — the namespace is what keeps
+demos isolated from each other on the same cluster.
 
 Start with [`demos/base/README.md`](demos/base/README.md) for a from-scratch
 install. Once that's green, pick another demo.

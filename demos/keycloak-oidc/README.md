@@ -133,8 +133,20 @@ Copy the example files and fill in your values:
 ```bash
 # From the repo root:
 cp .env.example .env
-# Edit .env — set OPENSHELL_CHART_VERSION and CLUSTER_APPS_DOMAIN
+```
 
+Extract `CLUSTER_APPS_DOMAIN` from the cluster (you must be logged in — see
+[step 0](#0-log-into-your-openshift-cluster)):
+
+```bash
+CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
+```
+
+Edit the root `.env` and set `OPENSHELL_CHART_VERSION` and paste the
+`CLUSTER_APPS_DOMAIN` value from above.
+
+```bash
 # From this demo directory:
 cp .env.example .env
 # Edit .env — values are listed below

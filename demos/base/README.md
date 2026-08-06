@@ -303,28 +303,7 @@ git clone https://github.com/alpha-hack-program/openshell-demos.git
 cd openshell-demos/demos/base
 ```
 
-### 2. Create your `.env` files
-
-Copy the example files and fill in the real values:
-
-```bash
-# Root .env — cluster-wide variables
-cp ../../.env.example ../../.env
-# Edit ../../.env and set OPENSHELL_CHART_VERSION and CLUSTER_APPS_DOMAIN
-
-# Demo .env — demo-specific variables
-cp .env.example .env
-# Review .env — defaults are fine for most setups
-```
-
-The `.env.example` ships with `OPENSHELL_ROUTE=true` because the **passthrough
-Route is the recommended path** for this demo. It exposes the gateway over the
-network so you don't need an active `oc port-forward` terminal, and it
-preserves HTTP/2 end-to-end for gRPC (see
-[How OpenShell networking works](#how-openshell-networking-works)). If you
-prefer a local-only setup, set `OPENSHELL_ROUTE=false` in your `.env`.
-
-### 3. Log into your OpenShift cluster
+### 2. Log into your OpenShift cluster
 
 Make sure you're logged in with a user that has **cluster-admin** rights (or
 at least the ability to grant SCCs and create namespaces):
@@ -336,6 +315,39 @@ oc whoami   # confirm you're logged in
 
 The install scripts use `oc` and `helm` commands that target this cluster. If
 you're not logged in, they will fail.
+
+### 3. Create your `.env` files
+
+Copy the example files and fill in the real values:
+
+```bash
+# Root .env — cluster-wide variables
+cp ../../.env.example ../../.env
+```
+
+Extract `CLUSTER_APPS_DOMAIN` from the cluster so you don't have to type it
+manually:
+
+```bash
+CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
+```
+
+Edit `../../.env` and set `OPENSHELL_CHART_VERSION` and paste the
+`CLUSTER_APPS_DOMAIN` value from above.
+
+```bash
+# Demo .env — demo-specific variables
+cp .env.example .env
+# Review .env — defaults are fine for most setups
+```
+
+The `.env.example` ships with `OPENSHELL_ROUTE=true` because the **passthrough
+Route is the recommended path** for this demo. It exposes the gateway over the
+network so you don't need an active `oc port-forward` terminal, and it
+preserves HTTP/2 end-to-end for gRPC (see
+[How OpenShell networking works](#how-openshell-networking-works)). If you
+prefer a local-only setup, set `OPENSHELL_ROUTE=false` in your `.env`.
 
 ### 4. Run the install scripts
 
