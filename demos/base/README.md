@@ -333,8 +333,17 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-Edit `../../.env` and set `OPENSHELL_CHART_VERSION` and paste the
-`CLUSTER_APPS_DOMAIN` value from above.
+To find the latest chart version, check the
+[OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
+tag uses a `v` prefix (e.g. `v0.0.97`) but the chart version does **not**
+(e.g. `0.0.97`). You can also query it directly:
+
+```bash
+helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
+```
+
+Edit `../../.env` and set `OPENSHELL_CHART_VERSION` (without the `v` prefix)
+and paste the `CLUSTER_APPS_DOMAIN` value from above.
 
 ```bash
 # Demo .env — demo-specific variables
