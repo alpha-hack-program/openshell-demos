@@ -594,6 +594,16 @@ when creating the `byo-openai` provider instance in the next step:
 openshell provider profile import --file providers/openai-profile.yaml
 ```
 
+You can verify it was imported by listing all available profiles:
+
+```bash
+openshell provider list-profiles
+```
+
+You should see the `openai` profile under **INFERENCE** with `source: user`
+— that's the one you just imported. The rest are built-in profiles that ship
+with OpenShell (AWS Bedrock, NVIDIA, Claude Code, GitHub, etc.).
+
 ### 3. Create a provider instance
 
 A **provider instance** is a concrete credential tied to a profile. It holds
