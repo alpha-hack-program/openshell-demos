@@ -1,6 +1,7 @@
 name: CI onboard CLI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ['util/onboard/**']
