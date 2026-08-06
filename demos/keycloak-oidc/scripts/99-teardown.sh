@@ -2,12 +2,16 @@
 set -euo pipefail
 : "${OPENSHELL_NAMESPACE:?set in .env}"
 
+GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
+KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
+
 echo "=== Teardown: demos/keycloak-oidc ==="
-echo "Namespace: $OPENSHELL_NAMESPACE"
+echo "Namespace:          $OPENSHELL_NAMESPACE"
+echo "Keycloak namespace: $KEYCLOAK_NAMESPACE"
+echo "Gateway:            $GATEWAY_NAME"
 echo
 
 # --- Remove openshell CLI gateway registration ----------------------------------
-GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
 if openshell gateway list 2>/dev/null | grep -q "$GATEWAY_NAME"; then
   echo "Removing openshell gateway '$GATEWAY_NAME'..."
   openshell gateway remove "$GATEWAY_NAME" || true
@@ -57,6 +61,14 @@ if oc get ns spire &>/dev/null; then
   oc delete ns spire
 fi
 
+# --- Delete Keycloak namespace --------------------------------------------------
+if oc get ns "$KEYCLOAK_NAMESPACE" &>/dev/null; then
+  echo "Deleting Keycloak namespace $KEYCLOAK_NAMESPACE..."
+  oc delete ns "$KEYCLOAK_NAMESPACE"
+else
+  echo "Keycloak namespace $KEYCLOAK_NAMESPACE does not exist (already removed?)."
+fi
+
 # --- Delete demo namespace (removes all remaining resources) --------------------
 if oc get ns "$OPENSHELL_NAMESPACE" &>/dev/null; then
   echo "Deleting namespace $OPENSHELL_NAMESPACE..."
@@ -67,6 +79,3 @@ fi
 
 echo
 echo "Teardown complete. Cluster and local state for demos/keycloak-oidc have been removed."
-echo
-echo "NOTE: Keycloak realm/users were created manually and must be removed"
-echo "separately if you want a full reset (Keycloak admin console or kcadm.sh)."

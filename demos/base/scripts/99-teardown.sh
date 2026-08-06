@@ -2,10 +2,11 @@
 set -euo pipefail
 : "${OPENSHELL_NAMESPACE:?set in .env}"
 
-GATEWAY_NAME="openshift"
+GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
 
 echo "=== Teardown: demos/base ==="
 echo "Namespace: $OPENSHELL_NAMESPACE"
+echo "Gateway:   $GATEWAY_NAME"
 echo
 
 # --- Kill any local port-forward ------------------------------------------------
