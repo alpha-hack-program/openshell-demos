@@ -301,6 +301,11 @@ usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
+This step installs the OpenShell gateway into its own namespace via Helm
+(2a), exposes it outside the cluster with an OpenShift passthrough Route so
+the CLI can reach it (2b), and then extracts the mTLS client certificates
+and registers the gateway endpoint with the `openshell` CLI (2c).
+
 > **If you already have another OpenShell installation** on the same cluster
 > (the base demo, a previous run of this demo in a different namespace, etc.),
 > the Helm install below will fail because the chart creates cluster-scoped
