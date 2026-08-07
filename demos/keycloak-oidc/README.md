@@ -301,6 +301,15 @@ usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
+> **If you already have another OpenShell installation** on the same cluster
+> (the base demo, a previous run of this demo in a different namespace, etc.),
+> the Helm install below will fail because the chart creates cluster-scoped
+> resources (`openshell-node-reader` ClusterRole **and** ClusterRoleBinding)
+> that are already owned by the other release. **Tear down the previous
+> installation first** — e.g. `demos/base/scripts/99-teardown.sh` for the
+> base demo, or `demos/keycloak-oidc/scripts/99-teardown.sh` for a prior run
+> of this demo.
+
 #### 2a. Helm install
 
 The helm values at `helm/values.yaml` contain a `<keycloak-host>` placeholder
@@ -326,31 +335,6 @@ Wait for the gateway to come up:
 ```bash
 oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 ```
-
-> **If you already ran the base demo** on the same cluster, the `helm install`
-> will fail because the chart creates cluster-scoped resources
-> (`openshell-node-reader` ClusterRole **and** ClusterRoleBinding) that are
-> already owned by the base demo's release. Either tear down the base demo
-> first (`demos/base/scripts/99-teardown.sh`), or re-label both resources so
-> this release can adopt them:
->
-> ```bash
-> # Re-label the ClusterRole
-> oc annotate clusterrole openshell-node-reader \
->   meta.helm.sh/release-name=openshell \
->   meta.helm.sh/release-namespace="$OPENSHELL_NAMESPACE" --overwrite
-> oc label clusterrole openshell-node-reader \
->   app.kubernetes.io/managed-by=Helm --overwrite
->
-> # Re-label the ClusterRoleBinding
-> oc annotate clusterrolebinding openshell-node-reader \
->   meta.helm.sh/release-name=openshell \
->   meta.helm.sh/release-namespace="$OPENSHELL_NAMESPACE" --overwrite
-> oc label clusterrolebinding openshell-node-reader \
->   app.kubernetes.io/managed-by=Helm --overwrite
-> ```
->
-> Then re-run the `helm upgrade --install` command above.
 
 #### 2b. Expose the gateway via a passthrough Route
 
