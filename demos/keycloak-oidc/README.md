@@ -422,7 +422,11 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
 
 openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
-openshell gateway add "https://${ROUTE_HOST}:443" --local --name "$GATEWAY_NAME"
+openshell gateway add "https://${ROUTE_HOST}:443" \
+  --name "$GATEWAY_NAME" \
+  --oidc-issuer "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  --oidc-client-id "$KEYCLOAK_CLIENT_ID_CLI" \
+  --oidc-scopes "openid offline_access"
 ```
 
 #### 2d. Log in to the gateway
@@ -431,7 +435,7 @@ The gateway requires OIDC authentication — you must log in before you can
 run any admin commands. This opens a browser and redirects you to Keycloak:
 
 ```bash
-openshell auth login
+openshell gateway login
 ```
 
 Log in as the admin user (the one with the `openshell-admin` realm role).
