@@ -425,7 +425,18 @@ openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
 openshell gateway add "https://${ROUTE_HOST}:443" --local --name "$GATEWAY_NAME"
 ```
 
-#### 2d. Enable Providers v2
+#### 2d. Log in to the gateway
+
+The gateway requires OIDC authentication — you must log in before you can
+run any admin commands. This opens a browser and redirects you to Keycloak:
+
+```bash
+openshell auth login
+```
+
+Log in as the admin user (the one with the `openshell-admin` realm role).
+
+#### 2e. Enable Providers v2
 
 ```bash
 openshell settings set --global --key providers_v2_enabled --value true
@@ -438,10 +449,7 @@ openshell status
 openshell gateway list
 ```
 
-`openshell status` should show the new gateway URL
-(`openshell-<namespace>.apps.…`) and — once OIDC is properly configured —
-prompt for a Keycloak login instead of the mTLS-only mode you saw with the
-base demo.
+`openshell status` should show the gateway as connected and authenticated.
 
 > The script `scripts/02-apply-oidc-overlay.sh` runs the helm install
 > commands from step 2a. The Route, mTLS, and gateway registration steps
