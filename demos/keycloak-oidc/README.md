@@ -383,7 +383,8 @@ oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 Extract the client mTLS certificates and register the gateway:
 
 ```bash
-MTLS_DIR=~/.config/openshell/gateways/openshift/mtls
+GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
+MTLS_DIR=~/.config/openshell/gateways/${GATEWAY_NAME}/mtls
 mkdir -p "$MTLS_DIR"
 
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
@@ -393,8 +394,8 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
 
-openshell gateway remove openshift 2>/dev/null || true
-openshell gateway add "https://${ROUTE_HOST}:443" --local --name openshift
+openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
+openshell gateway add "https://${ROUTE_HOST}:443" --local --name "$GATEWAY_NAME"
 ```
 
 #### 2d. Enable Providers v2
