@@ -373,7 +373,7 @@ helm upgrade openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --namespace "$OPENSHELL_NAMESPACE" \
   -f helm/values.yaml \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
-  --set "server.tls.additionalSANs={${ROUTE_HOST}}"
+  --set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}"
 
 oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 ```
