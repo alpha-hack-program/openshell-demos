@@ -317,9 +317,18 @@ and registers the gateway endpoint with the `openshell` CLI (2c).
 
 #### 2a. Helm install
 
-The helm values at `helm/values.yaml` contain a `<keycloak-host>` placeholder
-in the OIDC issuer URL. Use `--set` to substitute it with your real Keycloak
-hostname at install time:
+This demo provides two Helm values files:
+
+- **`helm/values.yaml`** — uses the PKI init job to generate TLS certificates
+  (default, no extra dependencies).
+- **`helm/values-certmanager.yaml`** — uses the OpenShift cert-manager
+  Operator to manage TLS certificates. Requires the cert-manager Operator to
+  be installed on the cluster. Set `CERT_MANAGER=true` in your `.env` to use
+  this path.
+
+Both files contain a `<keycloak-host>` placeholder in the OIDC issuer URL.
+Use `--set` to substitute it with your real Keycloak hostname at install
+time.
 
 ```bash
 source .env
@@ -328,10 +337,16 @@ source ../../.env
 oc create namespace "$OPENSHELL_NAMESPACE" 2>/dev/null || true
 oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAMESPACE"
 
+if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
+  VALUES_FILE=helm/values-certmanager.yaml
+else
+  VALUES_FILE=helm/values.yaml
+fi
+
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
-  -f helm/values.yaml \
+  -f "$VALUES_FILE" \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
 ```
 
@@ -368,12 +383,24 @@ oc -n "$OPENSHELL_NAMESPACE" delete secret \
   openshell-server-tls openshell-client-tls openshell-jwt-keys
 
 # Re-deploy so the gateway generates new certs that include the Route hostname
+if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
+  VALUES_FILE=helm/values-certmanager.yaml
+  SAN_SET=(
+    --set "certManager.serverDnsNames[2]=openshell.${OPENSHELL_NAMESPACE}.svc"
+    --set "certManager.serverDnsNames[3]=openshell.${OPENSHELL_NAMESPACE}.svc.cluster.local"
+    --set "certManager.serverDnsNames[4]=${ROUTE_HOST}"
+  )
+else
+  VALUES_FILE=helm/values.yaml
+  SAN_SET=(--set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}")
+fi
+
 helm upgrade openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
-  -f helm/values.yaml \
+  -f "$VALUES_FILE" \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
-  --set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}"
+  "${SAN_SET[@]}"
 
 oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 ```

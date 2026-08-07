@@ -1,0 +1,40 @@
+# OpenShift-compatibility overrides + cert-manager + OIDC for the keycloak-oidc demo.
+#
+# Use this instead of values.yaml when the OpenShift cert-manager Operator is
+# installed and you want cert-manager to manage server and client TLS
+# certificates. The PKI init job still runs in JWT-only mode to generate
+# the Ed25519 sandbox signing keys — do NOT set pkiInitJob.enabled: false.
+#
+# The install commands in the README append namespace-specific DNS names via
+# --set overrides. If running helm manually, you must add them yourself —
+# especially the route FQDN, without which TLS handshakes will fail.
+
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null
+
+certManager:
+  enabled: true
+  caSecretName: openshell-ca-tls
+  clientCaFromServerTlsSecret: true
+  certificateDuration: 8760h       # 1 year
+  certificateRenewBefore: 720h     # 30 days
+  serverDnsNames:
+    - openshell
+    - "127.0.0.1"
+    # The README commands append (via --set) based on your .env:
+    #   [2] openshell.$OPENSHELL_NAMESPACE.svc
+    #   [3] openshell.$OPENSHELL_NAMESPACE.svc.cluster.local
+    #   [4] $ROUTE_HOST  (the passthrough Route FQDN)
+
+server:
+  auth:
+    allowUnauthenticatedUsers: false
+  oidc:
+    issuer: "https://<keycloak-host>/realms/openshell"     # fill in via --set
+    audience: "openshell-cli"
+    rolesClaim: "realm_access.roles"
+    adminRole: "openshell-admin"
+    userRole: "openshell-user"
