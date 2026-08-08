@@ -23,7 +23,7 @@
       "clientId": "openshell-gateway",
       "publicClient": false,
       "protocol": "openid-connect",
-      "secret": "__REPLACE_AT_DEPLOY_TIME__",
+      "secret": "openshell-gateway-demo-secret",
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false

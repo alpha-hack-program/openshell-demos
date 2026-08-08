@@ -93,8 +93,9 @@ a parent directory for others.
   `.env` with demo-specific variables — at minimum `OPENSHELL_NAMESPACE`.
   Every `.env.example` lists variable names only. Real values go in a
   gitignored `.env` (or a secret manager) at the same level, never
-  committed. Realm exports / client configs use `.template.` filenames with
-  placeholder values, substituted at deploy time by a script.
+  committed. Realm exports use hardcoded demo-only credentials (see each
+  demo's README for details); in production, generate unique secrets per
+  environment.
 - **Script numbering:** `00-`, `01-`, `02-`, ... reflects run order within a
   folder.
 - **Idempotency:** scripts should be safe to re-run (`get || create` patterns,

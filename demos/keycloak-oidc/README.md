@@ -91,8 +91,10 @@ flowchart TB
 
 - `helm/values.yaml` — OpenShift-compatibility overrides plus OIDC
   configuration (`server.oidc.*`, `allowUnauthenticatedUsers: false`).
-- A Keycloak realm (`keycloak/realm-export.template.json`) with CLI and
-  gateway clients, admin/user roles, and a few demo users.
+- A Keycloak realm (`keycloak/realm-export.json`) with CLI and
+  gateway clients, admin/user roles, and a few demo users. The gateway
+  client secret is hardcoded (`openshell-gateway-demo-secret`) — in a
+  production setup you would generate a unique secret per environment.
 - Providers v2 enabled (`providers_v2_enabled=true`).
 - A per-user provider profile and onboarding flow.
 - Two example MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars
@@ -197,20 +199,19 @@ after it runs, so you'll come back and complete your `.env` then.
 
 ### 1. Deploy Keycloak
 
-#### 1a. Prepare the realm JSON
+#### 1a. Check the realm JSON
+
+The realm JSON at `keycloak/realm-export.json` is ready to import as-is —
+no substitution needed. The gateway client secret is hardcoded as
+`openshell-gateway-demo-secret` (along with demo user passwords
+`user1`/`user1`, `user2`/`user2`). This keeps the demo simple; in
+production you would generate a unique secret per environment.
+
+Optionally, run the helper script to verify your `.env` values match:
 
 ```bash
 ./scripts/01-deploy-keycloak.sh
 ```
-
-The script derives `KEYCLOAK_HOST` from `CLUSTER_APPS_DOMAIN` (in the root
-`.env`) and generates a random client secret. It prepares a realm JSON file
-with the secret substituted and prints all the values you need — **copy them
-into your `.env` file now**.
-
-> **Take note of the realm JSON path** printed by the script (e.g.
-> `/tmp/tmp.XXXXXX`) — you will need it in step 1c to import the realm into
-> Keycloak after it's deployed.
 
 #### 1b. Deploy Keycloak on the cluster
 
@@ -285,14 +286,36 @@ OperatorHub on OpenShift.
 
 #### 1c. Import the realm JSON
 
-Import the realm JSON you saved in step 1a into Keycloak via the admin
-console:
+Import the realm JSON into Keycloak via the admin console or the Admin
+REST API.
+
+**Option A — Admin console (browser):**
 
 1. Open `https://<KEYCLOAK_HOST>/admin` in your browser (use the admin
    credentials you extracted in step 1b).
 2. In the left sidebar, click **Manage realms**, then click **Create realm**.
-3. Click **Browse**, select the realm JSON file from step 1a (the path
-   printed by the script, e.g. `/tmp/tmp.XXXXXX`), and click **Create**.
+3. Click **Browse**, select `keycloak/realm-export.json`, and click
+   **Create**.
+
+**Option B — Admin REST API (CLI):**
+
+```bash
+source .env
+
+ADMIN_TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password" \
+  -d "client_id=admin-cli" \
+  -d "username=${KEYCLOAK_ADMIN_USER}" \
+  -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
+  | jq -r '.access_token')
+
+curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/admin/realms" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d @keycloak/realm-export.json
+```
 
 The realm template includes two demo users (`user1` / `user2`) with the
 `openshell-user` role and `offline_access` scope — they're created
@@ -915,9 +938,9 @@ Codex (in sandbox)
 
 ## Secrets and security notes
 
-- Nothing under `keycloak/`, `providers/`, or `.env` should ever contain a real
-  secret in git. `keycloak/realm-export.template.json` uses a placeholder that
-  `scripts/01-deploy-keycloak.sh` substitutes at deploy time only.
+- The gateway client secret in `keycloak/realm-export.json` is a hardcoded
+  demo value (`openshell-gateway-demo-secret`). In production, generate a
+  unique secret per environment and never commit it to git.
 - `openshell provider refresh configure` supports `--secret-material-key` to
   mark values as sensitive at the gateway — used for `refresh_token` in the
   onboarding commands. No `client_secret` is needed because the refresh token
