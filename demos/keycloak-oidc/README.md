@@ -684,8 +684,9 @@ Assign role) or the Admin REST API.
 
 ### 5. Run the demo
 
-Create a sandbox, verify that outbound calls are blocked by default, then
-attach the user's provider and grant access to a real MCP server.
+Create a sandbox, attach the user's provider and network policy, then
+verify that MCP calls succeed with the user's own scoped token — and that
+cross-user isolation holds.
 
 ```bash
 source .env
@@ -694,62 +695,80 @@ SERVER_NAME="mcp-server-a"
 MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 ```
 
-**Create the sandbox** — no provider attached yet, so all outbound calls are
-blocked:
+**Create the sandbox and attach the provider.** The `-- true` creates the
+sandbox without entering an interactive shell — we use `exec` to run
+commands inside it. Host-side variables like `$MCP_URL` are not available
+inside the sandbox, so pass them via `exec --env`:
 
 ```bash
-openshell sandbox create --name "demo-${USER_ID}"
+openshell sandbox create --name "demo-${USER_ID}" -- true
+
+openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
 ```
 
-Try to reach the MCP server from the sandbox — it should fail. Host-side
-variables like `$MCP_URL` are not available inside the sandbox, so pass it
-in via `exec --env`:
+**Test without a network policy** — the sandbox can reach in-cluster
+services, but Envoy rejects the request because no token is presented
+(the policy hasn't granted curl access to the endpoint yet):
 
 ```bash
 openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
-  -- curl -sS "$MCP_URL"
-# Expected: blocked by policy — the sandbox has no network access
+  -- bash -c 'curl -so /dev/null -w "%{http_code}" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+# Expected: 401 — no token presented
 ```
 
-Now **attach the user's provider and add a network policy** for the MCP
-server:
+**Add a network policy** for the MCP server and authorize the user:
 
 ```bash
-openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
-
 openshell policy update "demo-${USER_ID}" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/bin/curl --wait
+
+./scripts/07-authorize-mcp-user.sh "${USER_ID}" "${SERVER_NAME}"
 ```
 
 Note that network policies are applied per-sandbox via `openshell policy
 update`, not in the provider profile. The profile defines *how* to refresh
 credentials; the policy defines *where* the sandbox can connect.
 
-**Authorize the user for the MCP server** — confirm they hold the required
-Keycloak realm role, then grant the sandbox endpoint:
-
-```bash
-export KEYCLOAK_ADMIN_TOKEN=...   # obtain via your own admin login
-./scripts/07-authorize-mcp-user.sh user1 mcp-server-a
-```
-
-**Reconnect and verify** — the same curl should now succeed, with the
-request carrying this user's own scoped access token:
+**Verify** — the same request with the user's token should now succeed.
+`$USER_ACCESS_TOKEN` is injected into the sandbox by the provider:
 
 ```bash
 openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -H "Authorization: Bearer $USER_ACCESS_TOKEN" "$MCP_URL"'
-# Expected: success — the MCP server validates the token and returns a response
-# $USER_ACCESS_TOKEN is injected by the provider; $MCP_URL is passed via --env
+  -- bash -c 'curl -sS \
+    -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — MCP server returns its capabilities
 ```
 
-**Isolation check:** open a second terminal, set `USER_ID="user2"` and
-`SERVER_NAME="mcp-server-b"`, and repeat the process above (onboard user2
-first if you haven't already). Keep user1's sandbox running in the first
-terminal. Confirm:
-- user1 can reach `mcp-server-a` but gets `403` from `mcp-server-b`
-- user2 can reach `mcp-server-b` but gets `403` from `mcp-server-a`
+**Isolation check** — user1 should not be able to reach `mcp-server-b`
+(different realm role required):
+
+```bash
+openshell sandbox exec -n "demo-${USER_ID}" \
+  -- bash -c 'curl -so /dev/null -w "%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "http://mcp-server-b.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"'
+# Expected: 403 — valid token, but user1 lacks the mcp-server-b-user role
+```
+
+To test the other direction, open a second terminal and repeat with
+`USER_ID="user2"` and `SERVER_NAME="mcp-server-b"` (onboard user2 first
+if you haven't already). Confirm user2 can reach `mcp-server-b` (`200`)
+but gets `403` from `mcp-server-a`.
 
 #### Test recipe: Claude Code + BYO LLM + MCP tool
 
