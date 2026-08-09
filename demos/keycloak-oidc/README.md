@@ -795,7 +795,29 @@ export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
 LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 ```
 
-1. Import the Claude Code provider profile and create the provider:
+1. Import the Claude Code provider profile and create the provider.
+
+   The profile ([`providers/byo-claude-profile.yaml`](providers/byo-claude-profile.yaml))
+   tells OpenShell how to inject your LLM API key into the sandbox as
+   `ANTHROPIC_API_KEY` — the environment variable Claude Code expects:
+
+   ```yaml
+   id: byo-claude
+   display_name: BYO LLM (Claude Code compatible)
+   description: OpenAI-compatible LLM for Claude Code
+   category: inference
+   inference_capable: true
+
+   credentials:
+     - name: api_key
+       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
+       env_vars: [ANTHROPIC_API_KEY]
+       required: true
+       auth_style: header
+       header_name: x-api-key
+   ```
+
+   Import it and create a provider instance with your key:
 
    ```bash
    openshell provider profile import -f providers/byo-claude-profile.yaml
@@ -860,7 +882,42 @@ credentials at the proxy boundary and injects the real API key server-side.
    ```
 
 2. Import the Codex policy profile and create a second provider for binary
-   permissions:
+   permissions.
+
+   The profile ([`providers/byo-codex-profile.yaml`](providers/byo-codex-profile.yaml))
+   defines which binaries Codex needs (`codex`, its Node modules), locks
+   network access to `inference.local:443` (the OpenShell privacy router),
+   and injects the API key as `OPENAI_API_KEY`:
+
+   ```yaml
+   id: byo-codex
+   display_name: BYO LLM (Codex policy)
+   description: Network policy and binary permissions for Codex via inference.local
+   category: inference
+   inference_capable: true
+
+   credentials:
+     - name: api_key
+       description: LLM API key (injected as OPENAI_API_KEY for Codex)
+       env_vars: [OPENAI_API_KEY]
+       required: true
+       auth_style: bearer
+       header_name: authorization
+
+   endpoints:
+     - host: inference.local
+       port: 443
+       protocol: rest
+       access: read-write
+       enforcement: enforce
+
+   binaries:
+     - /usr/bin/codex
+     - /usr/local/bin/codex
+     - /usr/lib/node_modules/@openai/**
+   ```
+
+   Import it and create the provider:
 
    ```bash
    openshell provider profile import -f providers/byo-codex-profile.yaml
