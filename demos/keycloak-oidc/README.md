@@ -907,11 +907,25 @@ Codex (in sandbox)
       → Envoy checks JWT + realm role → app
 ```
 
-**Now repeat with user2.** Run the same recipe with `USER_ID="user2"` and
-`SERVER_NAME="mcp-server-b"` (onboard user2 first if you haven't already —
-see step 3). Confirm user2's sandbox can reach `mcp-server-b` but **not**
-`mcp-server-a`, proving that the per-user credential isolation works
-end to end through the agentic coding tool.
+**Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
+Compatibility Engine — tax calculation, housing grants, voting eligibility,
+etc.). Start from step 3 with different variables and a question that
+exercises `mcp-server-b`'s `calc_tax` tool:
+
+```bash
+USER_ID="user2"
+SERVER_NAME="mcp-server-b"
+```
+
+Then run steps 3-5 above. In step 5, replace the prompt with a tax question:
+
+```
+"What is the tax liability for an income of 90000?"
+```
+
+Confirm user2's sandbox can reach `mcp-server-b` (`200`) but **not**
+`mcp-server-a` (`403`), proving that the per-user credential isolation
+works end to end through the agentic coding tool.
 
 Alternatively, run the isolation verification script to test all four
 user/server combinations automatically:
