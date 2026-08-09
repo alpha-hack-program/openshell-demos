@@ -795,25 +795,10 @@ export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
 LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 ```
 
-1. Generate a Claude Code provider profile for your LLM and import it:
+1. Import the Claude Code provider profile and create the provider:
 
    ```bash
-   cat > /tmp/byo-claude-profile.yaml << EOF
-   id: byo-claude
-   display_name: BYO LLM (Claude Code compatible)
-   description: OpenAI-compatible LLM for Claude Code
-   category: inference
-   inference_capable: true
-   credentials:
-     - name: api_key
-       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
-       env_vars: [ANTHROPIC_API_KEY]
-       required: true
-       auth_style: header
-       header_name: x-api-key
-   EOF
-
-   openshell provider profile import -f /tmp/byo-claude-profile.yaml
+   openshell provider profile import -f providers/byo-claude-profile.yaml
    openshell provider create --name byo-claude --type byo-claude \
      --credential "ANTHROPIC_API_KEY=$OPENAI_API_KEY"
    ```
@@ -874,36 +859,11 @@ credentials at the proxy boundary and injects the real API key server-side.
      --timeout 120
    ```
 
-2. Generate a Codex policy profile and create a second provider for binary
+2. Import the Codex policy profile and create a second provider for binary
    permissions:
 
    ```bash
-   cat > /tmp/byo-codex-profile.yaml << EOF
-   id: byo-codex
-   display_name: BYO LLM (Codex policy)
-   description: Network policy and binary permissions for Codex via inference.local
-   category: inference
-   inference_capable: true
-   credentials:
-     - name: api_key
-       description: LLM API key (injected as OPENAI_API_KEY for Codex)
-       env_vars: [OPENAI_API_KEY]
-       required: true
-       auth_style: bearer
-       header_name: authorization
-   endpoints:
-     - host: inference.local
-       port: 443
-       protocol: rest
-       access: read-write
-       enforcement: enforce
-   binaries:
-     - /usr/bin/codex
-     - /usr/local/bin/codex
-     - /usr/lib/node_modules/@openai/**
-   EOF
-
-   openshell provider profile import -f /tmp/byo-codex-profile.yaml
+   openshell provider profile import -f providers/byo-codex-profile.yaml
    openshell provider create --name byo-codex --type byo-codex \
      --credential "OPENAI_API_KEY=$OPENAI_API_KEY"
    ```
