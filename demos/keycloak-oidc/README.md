@@ -676,47 +676,11 @@ source .env
 This deploys `mcp-server-a` and `mcp-server-b` into `$OPENSHELL_NAMESPACE`
 as two-container pods (Envoy + the app), each with its own ServiceAccount.
 
-Before moving to step 5, assign the MCP server roles to your demo users in
-Keycloak. You can do this via the admin console (Users > select user >
-Role mapping > Assign role) or via the Admin REST API:
-
-```bash
-source .env
-
-ADMIN_TOKEN=$(curl -sk -X POST \
-  "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
-  -d "grant_type=password" \
-  -d "client_id=admin-cli" \
-  -d "username=${KEYCLOAK_ADMIN_USER}" \
-  -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
-  | jq -r '.access_token')
-
-# Grant mcp-server-a-user to user1
-USER1_UUID=$(curl -sk \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=user1&exact=true" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
-ROLE_A=$(curl -sk \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/roles/mcp-server-a-user" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}")
-curl -sk -X POST \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users/${USER1_UUID}/role-mappings/realm" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "[${ROLE_A}]"
-
-# Grant mcp-server-b-user to user2
-USER2_UUID=$(curl -sk \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=user2&exact=true" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
-ROLE_B=$(curl -sk \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/roles/mcp-server-b-user" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}")
-curl -sk -X POST \
-  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users/${USER2_UUID}/role-mappings/realm" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "[${ROLE_B}]"
-```
+The MCP server roles are already assigned to the demo users in the realm
+JSON imported in step 1c (`mcp-server-a-user` → `user1`,
+`mcp-server-b-user` → `user2`). If you need to assign roles to additional
+users, use the Keycloak admin console (Users > select user > Role mapping >
+Assign role) or the Admin REST API.
 
 ### 5. Run the demo
 
@@ -737,12 +701,13 @@ blocked:
 openshell sandbox create --name "demo-${USER_ID}" -- bash
 ```
 
-Connect to the sandbox and try to reach the MCP server — it should fail:
+Connect to the sandbox and try to reach the MCP server — it should fail.
+Host-side variables like `$MCP_URL` are not available inside the sandbox,
+so pass it in via `exec --env` or use the literal URL:
 
 ```bash
-openshell sandbox connect "demo-${USER_ID}"
-# Inside the sandbox:
-curl -sS "$MCP_URL"
+openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
+  -- curl -sS "$MCP_URL"
 # Expected: blocked by policy — the sandbox has no network access
 ```
 
@@ -773,10 +738,10 @@ export KEYCLOAK_ADMIN_TOKEN=...   # obtain via your own admin login
 request carrying this user's own scoped access token:
 
 ```bash
-openshell sandbox connect "demo-${USER_ID}"
-# Inside the sandbox:
-curl -sS -H "Authorization: Bearer $USER_ACCESS_TOKEN" "$MCP_URL"
+openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -H "Authorization: Bearer $USER_ACCESS_TOKEN" "$MCP_URL"'
 # Expected: success — the MCP server validates the token and returns a response
+# $USER_ACCESS_TOKEN is injected by the provider; $MCP_URL is passed via --env
 ```
 
 **Isolation check:** open a second terminal, set `USER_ID="user2"` and

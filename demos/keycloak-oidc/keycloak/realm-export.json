@@ -62,7 +62,7 @@
       "email": "user1@demo.local",
       "emailVerified": true,
       "credentials": [{ "type": "password", "value": "user1", "temporary": false }],
-      "realmRoles": ["openshell-user", "offline_access"]
+      "realmRoles": ["openshell-user", "offline_access", "mcp-server-a-user"]
     },
     {
       "username": "user2",
@@ -72,7 +72,7 @@
       "email": "user2@demo.local",
       "emailVerified": true,
       "credentials": [{ "type": "password", "value": "user2", "temporary": false }],
-      "realmRoles": ["openshell-user", "offline_access"]
+      "realmRoles": ["openshell-user", "offline_access", "mcp-server-b-user"]
     }
   ]
 }
