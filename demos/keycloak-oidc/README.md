@@ -937,10 +937,10 @@ user/server combinations automatically:
 Expected output:
 
 ```
-PASS  user1 → mcp-server-a  HTTP 200 (expected 200)
+PASS  user1 → mcp-server-a (evaluate_unpaid_leave_eligibility)  HTTP 200 (expected 200)
 PASS  user1 → mcp-server-b  HTTP 403 (expected 403)
 PASS  user2 → mcp-server-a  HTTP 403 (expected 403)
-PASS  user2 → mcp-server-b  HTTP 200 (expected 200)
+PASS  user2 → mcp-server-b (calc_tax)  HTTP 200 (expected 200)
 
 Results: 4 passed, 0 failed
 ```
