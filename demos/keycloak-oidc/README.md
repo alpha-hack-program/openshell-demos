@@ -713,9 +713,8 @@ the sandbox:
 openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
 ```
 
-**Test without a network policy** — the sandbox can reach in-cluster
-services, but Envoy rejects the request because no token is presented
-(the policy hasn't granted curl access to the endpoint yet):
+**Test without the Authorization header** — the request reaches the MCP
+server but Envoy's RBAC filter rejects it:
 
 ```bash
 openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
@@ -725,7 +724,7 @@ openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
     "$MCP_URL"'
-# Expected: 401 — no token presented
+# Expected: 403 — request rejected by Envoy
 ```
 
 **Add a network policy** for the MCP server and authorize the user:
