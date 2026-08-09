@@ -751,17 +751,20 @@ openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
 ```
 
 **Isolation check** — user1 should not be able to reach `mcp-server-b`
-(different realm role required):
+(different realm role required). Note: use `--env` to pass host-side
+variables into the sandbox — they are not available inside single quotes:
 
 ```bash
-openshell sandbox exec -n "demo-${USER_ID}" \
+OTHER_MCP_URL="http://mcp-server-b.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n "demo-${USER_ID}" --env "OTHER_MCP_URL=${OTHER_MCP_URL}" \
   -- bash -c 'curl -so /dev/null -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "http://mcp-server-b.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"'
+    "$OTHER_MCP_URL"'
 # Expected: 403 — valid token, but user1 lacks the mcp-server-b-user role
 ```
 
