@@ -789,6 +789,8 @@ OpenAI-compatible LLM.
 **Prerequisites** beyond steps 1-5 above — set these in your terminal:
 
 ```bash
+USER_ID="user1"
+SERVER_NAME="mcp-server-a"
 export OPENAI_API_KEY="<your-key>"
 export OPENAI_BASE_URL="https://<your-provider>/v1"   # e.g. https://api.openai.com/v1
 export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
@@ -865,7 +867,12 @@ Codex CLI** instead of Claude Code. The key architectural difference: Codex
 uses `inference.local` — OpenShell's privacy router — which strips caller
 credentials at the proxy boundary and injects the real API key server-side.
 
-**Prerequisites:** steps 1-5 above, plus the same `OPENAI_*` exports.
+**Prerequisites:** steps 1-5 above, plus the same `OPENAI_*` exports and:
+
+```bash
+USER_ID="user1"
+SERVER_NAME="mcp-server-a"
+```
 
 1. Create the inference provider and configure `inference.local` routing
    (only type `openai` providers can drive `inference.local`):
