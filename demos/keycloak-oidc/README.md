@@ -894,6 +894,14 @@ export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
    '
    ```
 
+   > **Known issue:** Codex v0.117.0's MCP client (`rmcp`) expects plain
+   > JSON-RPC responses, but these MCP servers respond with SSE-wrapped
+   > JSON (`data: {...}`). Codex will connect to `inference.local`
+   > successfully and answer using the model, but the MCP tool call will
+   > fail with `data did not match any variant of untagged enum
+   > JsonRpcMessage`. This is a transport compatibility issue — the model
+   > inference path works correctly regardless.
+
 **Traffic flow:**
 
 ```
@@ -915,7 +923,7 @@ etc.). Set the variables and run steps 3-5 again:
 ```bash
 USER_ID="user2"
 SERVER_NAME="mcp-server-b"
-QUESTION="What is the tax liability for an income of 90000?"
+QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 ```
 
 Confirm user2's sandbox can reach `mcp-server-b` (`200`) but **not**
