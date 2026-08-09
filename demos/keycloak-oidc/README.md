@@ -698,12 +698,12 @@ MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp
 blocked:
 
 ```bash
-openshell sandbox create --name "demo-${USER_ID}" -- bash
+openshell sandbox create --name "demo-${USER_ID}"
 ```
 
-Connect to the sandbox and try to reach the MCP server — it should fail.
-Host-side variables like `$MCP_URL` are not available inside the sandbox,
-so pass it in via `exec --env` or use the literal URL:
+Try to reach the MCP server from the sandbox — it should fail. Host-side
+variables like `$MCP_URL` are not available inside the sandbox, so pass it
+in via `exec --env`:
 
 ```bash
 openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
@@ -711,8 +711,8 @@ openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
 # Expected: blocked by policy — the sandbox has no network access
 ```
 
-Exit the sandbox, then **attach the user's provider and add a network policy**
-for the MCP server:
+Now **attach the user's provider and add a network policy** for the MCP
+server:
 
 ```bash
 openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
