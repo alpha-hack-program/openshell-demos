@@ -907,6 +907,12 @@ Codex (in sandbox)
       → Envoy checks JWT + realm role → app
 ```
 
+**Now repeat with user2.** Run the same recipe with `USER_ID="user2"` and
+`SERVER_NAME="mcp-server-b"` (onboard user2 first if you haven't already —
+see step 3). Confirm user2's sandbox can reach `mcp-server-b` but **not**
+`mcp-server-a`, proving that the per-user credential isolation works
+end to end through the agentic coding tool.
+
 #### Alternative: Claude Code + BYO LLM + MCP tool
 
 > **Requires an Anthropic Messages API endpoint.** Claude Code uses the
