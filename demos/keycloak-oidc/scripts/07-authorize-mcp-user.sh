@@ -24,6 +24,14 @@ SERVER_NAME="${2:?usage: $0 <user-id> <server-name>}"
 : "${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
 
+# ---------------------------------------------------------------------------
+# Step 1 (Keycloak): obtain an admin token to query the Keycloak Admin API.
+#
+# This is a Keycloak-only concern — OpenShell is not involved yet.
+# We authenticate against the *master* realm with the operator-level
+# credentials created by the Keycloak Operator at install time.
+# If KEYCLOAK_ADMIN_TOKEN is already exported, skip this step.
+# ---------------------------------------------------------------------------
 if [[ -z "${KEYCLOAK_ADMIN_TOKEN:-}" ]]; then
   : "${KEYCLOAK_ADMIN_USER:?set KEYCLOAK_ADMIN_USER in .env or export KEYCLOAK_ADMIN_TOKEN}"
   : "${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env or export KEYCLOAK_ADMIN_TOKEN}"
@@ -36,9 +44,20 @@ if [[ -z "${KEYCLOAK_ADMIN_TOKEN:-}" ]]; then
     | jq -r '.access_token')
 fi
 
+# Each MCP server requires a specific Keycloak realm role: the Envoy sidecar
+# in front of the server checks the caller's JWT for this role before
+# forwarding the request to the app. The convention is <server-name>-user.
 REQUIRED_ROLE="${SERVER_NAME}-user"
 SANDBOX_NAME="demo-${USER_ID}"
 
+# ---------------------------------------------------------------------------
+# Step 2 (Keycloak): verify the user holds the required realm role.
+#
+# This is a pre-flight check — the actual enforcement happens at request
+# time in the Envoy sidecar (jwt_authn + rbac filters). If the user
+# doesn't hold the role, we fail fast with a clear message rather than
+# letting them hit a cryptic 403 from Envoy later.
+# ---------------------------------------------------------------------------
 KC_USER_ID=$(curl -sk \
   -H "Authorization: Bearer ${KEYCLOAK_ADMIN_TOKEN}" \
   "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=${USER_ID}&exact=true" \
@@ -55,6 +74,19 @@ if [ "$HAS_ROLE" != "yes" ]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Step 3 (OpenShell): add a network policy to the user's sandbox.
+#
+# This is the OpenShell side. The provider (user-<id>) was already attached
+# to the sandbox — it injects the user's Keycloak access token as
+# $USER_ACCESS_TOKEN inside the sandbox. But the sandbox still can't reach
+# the MCP server until we explicitly allow it via a policy endpoint.
+#
+# openshell policy update adds the MCP server's in-cluster DNS name and
+# port to the sandbox's allow-list. The --binary flag scopes this endpoint
+# to a specific binary (/usr/bin/curl here); only that binary is allowed
+# to connect to this endpoint. --wait blocks until the policy is active.
+# ---------------------------------------------------------------------------
 SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER_NAME" -o jsonpath='{.spec.ports[0].port}')
 openshell policy update "$SANDBOX_NAME" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:${SERVER_PORT}:read-write:rest:enforce" \

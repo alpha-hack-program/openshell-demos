@@ -678,9 +678,9 @@ as two-container pods (Envoy + the app), each with its own ServiceAccount.
 
 The MCP server roles are already assigned to the demo users in the realm
 JSON imported in step 1c (`mcp-server-a-user` → `user1`,
-`mcp-server-b-user` → `user2`). If you need to assign roles to additional
-users, use the Keycloak admin console (Users > select user > Role mapping >
-Assign role) or the Admin REST API.
+`mcp-server-b-user` → `user2`). To onboard additional users beyond the
+two pre-configured ones, see
+[Onboarding additional users](docs/onboard-additional-users.md).
 
 ### 5. Run the demo
 
@@ -727,14 +727,15 @@ openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
 # Expected: 403 — request rejected by Envoy
 ```
 
-**Add a network policy** for the MCP server and authorize the user:
+**Add a network policy** so the sandbox can reach the MCP server. The
+Keycloak roles are already assigned via the realm import (step 1c) — this
+step only needs to tell OpenShell which endpoint the sandbox is allowed to
+connect to:
 
 ```bash
 openshell policy update "demo-${USER_ID}" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/bin/curl --wait
-
-./scripts/07-authorize-mcp-user.sh "${USER_ID}" "${SERVER_NAME}"
 ```
 
 Note that network policies are applied per-sandbox via `openshell policy
@@ -820,11 +821,11 @@ LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 2. Attach the provider and grant network access:
 
    ```bash
-   openshell sandbox provider attach demo-user1 byo-claude
-   openshell policy update demo-user1 \
+   openshell sandbox provider attach "demo-${USER_ID}" byo-claude
+   openshell policy update "demo-${USER_ID}" \
      --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
-     --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
+     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
      --wait
    ```
@@ -832,11 +833,11 @@ LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
 3. Run the test:
 
    ```bash
-   openshell sandbox exec -n demo-user1 \
+   openshell sandbox exec -n "demo-${USER_ID}" \
      --env "ANTHROPIC_BASE_URL=$OPENAI_BASE_URL" \
      --env "ANTHROPIC_MODEL=$OPENAI_MODEL" \
      -- bash -c '
-   MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
+   MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
    claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
      --mcp-config "$MCP_JSON" \
      --strict-mcp-config \
@@ -910,13 +911,13 @@ credentials at the proxy boundary and injects the real API key server-side.
 3. Create and configure the sandbox:
 
    ```bash
-   openshell sandbox create --name codex-user1 \
+   openshell sandbox create --name "codex-${USER_ID}" \
      --provider byo-codex \
-     --provider user-user1 \
+     --provider "user-${USER_ID}" \
      -- true
 
-   openshell policy update codex-user1 \
-     --add-endpoint "mcp-server-a.$OPENSHELL_NAMESPACE.svc.cluster.local:8000:read-write:rest:enforce" \
+   openshell policy update "codex-${USER_ID}" \
+     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/bin/codex \
      --wait
    ```
@@ -924,7 +925,7 @@ credentials at the proxy boundary and injects the real API key server-side.
 4. Write the Codex config inside the sandbox:
 
    ```bash
-   openshell sandbox exec -n codex-user1 --no-tty -- bash -c '
+   openshell sandbox exec -n "codex-${USER_ID}" --no-tty -- bash -c '
    mkdir -p ~/.codex && cat > ~/.codex/config.toml << "TOML"
    model_provider = "openshell-byo"
    model = "'"$OPENAI_MODEL"'"
@@ -941,10 +942,10 @@ credentials at the proxy boundary and injects the real API key server-side.
 5. Run the test: [VERIFY]
 
    ```bash
-   openshell sandbox exec -n codex-user1 --no-tty -- bash -c '
+   openshell sandbox exec -n "codex-${USER_ID}" --no-tty -- bash -c '
    codex mcp add eligibility \
      --transport http \
-     --url "http://mcp-server-a.'"$OPENSHELL_NAMESPACE"'.svc.cluster.local:8000/mcp" \
+     --url "http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp" \
      --header "Authorization: Bearer $USER_ACCESS_TOKEN"
 
    codex exec --skip-git-repo-check \
