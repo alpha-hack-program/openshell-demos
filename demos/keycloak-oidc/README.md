@@ -637,6 +637,17 @@ short-lived access tokens and rotates the refresh token whenever the IdP
 returns a new one. The user just does `openshell sandbox connect` and gets a
 sandbox with a live credential — they never see a token.
 
+> **Why three separate commands?** A provider profile can define *multiple*
+> credentials, each with its own refresh strategy, token endpoint, and
+> timing. `provider create` registers the credential keys the provider will
+> manage. `refresh configure` binds a specific strategy and the per-user
+> material (the actual refresh token) to each credential key — one call per
+> key. `refresh rotate` triggers the first token exchange to verify the
+> wiring. The `--strategy` flag on `refresh configure` is not redundant
+> with the profile: when a profile declares several credentials with
+> different strategies, the flag tells the gateway which strategy applies to
+> which credential key on this particular provider instance.
+
 > The script `scripts/03-onboard-user.sh <user-id> <refresh-token>` wraps
 > these same commands.
 
@@ -666,9 +677,46 @@ This deploys `mcp-server-a` and `mcp-server-b` into `$OPENSHELL_NAMESPACE`
 as two-container pods (Envoy + the app), each with its own ServiceAccount.
 
 Before moving to step 5, assign the MCP server roles to your demo users in
-Keycloak (via the admin console or admin API):
-- Grant `mcp-server-a-user` to `user1`
-- Grant `mcp-server-b-user` to `user2`
+Keycloak. You can do this via the admin console (Users > select user >
+Role mapping > Assign role) or via the Admin REST API:
+
+```bash
+source .env
+
+ADMIN_TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password" \
+  -d "client_id=admin-cli" \
+  -d "username=${KEYCLOAK_ADMIN_USER}" \
+  -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
+  | jq -r '.access_token')
+
+# Grant mcp-server-a-user to user1
+USER1_UUID=$(curl -sk \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=user1&exact=true" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
+ROLE_A=$(curl -sk \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/roles/mcp-server-a-user" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}")
+curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users/${USER1_UUID}/role-mappings/realm" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "[${ROLE_A}]"
+
+# Grant mcp-server-b-user to user2
+USER2_UUID=$(curl -sk \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=user2&exact=true" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
+ROLE_B=$(curl -sk \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/roles/mcp-server-b-user" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}")
+curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users/${USER2_UUID}/role-mappings/realm" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "[${ROLE_B}]"
+```
 
 ### 5. Run the demo
 

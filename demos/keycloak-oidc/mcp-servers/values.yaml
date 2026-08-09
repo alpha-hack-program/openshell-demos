@@ -7,7 +7,7 @@
 # no separate workload-identity plane needed.
 
 keycloak:
-  issuer: "https://keycloak.apps.ocp.sandbox2229.opentlc.com/realms/openshell"
+  issuer: "https://<keycloak-host>/realms/openshell"
   # Client whose tokens these servers accept, checked against the token's
   # `azp` (or `aud`, depending on how your images validate it).
   clientId: "openshell-gateway"

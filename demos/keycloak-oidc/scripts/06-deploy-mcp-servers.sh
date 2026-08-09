@@ -2,12 +2,23 @@
 set -euo pipefail
 # Deploys two MCP servers, each expected to validate the caller's
 # Keycloak-issued OAuth access token directly.
-: "${OPENSHELL_NAMESPACE:?set in .env}"
 
-HERE="$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEMO_DIR="$SCRIPT_DIR/.."
 
-helm upgrade --install mcp-servers "$HERE/../mcp-servers" \
-  --namespace "$OPENSHELL_NAMESPACE"
+# Source demo .env for OPENSHELL_NAMESPACE and MCP server image variables
+DEMO_ENV="$DEMO_DIR/.env"
+if [[ -f "$DEMO_ENV" ]]; then
+  set -a; source "$DEMO_ENV"; set +a
+fi
+
+: "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
+: "${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}"
+: "${KEYCLOAK_REALM:=openshell}"
+
+helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
+  --namespace "$OPENSHELL_NAMESPACE" \
+  --set "keycloak.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
 
 oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-server-a
 oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-server-b

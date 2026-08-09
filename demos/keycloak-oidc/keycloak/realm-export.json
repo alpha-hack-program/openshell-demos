@@ -16,8 +16,22 @@
       "protocol": "openid-connect",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://127.0.0.1:*/callback"],
-      "webOrigins": ["+"]
+      "redirectUris": ["http://127.0.0.1/*", "http://localhost/*"],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "openshell-cli-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "openshell-cli",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "openshell-gateway",
@@ -31,14 +45,32 @@
   ],
   "users": [
     {
+      "username": "openshell-admin",
+      "enabled": true,
+      "firstName": "OpenShell",
+      "lastName": "Admin",
+      "email": "openshell-admin@demo.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "openshell-admin", "temporary": false }],
+      "realmRoles": ["openshell-admin", "offline_access"]
+    },
+    {
       "username": "user1",
       "enabled": true,
+      "firstName": "user1",
+      "lastName": "Demo",
+      "email": "user1@demo.local",
+      "emailVerified": true,
       "credentials": [{ "type": "password", "value": "user1", "temporary": false }],
       "realmRoles": ["openshell-user", "offline_access"]
     },
     {
       "username": "user2",
       "enabled": true,
+      "firstName": "user2",
+      "lastName": "Demo",
+      "email": "user2@demo.local",
+      "emailVerified": true,
       "credentials": [{ "type": "password", "value": "user2", "temporary": false }],
       "realmRoles": ["openshell-user", "offline_access"]
     }

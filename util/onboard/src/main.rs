@@ -64,6 +64,10 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
 
+    /// Show openshell commands and substitutions as they run
+    #[arg(short = 'v', long)]
+    verbose: bool,
+
     /// Require valid TLS certificates (disables danger_accept_invalid_certs)
     #[arg(long)]
     strict_tls: bool,
@@ -266,14 +270,16 @@ enum CmdResult {
     AlreadyExists,
 }
 
-fn run_cmd(label: &str, program: &str, args: &[&str], dry_run: bool) -> Result<CmdResult, String> {
+fn run_cmd(label: &str, program: &str, args: &[&str], dry_run: bool, verbose: bool) -> Result<CmdResult, String> {
     let cmd_str = format!("{program} {}", args.join(" "));
     if dry_run {
         eprintln!("[onboard] DRY-RUN: {cmd_str}");
         return Ok(CmdResult::Ok);
     }
 
-    log(&format!("{label}: {cmd_str}"));
+    if verbose {
+        log(&format!("{label}: {cmd_str}"));
+    }
     let output = Command::new(program)
         .args(args)
         .output()
@@ -357,11 +363,29 @@ fn run() -> Result<(), String> {
 
     // Step 5: call OpenShell CLI
     log("Importing provider profile...");
+
+    // Substitute <keycloak-host> in the profile before importing
+    let profile_content = std::fs::read_to_string(&cli.profile)
+        .map_err(|e| format!("failed to read profile {}: {e}", cli.profile))?;
+    let profile_content = profile_content.replace("<keycloak-host>", &cli.keycloak_host);
+    let tmp_profile = std::env::temp_dir().join("onboard-profile.yaml");
+    std::fs::write(&tmp_profile, &profile_content)
+        .map_err(|e| format!("failed to write temp profile: {e}"))?;
+    let tmp_profile_str = tmp_profile.to_string_lossy().to_string();
+
+    if cli.verbose {
+        log(&format!(
+            "Substituted <keycloak-host> → {} in profile, wrote to {}",
+            cli.keycloak_host, tmp_profile_str
+        ));
+    }
+
     match run_cmd(
         "profile import",
         "openshell",
-        &["provider", "profile", "import", "-f", &cli.profile],
+        &["provider", "profile", "import", "-f", &tmp_profile_str],
         cli.dry_run,
+        cli.verbose,
     )? {
         CmdResult::AlreadyExists => log("Profile already imported, skipping."),
         CmdResult::Ok => {}
@@ -382,6 +406,7 @@ fn run() -> Result<(), String> {
             "USER_ACCESS_TOKEN=pending",
         ],
         cli.dry_run,
+        cli.verbose,
     )? {
         CmdResult::AlreadyExists => log(&format!(
             "Provider '{provider_name}' already exists, skipping creation."
@@ -412,6 +437,7 @@ fn run() -> Result<(), String> {
             "refresh_token",
         ],
         cli.dry_run,
+        cli.verbose,
     )?;
 
     log("Rotating credential...");
@@ -427,6 +453,7 @@ fn run() -> Result<(), String> {
             "USER_ACCESS_TOKEN",
         ],
         cli.dry_run,
+        cli.verbose,
     )?;
 
     log(&format!("User '{provider_name}' onboarded successfully."));
