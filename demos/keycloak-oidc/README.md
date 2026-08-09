@@ -913,6 +913,24 @@ see step 3). Confirm user2's sandbox can reach `mcp-server-b` but **not**
 `mcp-server-a`, proving that the per-user credential isolation works
 end to end through the agentic coding tool.
 
+Alternatively, run the isolation verification script to test all four
+user/server combinations automatically:
+
+```bash
+./scripts/08-verify-isolation.sh
+```
+
+Expected output:
+
+```
+PASS  user1 → mcp-server-a  HTTP 200 (expected 200)
+PASS  user1 → mcp-server-b  HTTP 403 (expected 403)
+PASS  user2 → mcp-server-a  HTTP 403 (expected 403)
+PASS  user2 → mcp-server-b  HTTP 200 (expected 200)
+
+Results: 4 passed, 0 failed
+```
+
 #### Alternative: Claude Code + BYO LLM + MCP tool
 
 > **Requires an Anthropic Messages API endpoint.** Claude Code uses the
