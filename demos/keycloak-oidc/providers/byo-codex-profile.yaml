@@ -1,0 +1,25 @@
+id: byo-codex
+display_name: BYO LLM (Codex policy)
+description: Network policy and binary permissions for Codex via inference.local
+category: inference
+inference_capable: true
+
+credentials:
+  - name: api_key
+    description: LLM API key (injected as OPENAI_API_KEY for Codex)
+    env_vars: [OPENAI_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+
+endpoints:
+  - host: inference.local
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+
+binaries:
+  - /usr/bin/codex
+  - /usr/local/bin/codex
+  - /usr/lib/node_modules/@openai/**

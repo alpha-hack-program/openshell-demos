@@ -780,11 +780,14 @@ To test the other direction, open a second terminal and repeat with
 if you haven't already). Confirm user2 can reach `mcp-server-b` (`200`)
 but gets `403` from `mcp-server-a`.
 
-#### Test recipe: Claude Code + BYO LLM + MCP tool
+#### Test recipe: Codex + BYO LLM + MCP tool
 
-Claude Code (pre-installed in the base sandbox image) calling
+Codex CLI (pre-installed in the base sandbox image) calling
 `mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via your own
-OpenAI-compatible LLM.
+OpenAI-compatible LLM. Codex uses `inference.local` — OpenShell's privacy
+router — which strips caller credentials at the proxy boundary and injects
+the real API key server-side. This works with **any OpenAI-compatible
+endpoint** (vLLM, LiteLLM, OpenAI, DeepSeek, etc.).
 
 **Prerequisites** beyond steps 1-5 above — set these in your terminal:
 
@@ -794,84 +797,6 @@ SERVER_NAME="mcp-server-a"
 export OPENAI_API_KEY="<your-key>"
 export OPENAI_BASE_URL="https://<your-provider>/v1"   # e.g. https://api.openai.com/v1
 export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
-LLM_HOST=$(echo "$OPENAI_BASE_URL" | sed 's|https\?://||;s|/.*||')
-```
-
-1. Import the Claude Code provider profile and create the provider.
-
-   The profile ([`providers/byo-claude-profile.yaml`](providers/byo-claude-profile.yaml))
-   tells OpenShell how to inject your LLM API key into the sandbox as
-   `ANTHROPIC_API_KEY` — the environment variable Claude Code expects:
-
-   ```yaml
-   id: byo-claude
-   display_name: BYO LLM (Claude Code compatible)
-   description: OpenAI-compatible LLM for Claude Code
-   category: inference
-   inference_capable: true
-
-   credentials:
-     - name: api_key
-       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
-       env_vars: [ANTHROPIC_API_KEY]
-       required: true
-       auth_style: header
-       header_name: x-api-key
-   ```
-
-   Import it and create a provider instance with your key:
-
-   ```bash
-   openshell provider profile import -f providers/byo-claude-profile.yaml
-   openshell provider create --name byo-claude --type byo-claude \
-     --credential "ANTHROPIC_API_KEY=$OPENAI_API_KEY"
-   ```
-
-2. Attach the provider and grant network access:
-
-   ```bash
-   openshell sandbox provider attach "demo-${USER_ID}" byo-claude
-   openshell policy update "demo-${USER_ID}" \
-     --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
-     --binary /usr/local/bin/claude \
-     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-     --binary /usr/local/bin/claude \
-     --wait
-   ```
-
-3. Run the test:
-
-   ```bash
-   openshell sandbox exec -n "demo-${USER_ID}" \
-     --env "ANTHROPIC_BASE_URL=$OPENAI_BASE_URL" \
-     --env "ANTHROPIC_MODEL=$OPENAI_MODEL" \
-     -- bash -c '
-   MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
-   claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
-     --mcp-config "$MCP_JSON" \
-     --strict-mcp-config \
-     --permission-mode bypassPermissions \
-     --output-format text
-   '
-   ```
-
-> Provider profiles support `config:` fields with `env_vars`, but OpenShell
-> only injects *credentials* as environment variables — config values are
-> stored metadata, not injected into sandbox processes. Model routing and base
-> URL are non-secret config, so `--env` at exec time is the correct mechanism.
-
-#### Alternative: Codex + BYO LLM + MCP tool
-
-Same MCP servers, same per-user credential isolation, but using **OpenAI
-Codex CLI** instead of Claude Code. The key architectural difference: Codex
-uses `inference.local` — OpenShell's privacy router — which strips caller
-credentials at the proxy boundary and injects the real API key server-side.
-
-**Prerequisites:** steps 1-5 above, plus the same `OPENAI_*` exports and:
-
-```bash
-USER_ID="user1"
-SERVER_NAME="mcp-server-a"
 ```
 
 1. Create the inference provider and configure `inference.local` routing
@@ -949,28 +874,19 @@ SERVER_NAME="mcp-server-a"
 4. Write the Codex config inside the sandbox:
 
    ```bash
-   openshell sandbox exec -n "codex-${USER_ID}" --no-tty -- bash -c '
-   mkdir -p ~/.codex && cat > ~/.codex/config.toml << "TOML"
-   model_provider = "openshell-byo"
-   model = "'"$OPENAI_MODEL"'"
-
-   [model_providers.openshell-byo]
-   name = "OpenShell BYO Router"
-   base_url = "https://inference.local/v1"
-   env_key = "OPENAI_API_KEY"
-   wire_api = "responses"
-   TOML
+   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
+   mkdir -p ~/.codex && printf "model_provider = \"openshell-byo\"\nmodel = \"'"$OPENAI_MODEL"'\"\n\n[model_providers.openshell-byo]\nname = \"OpenShell BYO Router\"\nbase_url = \"https://inference.local/v1\"\nenv_key = \"OPENAI_API_KEY\"\nwire_api = \"responses\"\n" > ~/.codex/config.toml
+   cat ~/.codex/config.toml
    '
    ```
 
-5. Run the test: [VERIFY]
+5. Run the test:
 
    ```bash
-   openshell sandbox exec -n "codex-${USER_ID}" --no-tty -- bash -c '
+   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
    codex mcp add eligibility \
-     --transport http \
      --url "http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp" \
-     --header "Authorization: Bearer $USER_ACCESS_TOKEN"
+     --bearer-token-env-var USER_ACCESS_TOKEN
 
    codex exec --skip-git-repo-check \
      "My mother is at the hospital, can I get an aid while I am on unpaid leave?"
@@ -990,6 +906,97 @@ Codex (in sandbox)
       → supervisor resolves placeholder to real Keycloak token
       → Envoy checks JWT + realm role → app
 ```
+
+#### Alternative: Claude Code + BYO LLM + MCP tool
+
+> **Requires an Anthropic Messages API endpoint.** Claude Code uses the
+> Anthropic Messages API format, not OpenAI. This recipe only works if your
+> LLM provider exposes an Anthropic-compatible endpoint (e.g.
+> DeepSeek's `https://api.deepseek.com/anthropic`, or a LiteLLM proxy
+> configured with an `/anthropic` route). Standard OpenAI-compatible
+> endpoints (vLLM, OpenAI, etc.) will **not** work — use the Codex recipe
+> above instead.
+
+Claude Code (pre-installed in the base sandbox image) calling
+`mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an
+Anthropic-compatible LLM endpoint.
+
+**Prerequisites** beyond steps 1-5 above — set these in your terminal:
+
+```bash
+USER_ID="user1"
+SERVER_NAME="mcp-server-a"
+export OPENAI_API_KEY="<your-key>"
+export ANTHROPIC_BASE_URL="https://<your-anthropic-compatible-endpoint>"  # e.g. https://api.deepseek.com/anthropic
+export ANTHROPIC_MODEL="<model-name>"                                     # e.g. deepseek-v4-pro
+LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+```
+
+1. Import the Claude Code provider profile and create the provider.
+
+   The profile ([`providers/byo-claude-profile.yaml`](providers/byo-claude-profile.yaml))
+   tells OpenShell to inject your LLM API key into the sandbox as
+   `ANTHROPIC_API_KEY` — the environment variable Claude Code expects.
+   Base URL and model name are passed via `--env` at exec time (step 3),
+   since OpenShell only injects **credentials**, not config values:
+
+   ```yaml
+   id: byo-claude
+   display_name: BYO LLM (Claude Code compatible)
+   description: OpenAI-compatible LLM for Claude Code
+   category: inference
+   inference_capable: true
+
+   credentials:
+     - name: api_key
+       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
+       env_vars: [ANTHROPIC_API_KEY]
+       required: true
+       auth_style: header
+       header_name: x-api-key
+   ```
+
+   Import it and create a provider instance with your key:
+
+   ```bash
+   openshell provider profile import -f providers/byo-claude-profile.yaml
+   openshell provider create --name byo-claude --type byo-claude \
+     --credential "ANTHROPIC_API_KEY=$OPENAI_API_KEY"
+   ```
+
+2. Attach the provider and grant network access:
+
+   ```bash
+   openshell sandbox provider attach "demo-${USER_ID}" byo-claude
+   openshell policy update "demo-${USER_ID}" \
+     --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
+     --binary /usr/local/bin/claude \
+     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
+     --binary /usr/local/bin/claude \
+     --wait
+   ```
+
+3. Run the test. The provider injects `ANTHROPIC_API_KEY` automatically.
+   Base URL and model overrides are non-secret config, so we pass them via
+   `--env` — OpenShell only injects **credentials** as environment
+   variables, not `--config` values:
+
+   ```bash
+   openshell sandbox exec -n "demo-${USER_ID}" \
+     --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
+     --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
+     --env "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_MODEL" \
+     --env "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_MODEL" \
+     --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_MODEL" \
+     -- bash -c '
+   MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
+   claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
+     --mcp-config "$MCP_JSON" \
+     --strict-mcp-config \
+     --permission-mode bypassPermissions \
+     --output-format text
+   '
+   ```
 
 ## Configuration reference
 
