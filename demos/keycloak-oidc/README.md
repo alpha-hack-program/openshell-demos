@@ -794,6 +794,7 @@ endpoint** (vLLM, LiteLLM, OpenAI, DeepSeek, etc.).
 ```bash
 USER_ID="user1"
 SERVER_NAME="mcp-server-a"
+QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
 export OPENAI_API_KEY="<your-key>"
 export OPENAI_BASE_URL="https://<your-provider>/v1"   # e.g. https://api.openai.com/v1
 export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
@@ -889,7 +890,7 @@ export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
      --bearer-token-env-var USER_ACCESS_TOKEN
 
    codex exec --skip-git-repo-check \
-     "My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+     "'"${QUESTION}"'"
    '
    ```
 
@@ -909,18 +910,12 @@ Codex (in sandbox)
 
 **Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
 Compatibility Engine — tax calculation, housing grants, voting eligibility,
-etc.). Start from step 3 with different variables and a question that
-exercises `mcp-server-b`'s `calc_tax` tool:
+etc.). Set the variables and run steps 3-5 again:
 
 ```bash
 USER_ID="user2"
 SERVER_NAME="mcp-server-b"
-```
-
-Then run steps 3-5 above. In step 5, replace the prompt with a tax question:
-
-```
-"What is the tax liability for an income of 90000?"
+QUESTION="What is the tax liability for an income of 90000?"
 ```
 
 Confirm user2's sandbox can reach `mcp-server-b` (`200`) but **not**
@@ -964,6 +959,7 @@ Anthropic-compatible LLM endpoint.
 ```bash
 USER_ID="user1"
 SERVER_NAME="mcp-server-a"
+QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
 export OPENAI_API_KEY="<your-key>"
 export ANTHROPIC_BASE_URL="https://<your-anthropic-compatible-endpoint>"  # e.g. https://api.deepseek.com/anthropic
 export ANTHROPIC_MODEL="<model-name>"                                     # e.g. deepseek-v4-pro
@@ -1028,7 +1024,7 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
      --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_MODEL" \
      -- bash -c '
    MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
-   claude -p "My mother is at the hospital, can I get an aid while I am on unpaid leave?" \
+   claude -p "'"${QUESTION}"'" \
      --mcp-config "$MCP_JSON" \
      --strict-mcp-config \
      --permission-mode bypassPermissions \

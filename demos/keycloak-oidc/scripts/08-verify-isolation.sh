@@ -27,18 +27,31 @@ fi
 
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 
+# Each authorized pair: USER_ID, SERVER_NAME, TOOL_NAME, TOOL_CALL
+# user1 → mcp-server-a: Eligibility Engine — evaluate_unpaid_leave_eligibility
+# user2 → mcp-server-b: Compatibility Engine — calc_tax
+PAIRS=(
+  "user1|mcp-server-a|evaluate_unpaid_leave_eligibility|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"evaluate_unpaid_leave_eligibility\",\"arguments\":{\"employee_id\":\"E001\",\"leave_type\":\"unpaid\",\"reason\":\"family_medical\"}}}"
+  "user2|mcp-server-b|calc_tax|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}"
+)
+
 USERS=("user1" "user2")
 SERVERS=("mcp-server-a" "mcp-server-b")
 
-# MCP JSON-RPC requests per server — authorized pairs call a real tool,
-# unauthorized pairs just initialize (enough to get a 403 from Envoy).
 MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}'
 
-# mcp-server-a: Eligibility Engine — evaluate_unpaid_leave_eligibility
-TOOL_CALL_A='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"evaluate_unpaid_leave_eligibility","arguments":{"employee_id":"E001","leave_type":"unpaid","reason":"family_medical"}}}'
-
-# mcp-server-b: Compatibility Engine — calc_tax
-TOOL_CALL_B='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"calc_tax","arguments":{"income":"90000"}}}'
+get_pair_info() {
+  local user="$1" server="$2"
+  for pair in "${PAIRS[@]}"; do
+    IFS='|' read -r p_user p_server p_tool p_call <<< "$pair"
+    if [[ "$p_user" == "$user" ]] && [[ "$p_server" == "$server" ]]; then
+      TOOL_NAME="$p_tool"
+      TOOL_CALL="$p_call"
+      return 0
+    fi
+  done
+  return 1
+}
 
 mcp_request() {
   local sandbox="$1" mcp_url="$2" body="$3"
@@ -75,21 +88,12 @@ for USER_ID in "${USERS[@]}"; do
       --binary /usr/bin/curl --wait &>/dev/null || true
 
     # Determine if this is an authorized pair
-    if { [[ "$USER_ID" == "user1" ]] && [[ "$SERVER_NAME" == "mcp-server-a" ]]; } ||
-       { [[ "$USER_ID" == "user2" ]] && [[ "$SERVER_NAME" == "mcp-server-b" ]]; }; then
+    if get_pair_info "$USER_ID" "$SERVER_NAME"; then
       EXPECTED=200
 
       # Authorized: initialize the session, then call the domain-specific tool
       HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$MCP_INIT")
       if [[ "$HTTP_CODE" == "200" ]]; then
-        # Pick the right tool call for this server
-        if [[ "$SERVER_NAME" == "mcp-server-a" ]]; then
-          TOOL_CALL="$TOOL_CALL_A"
-          TOOL_NAME="evaluate_unpaid_leave_eligibility"
-        else
-          TOOL_CALL="$TOOL_CALL_B"
-          TOOL_NAME="calc_tax"
-        fi
         HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$TOOL_CALL")
         LABEL="${USER_ID} → ${SERVER_NAME} (${TOOL_NAME})"
       else
