@@ -695,14 +695,21 @@ SERVER_NAME="mcp-server-a"
 MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 ```
 
-**Create the sandbox and attach the provider.** The `-- true` creates the
-sandbox without entering an interactive shell — we use `exec` to run
-commands inside it. Host-side variables like `$MCP_URL` are not available
-inside the sandbox, so pass them via `exec --env`:
+**Create the sandbox.** The `-- true` creates the sandbox without entering
+an interactive shell — we use `exec` to run commands inside it. Host-side
+variables like `$MCP_URL` are not available inside the sandbox, so pass
+them via `exec --env`:
 
 ```bash
 openshell sandbox create --name "demo-${USER_ID}" -- true
+```
 
+**Attach the user's provider** so the sandbox gets the user's credentials.
+This injects `$USER_ACCESS_TOKEN` (a short-lived Keycloak access token,
+automatically refreshed by the gateway) as an environment variable inside
+the sandbox:
+
+```bash
 openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
 ```
 
