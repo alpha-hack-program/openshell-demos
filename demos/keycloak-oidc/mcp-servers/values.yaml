@@ -46,6 +46,12 @@ envoy:
 # elements field-by-field, so that silently blanks out servers[0]'s other
 # fields (name, port, requiredRole). Pass a full replacement values file
 # (all fields for that server) instead.
+#
+# TODO: both MCP servers should include the calling user's identity
+# (extracted from the Authorization: Bearer JWT header — e.g. the `sub` or
+# `preferred_username` claim) in the tool response payload. This would make
+# credential isolation visible in the demo output: the same tool returns
+# different user context depending on who called it.
 servers:
   - name: mcp-server-a
     image:
