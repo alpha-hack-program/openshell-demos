@@ -46,25 +46,11 @@ envoy:
 # elements field-by-field, so that silently blanks out servers[0]'s other
 # fields (name, port, requiredRole). Pass a full replacement values file
 # (all fields for that server) instead.
-#
-# TODO: both MCP servers should include the calling user's identity
-# (extracted from the Authorization: Bearer JWT header — e.g. the `sub` or
-# `preferred_username` claim) in the tool response payload. This would make
-# credential isolation visible in the demo output: the same tool returns
-# different user context depending on who called it.
-#
-# TODO: both MCP server images should read MCP_STATELESS (env var) to switch
-# between stateful (SSE, session IDs) and stateless (plain JSON, no session)
-# modes at runtime. The Rust change: gate .with_stateful_mode(false) and
-# .with_json_response(true) in streamable_http_config() behind this env var.
-# mcp-server-b 3.1.5 already hardcodes stateless; mcp-server-a 2.0.2 still
-# hardcodes stateful — both should respect the env var so the same image
-# works for interactive (SSE) and agentic (one-shot HTTP) clients.
 servers:
   - name: mcp-server-a
     image:
       repository: "quay.io/atarazana/eligibility-engine-mcp-rs"
-      tag: "2.0.2"    # TODO: upgrade to a tag that reads MCP_STATELESS
+      tag: "2.0.2"
       pullPolicy: IfNotPresent
     port: 8000              # Envoy listens here; Service targets this
     internalPort: 8001      # app's own hardcoded default when unconfigured

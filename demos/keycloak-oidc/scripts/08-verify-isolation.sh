@@ -27,15 +27,6 @@ fi
 
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 
-# TODO: mcp-server-a (eligibility-engine-mcp-rs:2.0.2) is still in stateful/SSE
-# mode. It requires Mcp-Session-Id headers and returns text/event-stream
-# responses that curl can't easily consume. Fix: apply the same patch as
-# compatibility-engine-mcp-rs:3.1.5 — add .with_stateful_mode(false) before
-# .with_json_response(true) in streamable_http_config(). Until then, the
-# tool call for user1→mcp-server-a will fail (422) even though authorization
-# (200 on initialize) works correctly. Bump the tag in mcp-servers/values.yaml
-# once a fixed image is available.
-
 # Each authorized pair: USER_ID, SERVER_NAME, TOOL_NAME, TOOL_CALL
 # user1 → mcp-server-a: Eligibility Engine — evaluate_unpaid_leave_eligibility
 #   params: relationship (father/mother/…), situation (illness/birth/…),
