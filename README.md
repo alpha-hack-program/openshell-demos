@@ -1,7 +1,7 @@
 # OpenShell on OpenShift — demos
 
 [![OpenShell](https://img.shields.io/badge/OpenShell_Chart-0.0.101-blue)](https://github.com/NVIDIA/OpenShell)
-[![Build onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/build-onboard.yml)
+[![CI onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml)
 
 > **Experimental — not production-ready.**
 > These demos build on top of the
