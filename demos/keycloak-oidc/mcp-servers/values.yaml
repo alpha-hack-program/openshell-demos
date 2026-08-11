@@ -60,7 +60,7 @@ servers:
   - name: mcp-server-b
     image:
       repository: "quay.io/atarazana/compatibility-engine-mcp-rs"
-      tag: "3.1.1"
+      tag: "3.1.5"
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8001      # [VERIFY] assumed same default as mcp-server-a

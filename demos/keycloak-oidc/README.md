@@ -782,22 +782,31 @@ but gets `403` from `mcp-server-a`.
 
 #### Test recipe: Codex + BYO LLM + MCP tool
 
-Codex CLI (pre-installed in the base sandbox image) calling
-`mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via your own
-OpenAI-compatible LLM. Codex uses `inference.local` — OpenShell's privacy
-router — which strips caller credentials at the proxy boundary and injects
-the real API key server-side. This works with **any OpenAI-compatible
-endpoint** (vLLM, LiteLLM, OpenAI, DeepSeek, etc.).
+Codex CLI calling an MCP server's tool via your own OpenAI-compatible LLM.
+Codex uses `inference.local` — OpenShell's privacy router — which strips
+caller credentials at the proxy boundary and injects the real API key
+server-side.
 
-**Prerequisites** beyond steps 1-5 above — set these in your terminal:
+> **LLM endpoint requirements.** Codex 0.146.0+ only supports
+> `wire_api = "responses"` (the OpenAI Responses API). It sends MCP tools
+> as `"type": "namespace"` tools — a Responses API extension that groups
+> MCP tools under a named scope. This means your LLM endpoint must support
+> the Responses API **with namespace tools**, which requires **vLLM >=
+> 0.25.0** (or OpenAI's own API). Older vLLM versions accept the Responses
+> API but reject `namespace` tools with a 400 error. See
+> [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md)
+> for the full compatibility matrix and a test script.
+
+**Prerequisites** beyond steps 1-5 above — set these in your **admin
+terminal**:
 
 ```bash
 USER_ID="user1"
 SERVER_NAME="mcp-server-a"
 QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
 export OPENAI_API_KEY="<your-key>"
-export OPENAI_BASE_URL="https://<your-provider>/v1"   # e.g. https://api.openai.com/v1
-export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
+export OPENAI_BASE_URL="https://<your-provider>/v1"   # must support Responses API + namespace tools
+export OPENAI_MODEL="<model-name>"
 ```
 
 1. Create the inference provider and configure `inference.local` routing
@@ -858,49 +867,67 @@ export OPENAI_MODEL="<model-name>"                     # e.g. gpt-4o
      --credential "OPENAI_API_KEY=$OPENAI_API_KEY"
    ```
 
-3. Create and configure the sandbox:
+3. Create and configure the sandbox. Use a custom image with Codex >=
+   0.146.0 if the chart's default sandbox image ships an older version:
 
    ```bash
+   CODEX_IMAGE="quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012"  # Codex 0.146.0
+
    openshell sandbox create --name "codex-${USER_ID}" \
      --provider byo-codex \
      --provider "user-${USER_ID}" \
-     -- true
+     "${CODEX_IMAGE}" -- true
 
    openshell policy update "codex-${USER_ID}" \
      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-     --binary /usr/bin/codex \
+     --binary /usr/local/bin/codex \
+     --binary /usr/bin/node \
+     --binary /usr/bin/node-22 \
+     --binary /usr/lib/node_modules/@openai/** \
      --wait
    ```
 
-4. Write the Codex config inside the sandbox:
+4. Write the Codex config and register the MCP server inside the sandbox:
 
    ```bash
    openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
    mkdir -p ~/.codex && printf "model_provider = \"openshell-byo\"\nmodel = \"'"$OPENAI_MODEL"'\"\n\n[model_providers.openshell-byo]\nname = \"OpenShell BYO Router\"\nbase_url = \"https://inference.local/v1\"\nenv_key = \"OPENAI_API_KEY\"\nwire_api = \"responses\"\n" > ~/.codex/config.toml
    cat ~/.codex/config.toml
    '
-   ```
 
-5. Run the test:
-
-   ```bash
    openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
-   codex mcp add eligibility \
+   codex mcp add '"${SERVER_NAME}"' \
      --url "http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp" \
      --bearer-token-env-var USER_ACCESS_TOKEN
+   '
+   ```
 
-   codex exec --skip-git-repo-check \
+5. Run the test from the **user terminal**:
+
+   ```bash
+   source .env
+   USER_ID="user1"
+   QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+
+   # The OpenShell sandbox provides the security boundary (network policy,
+   # credential isolation, binary permissions). Codex's built-in sandbox
+   # is redundant and incompatible with the container environment, so we
+   # disable it with --dangerously-bypass-approvals-and-sandbox.
+   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
+   codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
      "'"${QUESTION}"'"
    '
    ```
 
-   > **Known issue:** Codex v0.117.0's MCP client (`rmcp`) expects plain
-   > JSON-RPC responses, but these MCP servers respond with SSE-wrapped
-   > JSON (`data: {...}`). Codex will connect to `inference.local`
-   > successfully and answer using the model, but the MCP tool call will
-   > fail with `data did not match any variant of untagged enum
-   > JsonRpcMessage`. This is a transport compatibility issue — the model
-   > inference path works correctly regardless.
+   > **Note on `--dangerously-bypass-approvals-and-sandbox`:** The flag
+   > name is alarming, but it's the intended mode for externally-sandboxed
+   > environments. Codex's built-in bubblewrap sandbox cannot create user
+   > namespaces inside the OpenShell container, and its interactive approval
+   > prompts don't work in non-interactive `codex exec` mode. The OpenShell
+   > sandbox already enforces network policy (only declared endpoints are
+   > reachable), binary permissions, and credential isolation — the real
+   > security boundary. Disabling Codex's inner sandbox removes the
+   > redundant layer that would otherwise block execution.
 
 **Traffic flow:**
 
@@ -910,15 +937,15 @@ Codex (in sandbox)
     → OpenShell privacy router
       → strips credentials, injects real API key
       → forwards to your LLM provider
-  → mcp-server-a:8000/mcp (tool calls)
+  → ${SERVER_NAME}:8000/mcp (tool calls)
     → Authorization: Bearer $USER_ACCESS_TOKEN
       → supervisor resolves placeholder to real Keycloak token
       → Envoy checks JWT + realm role → app
 ```
 
 **Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
-Compatibility Engine — tax calculation, housing grants, voting eligibility,
-etc.). Set the variables and run steps 3-5 again:
+Compatibility Engine — tax calculation). Set the variables and run
+steps 3-5 again:
 
 ```bash
 USER_ID="user2"
@@ -1114,7 +1141,7 @@ exact patch release before relying on this beyond a demo.
       — verified via the Envoy sidecar (401/403/200 cases all tested live)
 - [x] (Stretch) A user authorized for one MCP server's role does not
       thereby gain access to the other — verified both directions
-- [ ] (Stretch) Codex variant — [VERIFY] against a live cluster
+- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + vLLM 0.27.1 + MCP server 3.1.5
 
 ## Open risks
 
