@@ -84,6 +84,7 @@ fn log(msg: &str) {
     eprintln!("[onboard] {msg}");
 }
 
+/// Default: skip TLS verification — lab clusters often use self-signed certs; pass --strict-tls for production.
 fn build_http_client(strict_tls: bool) -> reqwest::blocking::Client {
     let accept_invalid = !strict_tls;
     if accept_invalid {
