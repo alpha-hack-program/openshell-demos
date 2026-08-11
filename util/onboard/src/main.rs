@@ -271,7 +271,13 @@ enum CmdResult {
     AlreadyExists,
 }
 
-fn run_cmd(label: &str, program: &str, args: &[&str], dry_run: bool, verbose: bool) -> Result<CmdResult, String> {
+fn run_cmd(
+    label: &str,
+    program: &str,
+    args: &[&str],
+    dry_run: bool,
+    verbose: bool,
+) -> Result<CmdResult, String> {
     let cmd_str = format!("{program} {}", args.join(" "));
     if dry_run {
         eprintln!("[onboard] DRY-RUN: {cmd_str}");
