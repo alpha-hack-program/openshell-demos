@@ -13,7 +13,6 @@ securityContext:
   runAsUser: null
 
 server:
-  disableTls: true
   auth:
     allowUnauthenticatedUsers: false   # real OIDC is configured below
   oidc:
