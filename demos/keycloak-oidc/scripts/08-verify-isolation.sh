@@ -27,11 +27,22 @@ fi
 
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 
+# TODO: mcp-server-a (eligibility-engine-mcp-rs:2.0.2) is still in stateful/SSE
+# mode. It requires Mcp-Session-Id headers and returns text/event-stream
+# responses that curl can't easily consume. Fix: apply the same patch as
+# compatibility-engine-mcp-rs:3.1.5 — add .with_stateful_mode(false) before
+# .with_json_response(true) in streamable_http_config(). Until then, the
+# tool call for user1→mcp-server-a will fail (422) even though authorization
+# (200 on initialize) works correctly. Bump the tag in mcp-servers/values.yaml
+# once a fixed image is available.
+
 # Each authorized pair: USER_ID, SERVER_NAME, TOOL_NAME, TOOL_CALL
 # user1 → mcp-server-a: Eligibility Engine — evaluate_unpaid_leave_eligibility
+#   params: relationship (father/mother/…), situation (illness/birth/…),
+#           is_single_parent (bool), total_children_after (int)
 # user2 → mcp-server-b: Compatibility Engine — calc_tax
 PAIRS=(
-  "user1|mcp-server-a|evaluate_unpaid_leave_eligibility|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"evaluate_unpaid_leave_eligibility\",\"arguments\":{\"employee_id\":\"E001\",\"leave_type\":\"unpaid\",\"reason\":\"family_medical\"}}}"
+  "user1|mcp-server-a|evaluate_unpaid_leave_eligibility|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"evaluate_unpaid_leave_eligibility\",\"arguments\":{\"relationship\":\"mother\",\"situation\":\"illness\",\"is_single_parent\":false,\"total_children_after\":0}}}"
   "user2|mcp-server-b|calc_tax|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}"
 )
 

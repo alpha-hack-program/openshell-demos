@@ -50,7 +50,7 @@ servers:
   - name: mcp-server-a
     image:
       repository: "quay.io/atarazana/eligibility-engine-mcp-rs"
-      tag: "2.0.2"
+      tag: "2.0.2"    # TODO: upgrade to a tag with .with_stateful_mode(false) fix (like mcp-server-b 3.1.5)
       pullPolicy: IfNotPresent
     port: 8000              # Envoy listens here; Service targets this
     internalPort: 8001      # app's own hardcoded default when unconfigured

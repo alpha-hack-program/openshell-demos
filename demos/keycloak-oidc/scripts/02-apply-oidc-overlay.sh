@@ -4,7 +4,12 @@ set -euo pipefail
 : "${OPENSHELL_CHART_VERSION:?set in .env}"
 
 HERE="$(dirname "$0")"
-VALUES="$HERE/../helm/values.yaml"
+
+if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
+  VALUES="$HERE/../helm/values-certmanager.yaml"
+else
+  VALUES="$HERE/../helm/values.yaml"
+fi
 
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
