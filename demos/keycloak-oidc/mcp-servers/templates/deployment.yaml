@@ -60,8 +60,8 @@ spec:
             # reachable, authenticating entrypoint in this pod.
             - name: MCP_DISABLE_HOST_CHECK
               value: "true"
-            - name: MCP_STATELESS
-              value: {{ .stateless | default false | quote }}
+            - name: MCP_STATEFUL_MODE
+              value: {{ .statefulMode | default false | quote }}
             - name: RUST_LOG
               value: "debug"
           resources:

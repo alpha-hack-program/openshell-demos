@@ -50,23 +50,23 @@ servers:
   - name: mcp-server-a
     image:
       repository: "quay.io/atarazana/eligibility-engine-mcp-rs"
-      tag: "2.0.2"
+      tag: "2.4.0"
       pullPolicy: IfNotPresent
     port: 8000              # Envoy listens here; Service targets this
     internalPort: 8001      # app's own hardcoded default when unconfigured
                              # (confirmed for this image via testing)
     requiredRole: "mcp-server-a-user"
-    stateless: true
+    statefulMode: false
     resources: {}
   - name: mcp-server-b
     image:
       repository: "quay.io/atarazana/compatibility-engine-mcp-rs"
-      tag: "3.1.5"
+      tag: "3.2.0"
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8001      # [VERIFY] assumed same default as mcp-server-a
                              # (same author/framework) — not individually
                              # confirmed for this image
     requiredRole: "mcp-server-b-user"
-    stateless: true
+    statefulMode: false
     resources: {}
