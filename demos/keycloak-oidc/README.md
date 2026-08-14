@@ -797,16 +797,15 @@ server-side.
 > [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md)
 > for the full compatibility matrix and a test script.
 
-**Prerequisites** beyond steps 1-5 above — set these in your **admin
-terminal**:
+**Prerequisites** beyond steps 1-5 above — set `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, and `OPENAI_MODEL` in your `.env` (see `.env.example`),
+then in your **admin terminal**:
 
 ```bash
+source .env
 USER_ID="user1"
 SERVER_NAME="mcp-server-a"
 QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
-export OPENAI_API_KEY="<your-key>"
-export OPENAI_BASE_URL="https://<your-provider>/v1"   # must support Responses API + namespace tools
-export OPENAI_MODEL="<model-name>"
 ```
 
 1. Create the inference provider and configure `inference.local` routing
@@ -989,15 +988,15 @@ Claude Code (pre-installed in the base sandbox image) calling
 `mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an
 Anthropic-compatible LLM endpoint.
 
-**Prerequisites** beyond steps 1-5 above — set these in your terminal:
+**Prerequisites** beyond steps 1-5 above — set `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, and `ANTHROPIC_MODEL` in your `.env` (see
+`.env.example`), then in your terminal:
 
 ```bash
+source .env
 USER_ID="user1"
 SERVER_NAME="mcp-server-a"
 QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
-export OPENAI_API_KEY="<your-key>"
-export ANTHROPIC_BASE_URL="https://<your-anthropic-compatible-endpoint>"  # e.g. https://api.deepseek.com/anthropic
-export ANTHROPIC_MODEL="<model-name>"                                     # e.g. deepseek-v4-pro
 LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
 ```
 
@@ -1030,7 +1029,7 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    ```bash
    openshell provider profile import -f providers/byo-claude-profile.yaml
    openshell provider create --name byo-claude --type byo-claude \
-     --credential "ANTHROPIC_API_KEY=$OPENAI_API_KEY"
+     --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
    ```
 
 2. Attach the provider and grant network access:
