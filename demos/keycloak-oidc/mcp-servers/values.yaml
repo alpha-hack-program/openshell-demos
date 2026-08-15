@@ -49,8 +49,8 @@ envoy:
 servers:
   - name: mcp-server-a
     image:
-      repository: "quay.io/atarazana/eligibility-engine-mcp-rs"
-      tag: "2.4.0"
+      repository: "quay.io/atarazana/elegibility-engine-mcp-rs"
+      tag: "2.4.1"
       pullPolicy: IfNotPresent
     port: 8000              # Envoy listens here; Service targets this
     internalPort: 8001      # app's own hardcoded default when unconfigured

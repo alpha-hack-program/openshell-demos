@@ -111,10 +111,10 @@ for USER_ID in "${USERS[@]}"; do
 
     if [[ "$HTTP_CODE" == "$EXPECTED" ]]; then
       echo "PASS  ${LABEL}  HTTP ${HTTP_CODE} (expected ${EXPECTED})"
-      ((PASS++))
+      ((++PASS))
     else
       echo "FAIL  ${LABEL}  HTTP ${HTTP_CODE} (expected ${EXPECTED})"
-      ((FAIL++))
+      ((++FAIL))
       ERRORS="${ERRORS}\n  ${LABEL}: got ${HTTP_CODE}, expected ${EXPECTED}"
     fi
   done

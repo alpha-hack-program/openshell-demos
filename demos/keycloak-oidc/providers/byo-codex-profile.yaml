@@ -22,4 +22,3 @@ endpoints:
 binaries:
   - /usr/bin/codex
   - /usr/local/bin/codex
-  - /usr/lib/node_modules/@openai/**

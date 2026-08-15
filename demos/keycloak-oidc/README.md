@@ -855,7 +855,6 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    binaries:
      - /usr/bin/codex
      - /usr/local/bin/codex
-     - /usr/lib/node_modules/@openai/**
    ```
 
    Import it and create the provider:
@@ -867,41 +866,56 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    ```
 
 3. Create and configure the sandbox. Use a custom image with Codex >=
-   0.146.0 if the chart's default sandbox image ships an older version:
+   0.146.0 if the chart's default sandbox image ships an older version.
+
+   Generate the Codex config locally (model provider + MCP server
+   registration), then inject it at sandbox creation time with `--upload`
+   so the sandbox starts ready — no `sandbox exec` needed:
 
    ```bash
    CODEX_IMAGE="quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012"  # Codex 0.146.0
+   MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+   CODEX_CONFIG=$(mktemp)
+   cat > "$CODEX_CONFIG" <<EOF
+   model_provider = "openshell-byo"
+   model = "${OPENAI_MODEL}"
+
+   [model_providers.openshell-byo]
+   name = "OpenShell BYO Router"
+   base_url = "https://inference.local/v1"
+   env_key = "OPENAI_API_KEY"
+   wire_api = "responses"
+
+   [mcp_servers.${SERVER_NAME}]
+   url = "${MCP_URL}"
+   bearer_token_env_var = "USER_ACCESS_TOKEN"
+
+   [projects."/sandbox"]
+   trust_level = "trusted"
+   EOF
 
    openshell sandbox create --name "codex-${USER_ID}" \
      --provider byo-codex \
      --provider "user-${USER_ID}" \
-     "${CODEX_IMAGE}" -- true
+     --from "${CODEX_IMAGE}" \
+     --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml" \
+     -- true
+
+   rm -f "$CODEX_CONFIG"
 
    openshell policy update "codex-${USER_ID}" \
      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/local/bin/codex \
-     --binary /usr/bin/node \
-     --binary /usr/bin/node-22 \
-     --binary /usr/lib/node_modules/@openai/** \
      --wait
    ```
 
-4. Write the Codex config and register the MCP server inside the sandbox:
+   > The `--upload` flag takes `<LOCAL_PATH>:<SANDBOX_PATH>` — specify the
+   > full file path on both sides (uploading a directory nests it as a
+   > subdirectory inside the target). The sandbox home is `/sandbox`, so
+   > Codex's config directory is `/sandbox/.codex/`.
 
-   ```bash
-   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
-   mkdir -p ~/.codex && printf "model_provider = \"openshell-byo\"\nmodel = \"'"$OPENAI_MODEL"'\"\n\n[model_providers.openshell-byo]\nname = \"OpenShell BYO Router\"\nbase_url = \"https://inference.local/v1\"\nenv_key = \"OPENAI_API_KEY\"\nwire_api = \"responses\"\n" > ~/.codex/config.toml
-   cat ~/.codex/config.toml
-   '
-
-   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
-   codex mcp add '"${SERVER_NAME}"' \
-     --url "http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp" \
-     --bearer-token-env-var USER_ACCESS_TOKEN
-   '
-   ```
-
-5. Run the test from the **user terminal**:
+4. Run the test from the **user terminal**:
 
    ```bash
    source .env
@@ -944,7 +958,7 @@ Codex (in sandbox)
 
 **Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
 Compatibility Engine — tax calculation). Set the variables and run
-steps 3-5 again:
+steps 3-4 again:
 
 ```bash
 USER_ID="user2"
@@ -983,6 +997,12 @@ Results: 4 passed, 0 failed
 > configured with an `/anthropic` route). Standard OpenAI-compatible
 > endpoints (vLLM, OpenAI, etc.) will **not** work — use the Codex recipe
 > above instead.
+>
+> **DeepSeek note:** the Anthropic-compatible endpoint uses a different
+> base URL (`https://api.deepseek.com/anthropic`) and model name
+> (`deepseek-chat`) than the OpenAI endpoint (`https://api.deepseek.com`,
+> `deepseek-v4-flash`). The API key is the same for both. See
+> `.env.example` for the correct values.
 
 Claude Code (pre-installed in the base sandbox image) calling
 `mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an

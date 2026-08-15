@@ -112,7 +112,86 @@ a parent directory for others.
 | [`base`](demos/base/README.md) | Demo-agnostic OpenShell-on-OpenShift install + hello-world sandbox verification | Verified end to end |
 | [`keycloak-oidc`](demos/keycloak-oidc/README.md) | Keycloak as OIDC IdP, per-user credential isolation via Providers v2, MCP servers gated by Keycloak role via an Envoy sidecar | Verified end to end against a live cluster |
 
-## 5. References (repo-wide)
+## 5. Running demos headlessly (Claude-specific)
+
+When running demo guides that involve browser-based OAuth flows (e.g.
+`openshell gateway login`, the `onboard` tool), use **Playwright** with
+headless Chromium to automate the Keycloak login form. This section
+captures the quirks discovered while running the guides end to end.
+
+### Playwright setup
+
+```bash
+mkdir -p /tmp/playwright-scratch && cd /tmp/playwright-scratch
+npm init -y && npm install playwright
+npx playwright install chromium
+```
+
+### Keycloak demo credentials
+
+Demo user credentials (usernames, passwords, role assignments) are defined
+in each demo's realm export JSON — e.g.
+`demos/keycloak-oidc/keycloak/realm-export.json`. Parse that file for
+usernames and passwords rather than hardcoding them.
+
+### Preventing real browser popups
+
+The `openshell` CLI uses `xdg-open` (Linux) to launch the browser for
+OAuth flows. To intercept the URL without opening Firefox/Chrome, create
+fake stubs in a temp directory and prepend it to `PATH`:
+
+```bash
+FAKE_BIN_DIR=$(mktemp -d)
+for cmd in xdg-open firefox google-chrome chromium-browser open; do
+  printf '#!/bin/bash\necho "$1" > /tmp/oauth-url\n' > "$FAKE_BIN_DIR/$cmd"
+  chmod +x "$FAKE_BIN_DIR/$cmd"
+done
+export PATH="$FAKE_BIN_DIR:$PATH"
+export DISPLAY=""   # prevent any GUI fallback
+```
+
+Then run the CLI command — it writes the URL to `/tmp/oauth-url` instead
+of opening a browser. Read that file and drive it with Playwright.
+
+### Browser-based OAuth flows
+
+- **`openshell gateway add`** already triggers the browser-based login
+  flow — there is no need to run a separate `openshell gateway login`
+  afterward.
+- **`openshell gateway login`** has no `--no-browser` flag. Use the
+  `xdg-open` interception above to capture the URL, then drive it with
+  Playwright. The CLI starts a callback listener on a random localhost
+  port — after Playwright submits the Keycloak form, wait for the redirect
+  to `localhost` or `127.0.0.1`.
+- **The `onboard` tool** supports `--no-browser`, which prints the
+  authorization URL to stdout instead of opening a browser. Start the tool
+  in a child process, capture the URL, drive the Keycloak login form with
+  Playwright, and let the redirect complete to the tool's localhost
+  callback listener (`127.0.0.1:9999`).
+
+### Keycloak login form selectors
+
+The Keycloak login page uses these selectors (stable across Keycloak 26+):
+- Username: `#username`
+- Password: `#password`
+- Submit button: `#kc-login`
+
+After submitting, wait for the redirect to `localhost` (the OAuth callback).
+
+### OpenShell CLI quirks
+
+- **Sandbox home directory** is `/sandbox`, not `/home/sandbox`.
+- **`sandbox create --from <image>`** — the image is passed via `--from`,
+  not as a positional argument.
+- **`--upload` path semantics** — takes `<LOCAL_PATH>:<SANDBOX_PATH>`.
+  Uploading a directory nests it as a subdirectory inside the target. To
+  inject a single file, specify the full file path on both sides:
+  `--upload /tmp/config.toml:/sandbox/.codex/config.toml`.
+- **`((count++))` under `set -e`** — post-increment from 0 evaluates to 0
+  (falsy), which `set -e` treats as a failure. Use pre-increment
+  `((++count))` instead.
+
+## 6. References (repo-wide)
 
 Demo-specific links live in each demo's own README. These apply across the
 whole repo:
