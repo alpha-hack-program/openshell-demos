@@ -11,3 +11,10 @@ credentials:
     required: true
     auth_style: header
     header_name: x-api-key
+
+endpoints:
+  - host: "<llm-host>"
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce

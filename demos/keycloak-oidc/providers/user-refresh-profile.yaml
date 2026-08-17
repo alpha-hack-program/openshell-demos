@@ -16,3 +16,15 @@ credentials:
       token_url: "https://<keycloak-host>/realms/openshell/protocol/openid-connect/token"
       scopes: [openid, offline_access]
       refresh_before_seconds: 300
+
+endpoints:
+  - host: "mcp-server-a.<openshell-namespace>.svc.cluster.local"
+    port: 8000
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: "mcp-server-b.<openshell-namespace>.svc.cluster.local"
+    port: 8000
+    protocol: rest
+    access: read-write
+    enforcement: enforce

@@ -31,3 +31,7 @@ certManager:
     #
     # If running helm manually (not via the script), you must add these yourself —
     # especially the route FQDN, without which TLS handshakes will fail.
+
+openshiftRoute:
+  enabled: true
+  # host is passed via --set at install time (depends on namespace + cluster domain)

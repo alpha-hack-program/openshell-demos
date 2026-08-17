@@ -94,6 +94,8 @@ a parent directory for others.
 
 ## 3. Cross-repo conventions
 
+- **Branch naming:** version-update branches use `v<VERSION>` (e.g.
+  `v0.0.106`). Feature or fix branches use a short descriptive slug.
 - **Environment variables:** the root `.env` holds cluster-wide variables
   (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Each demo has its own
   `.env` with demo-specific variables — at minimum `OPENSHELL_NAMESPACE`.
@@ -106,6 +108,12 @@ a parent directory for others.
   folder.
 - **Idempotency:** scripts should be safe to re-run (`get || create` patterns,
   `helm upgrade --install` rather than bare `install`).
+- **Keycloak operator:** always use the **Red Hat build of Keycloak**
+  (`rhbk-operator` from the **Red Hat Operators** catalog). Search for
+  `rhbk`, not `keycloak` — searching `keycloak` returns unrelated community
+  operators. Never suggest the community `keycloak-operator` or other
+  alternatives without first confirming `rhbk-operator` is unavailable via
+  `oc get packagemanifests -n openshift-marketplace | grep rhbk-operator`.
 - **Honesty about confidence:** if a command in a README is inferred rather
   than confirmed against a live source (docs, `--help` output, an actual
   running cluster), it's marked **[VERIFY]** in that README and stays marked
