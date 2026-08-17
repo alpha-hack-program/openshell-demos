@@ -165,8 +165,8 @@ echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 
 To find the latest chart version, check the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
-tag uses a `v` prefix (e.g. `v0.0.97`) but the chart version does **not**
-(e.g. `0.0.97`). You can also query it directly:
+tag uses a `v` prefix (e.g. `v0.0.106`) but the chart version does **not**
+(e.g. `0.0.106`). You can also query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
@@ -216,7 +216,9 @@ Optionally, run the helper script to verify your `.env` values match:
 #### 1b. Deploy Keycloak on the cluster
 
 We use the **Red Hat build of Keycloak** (RHBK) Operator, available from
-OperatorHub on OpenShift.
+OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
+**Red Hat Operators** catalog) — do **not** use the community
+`keycloak-operator` from Community Operators.
 
 1. Create the namespace first, then install the Operator into it:
 
@@ -224,15 +226,46 @@ OperatorHub on OpenShift.
    oc create namespace keycloak 2>/dev/null || true
    ```
 
-   In the OpenShift web console, go to **Operators > OperatorHub**, search
-   for **Keycloak**, and install the **Red Hat build of Keycloak** Operator.
+   **Via the web console:** go to **Operators > OperatorHub**, search for
+   **`rhbk`**, and install the **Red Hat build of Keycloak** Operator.
    Select **A specific namespace on the cluster** and choose `keycloak`.
+
+   **Via the CLI:**
+
+   ```bash
+   # Verify the package is available
+   oc get packagemanifests -n openshift-marketplace | grep rhbk-operator
+
+   # Create OperatorGroup + Subscription
+   oc apply -f - <<'EOF'
+   apiVersion: operators.coreos.com/v1
+   kind: OperatorGroup
+   metadata:
+     name: keycloak-og
+     namespace: keycloak
+   spec:
+     targetNamespaces:
+       - keycloak
+   ---
+   apiVersion: operators.coreos.com/v1alpha1
+   kind: Subscription
+   metadata:
+     name: rhbk-operator
+     namespace: keycloak
+   spec:
+     channel: stable-v26.6
+     name: rhbk-operator
+     source: redhat-operators
+     sourceNamespace: openshift-marketplace
+     installPlanApproval: Automatic
+   EOF
+   ```
 
 2. Wait for the Operator to be ready:
 
    ```bash
-   oc -n keycloak get csv | grep -i keycloak
-   # Should show a row with "Succeeded" for the keycloak-operator
+   oc -n keycloak get csv | grep rhbk
+   # Should show a row with "Succeeded" for the rhbk-operator
    ```
 
 3. Source your root `.env` (for `CLUSTER_APPS_DOMAIN`) and create a Keycloak
@@ -324,10 +357,9 @@ usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
-This step installs the OpenShell gateway into its own namespace via Helm
-(2a), exposes it outside the cluster with an OpenShift passthrough Route so
-the CLI can reach it (2b), and then extracts the mTLS client certificates
-and registers the gateway endpoint with the `openshell` CLI (2c).
+This step installs the OpenShell gateway with OIDC and a passthrough Route
+in a single Helm install (2a), then extracts the mTLS client certificates
+and registers the gateway endpoint with the `openshell` CLI (2b).
 
 > **If you already have another OpenShell installation** on the same cluster
 > (the base demo, a previous run of this demo in a different namespace, etc.),
@@ -349,9 +381,14 @@ This demo provides two Helm values files:
   be installed on the cluster. Set `CERT_MANAGER=true` in your `.env` to use
   this path.
 
-Both files contain a `<keycloak-host>` placeholder in the OIDC issuer URL.
-Use `--set` to substitute it with your real Keycloak hostname at install
-time.
+Both files contain a `<keycloak-host>` placeholder in the OIDC issuer URL
+and `openshiftRoute.enabled: true`. Use `--set` to fill in your Keycloak
+hostname and the Route FQDN at install time. The chart creates the
+passthrough Route automatically — no manual `oc create route` needed.
+
+The Route hostname must also be in the server certificate's SANs — without
+it, TLS handshakes will fail. The `--set` overrides below add it alongside
+the namespace-specific service DNS names.
 
 ```bash
 source .env
@@ -360,52 +397,8 @@ source ../../.env
 oc create namespace "$OPENSHELL_NAMESPACE" 2>/dev/null || true
 oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAMESPACE"
 
-if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
-  VALUES_FILE=helm/values-certmanager.yaml
-else
-  VALUES_FILE=helm/values.yaml
-fi
-
-helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
-  --version "$OPENSHELL_CHART_VERSION" \
-  --namespace "$OPENSHELL_NAMESPACE" \
-  -f "$VALUES_FILE" \
-  --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
-```
-
-Wait for the gateway to come up:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
-```
-
-#### 2b. Expose the gateway via a passthrough Route
-
-This is the same experimental approach used in the
-[base demo](../base/README.md#exposing-the-gateway-via-passthrough-route) —
-not supported by NVIDIA or Red Hat, but more practical than port-forwarding
-for multi-user demos. See the base demo README for background.
-
-Derive the Route hostname and create the passthrough Route:
-
-```bash
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
 
-oc -n "$OPENSHELL_NAMESPACE" create route passthrough openshell \
-  --service=openshell \
-  --port=8080 \
-  --hostname="${ROUTE_HOST}" 2>/dev/null || true
-```
-
-The gateway's TLS cert was generated at install time without this hostname in
-the SANs. Delete the TLS secrets so the gateway regenerates them with the
-Route hostname included:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" delete secret \
-  openshell-server-tls openshell-client-tls openshell-jwt-keys
-
-# Re-deploy so the gateway generates new certs that include the Route hostname
 if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
   VALUES_FILE=helm/values-certmanager.yaml
   SAN_SET=(
@@ -418,17 +411,28 @@ else
   SAN_SET=(--set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}")
 fi
 
-helm upgrade openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
   -f "$VALUES_FILE" \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  --set "openshiftRoute.host=${ROUTE_HOST}" \
   "${SAN_SET[@]}"
+```
 
+Wait for the gateway to come up:
+
+```bash
 oc -n "$OPENSHELL_NAMESPACE" rollout status statefulset/openshell
 ```
 
-#### 2c. Register the gateway with the CLI
+Verify the Route was created:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" get route openshell
+```
+
+#### 2b. Register the gateway with the CLI
 
 Extract the client mTLS certificates and register the gateway:
 
@@ -452,7 +456,7 @@ openshell gateway add "https://${ROUTE_HOST}:443" \
   --oidc-scopes "openid offline_access"
 ```
 
-#### 2d. Log in to the gateway
+#### 2c. Log in to the gateway
 
 The gateway requires OIDC authentication — you must log in before you can
 run any admin commands. This opens a browser and redirects you to Keycloak:
@@ -463,7 +467,7 @@ openshell gateway login
 
 Log in as the admin user (the one with the `openshell-admin` realm role).
 
-#### 2e. Enable Providers v2
+#### 2d. Enable Providers v2
 
 ```bash
 openshell settings set --global --key providers_v2_enabled --value true
@@ -477,11 +481,6 @@ openshell gateway list
 ```
 
 `openshell status` should show the gateway as connected and authenticated.
-
-> The script `scripts/02-apply-oidc-overlay.sh` runs the helm install
-> commands from step 2a. The Route, mTLS, and gateway registration steps
-> (2b–2c) follow the same pattern as the base demo — refer to
-> [`demos/base/README.md`](../base/README.md) for details.
 
 ### 3. Onboard a user
 
@@ -589,23 +588,27 @@ refresh strategy — how the gateway obtains fresh access tokens from Keycloak
 on the user's behalf. The **provider instance** stores each user's refresh
 token and is linked to the profile.
 
-The profile handles credential lifecycle only. It does not define network
-policies — which in-cluster services a sandbox can reach is controlled
-separately via `openshell policy update` (see
-[step 5](#5-run-the-demo)), because those endpoints are
-deployment-specific (they depend on your namespace and which services you
-deploy).
+The profile defines both the credential refresh strategy and the
+**endpoint binding** — which endpoints the proxy is allowed to inject the
+credential for. In 0.0.106+, credentials are only delivered to sandboxes
+when the profile includes matching endpoints (this is a security
+enhancement that prevents credentials from leaking to unintended
+destinations). Envoy RBAC at each MCP server still enforces role-based
+access — the endpoint binding only tells the proxy "you may inject this
+credential for requests to these hosts."
 
 First, import the provider profile. The profile at
-`providers/user-refresh-profile.yaml` contains a `<keycloak-host>`
-placeholder in its `token_url` — the URL the gateway calls to refresh
-tokens. Replace it with your actual Keycloak hostname:
+`providers/user-refresh-profile.yaml` contains two placeholders:
+`<keycloak-host>` in `token_url` and `<openshell-namespace>` in the MCP
+server endpoint hostnames. Replace both with your actual values:
 
 ```bash
 source .env
 
 TMPFILE=$(mktemp --suffix=.yaml)
-sed "s|<keycloak-host>|${KEYCLOAK_HOST}|" providers/user-refresh-profile.yaml > "$TMPFILE"
+sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
+    -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
+    providers/user-refresh-profile.yaml > "$TMPFILE"
 openshell provider profile import -f "$TMPFILE"
 rm -f "$TMPFILE"
 ```
@@ -686,7 +689,7 @@ two pre-configured ones, see
 
 ### 5. Run the demo
 
-Create a sandbox, attach the user's provider and network policy, then
+Create a sandbox with the user's provider, add binary permissions, then
 verify that MCP calls succeed with the user's own scoped token — and that
 cross-user isolation holds.
 
@@ -697,52 +700,28 @@ SERVER_NAME="mcp-server-a"
 MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 ```
 
-**Create the sandbox.** The `-- true` creates the sandbox without entering
-an interactive shell — we use `exec` to run commands inside it. Host-side
-variables like `$MCP_URL` are not available inside the sandbox, so pass
-them via `exec --env`:
+**Create the sandbox with the provider attached.** The `--provider` flag
+attaches the user's credential at creation time — this injects
+`$USER_ACCESS_TOKEN` as a resolve placeholder that the supervisor's proxy
+resolves to a real Keycloak access token on matching outbound requests.
+The `-- true` creates the sandbox without entering an interactive shell:
 
 ```bash
-openshell sandbox create --name "demo-${USER_ID}" -- true
+openshell sandbox create --name "demo-${USER_ID}" \
+  --provider "user-${USER_ID}" \
+  -- true
 ```
 
-**Attach the user's provider** so the sandbox gets the user's credentials.
-This injects `$USER_ACCESS_TOKEN` (a short-lived Keycloak access token,
-automatically refreshed by the gateway) as an environment variable inside
-the sandbox:
-
-```bash
-openshell sandbox provider attach "demo-${USER_ID}" "user-${USER_ID}"
-```
-
-**Test without the Authorization header** — the request reaches the MCP
-server but Envoy's RBAC filter rejects it:
-
-```bash
-openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -so /dev/null -w "%{http_code}" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-# Expected: 403 — request rejected by Envoy
-```
-
-**Add a network policy** so the sandbox can reach the MCP server. The
-Keycloak roles are already assigned via the realm import (step 1c) — this
-step only needs to tell OpenShell which endpoint the sandbox is allowed to
-connect to:
+**Add binary permissions** so curl can reach the MCP server. The provider
+profile already contributes the MCP server endpoint to the sandbox's
+network policy (endpoint binding), but does not grant binary-level
+permissions — those are deployment-specific and applied per-sandbox:
 
 ```bash
 openshell policy update "demo-${USER_ID}" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/bin/curl --wait
 ```
-
-Note that network policies are applied per-sandbox via `openshell policy
-update`, not in the provider profile. The profile defines *how* to refresh
-credentials; the policy defines *where* the sandbox can connect.
 
 **Verify** — the same request with the user's token should now succeed.
 `$USER_ACCESS_TOKEN` is injected into the sandbox by the provider:
@@ -1027,29 +1006,20 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    The profile ([`providers/byo-claude-profile.yaml`](providers/byo-claude-profile.yaml))
    tells OpenShell to inject your LLM API key into the sandbox as
    `ANTHROPIC_API_KEY` — the environment variable Claude Code expects.
+   It also includes an endpoint binding for `<llm-host>` (your LLM
+   provider's hostname), which must be substituted before import — in
+   0.0.106, the proxy only injects credentials for matching endpoints.
    Base URL and model name are passed via `--env` at exec time (step 3),
-   since OpenShell only injects **credentials**, not config values:
+   since OpenShell only injects **credentials**, not config values.
 
-   ```yaml
-   id: byo-claude
-   display_name: BYO LLM (Claude Code compatible)
-   description: OpenAI-compatible LLM for Claude Code
-   category: inference
-   inference_capable: true
-
-   credentials:
-     - name: api_key
-       description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
-       env_vars: [ANTHROPIC_API_KEY]
-       required: true
-       auth_style: header
-       header_name: x-api-key
-   ```
-
-   Import it and create a provider instance with your key:
+   Substitute the LLM host placeholder, import, and create the provider:
 
    ```bash
-   openshell provider profile import -f providers/byo-claude-profile.yaml
+   TMPFILE=$(mktemp --suffix=.yaml)
+   sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+   openshell provider profile import -f "$TMPFILE"
+   rm -f "$TMPFILE"
+
    openshell provider create --name byo-claude --type byo-claude \
      --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
    ```
@@ -1184,7 +1154,7 @@ exact patch release before relying on this beyond a demo.
   examples. Reconcile every command against the real repo before running it.
 - **Provider profile schema** — verified against
   [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2)
-  and a live gateway (CLI 0.0.97). `refresh` (with `token_url`, `scopes`,
+  and a live gateway (CLI 0.0.106). `refresh` (with `token_url`, `scopes`,
   `strategy`) must nest under the specific entry in `credentials[]`, not as a
   top-level profile field.
 - **Real user identity federation** (brokering each user's own IdP into

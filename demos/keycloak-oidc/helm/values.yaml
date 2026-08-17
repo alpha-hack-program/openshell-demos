@@ -25,3 +25,7 @@ server:
     spiffe:
       enabled: true          # Path B (stretch) only — leave false if only doing Path A
       workloadApiSocketPath: "/spiffe-workload-api/spire-agent.sock"
+
+openshiftRoute:
+  enabled: true
+  # host is passed via --set at install time (depends on namespace + cluster domain)

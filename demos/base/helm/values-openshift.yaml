@@ -13,3 +13,7 @@ podSecurityContext:
 
 securityContext:
   runAsUser: null
+
+openshiftRoute:
+  enabled: true
+  # host is passed via --set at install time (depends on namespace + cluster domain)

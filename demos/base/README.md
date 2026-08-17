@@ -28,7 +28,7 @@ entirely optional.
 On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
 
 ```bash
-OPENSHELL_VERSION="0.0.97"   # match OPENSHELL_CHART_VERSION in .env
+OPENSHELL_VERSION="0.0.106"   # match OPENSHELL_CHART_VERSION in .env
 sudo dnf install -y \
   "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
 openshell --version
@@ -45,9 +45,9 @@ openshell --version
 Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
 https://github.com/NVIDIA/OpenShell/releases.
 
-> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.97`) but the
-> Helm chart version does **not** (`0.0.97`). `OPENSHELL_CHART_VERSION` in
-> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.97`.
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.106`) but the
+> Helm chart version does **not** (`0.0.106`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.106`.
 
 #### Bash completions
 
@@ -335,8 +335,8 @@ echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 
 To find the latest chart version, check the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
-tag uses a `v` prefix (e.g. `v0.0.97`) but the chart version does **not**
-(e.g. `0.0.97`). You can also query it directly:
+tag uses a `v` prefix (e.g. `v0.0.106`) but the chart version does **not**
+(e.g. `0.0.106`). You can also query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
@@ -699,7 +699,7 @@ openshell provider delete byo-openai
 | Sandbox pods stuck `Pending` / SCC admission errors | `privileged` SCC not granted to `openshell-sandbox` service account in `$OPENSHELL_NAMESPACE`. Note: the SA is `openshell-sandbox`, **not** `default` |
 | `helm install` rejects pod security fields | `podSecurityContext.fsGroup` / `securityContext.runAsUser` not nulled out — OpenShift's admission controller needs to assign these itself |
 | Gateway pod stuck in `ContainerCreating`, event says `secret "openshell-jwt-keys" not found` | Do **not** set `pkiInitJob.enabled: false`. The PKI init job generates the sandbox JWT signing keys even when TLS is disabled. Leave it at the default (`true`) |
-| `helm install` says chart `not found` at `oci://ghcr.io/nvidia/openshell/helm-chart` | The chart version must **not** have a `v` prefix. Use `0.0.97`, not `v0.0.97`. The Git tag uses `v0.0.97` but the OCI chart is published as `0.0.97` |
+| `helm install` says chart `not found` at `oci://ghcr.io/nvidia/openshell/helm-chart` | The chart version must **not** have a `v` prefix. Use `0.0.106`, not `v0.0.106`. The Git tag uses `v0.0.106` but the OCI chart is published as `0.0.106` |
 | `kubectl apply` for Agent Sandbox returns 404 | The manifest file is `sandbox.yaml`, not `manifest.yaml` — see [Installing Agent Sandbox](#installing-agent-sandbox) |
 | Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' .env | xargs)` and `export $(grep -v '^#' ../../.env | xargs)` instead of plain `source` |
 | Sandbox pods never schedule at all | Agent Sandbox controller/CRDs not installed before the chart |

@@ -38,3 +38,7 @@ server:
     rolesClaim: "realm_access.roles"
     adminRole: "openshell-admin"
     userRole: "openshell-user"
+
+openshiftRoute:
+  enabled: true
+  # host is passed via --set at install time (depends on namespace + cluster domain)
