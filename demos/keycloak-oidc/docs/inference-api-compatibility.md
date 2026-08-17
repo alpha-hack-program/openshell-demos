@@ -17,18 +17,21 @@ for each case.
 ## External endpoints (hosted APIs)
 
 External providers expose a managed API — you point OpenShell at a URL and
-supply an API key. No model serving to manage.
+supply an API key. No model serving to manage. Any OpenAI- or
+Anthropic-compatible provider works (DeepSeek, Together, Fireworks, etc.)
+— the constraint is which wire format and tool types the provider supports.
 
-| Provider | Codex (Responses API) | Claude Code (Messages API) | Notes |
+| Endpoint type | Codex (Responses API) | Claude Code (Messages API) | What to check |
 |---|---|---|---|
-| OpenAI API | **Works** | N/A | Native Responses API, including `namespace` tools |
-| DeepSeek (OpenAI endpoint) | **Works** | N/A | `https://api.deepseek.com`, model `deepseek-v4-flash` |
-| DeepSeek (Anthropic endpoint) | N/A | **Works** | `https://api.deepseek.com/anthropic`, model `deepseek-chat` |
-| Any Anthropic Messages-compatible API | N/A | **Works** | e.g. LiteLLM with `/anthropic` route |
+| OpenAI Responses API + `namespace` tools | **Works** (incl. MCP) | N/A | Only OpenAI's own API supports `namespace` tools today. Most third-party Responses API implementations reject them (400) |
+| OpenAI Responses API (`function` tools only) | **Model only** | N/A | Codex model-only calls work. Codex + MCP fails — Codex sends MCP tools as `namespace`, which the provider rejects. Tested against DeepSeek (Aug 2026) |
+| Anthropic Messages API | N/A | **Works** (incl. MCP) | Claude Code sends tools in Anthropic format — no `namespace` issue. Tested against DeepSeek's `/anthropic` route (Aug 2026) |
 
-With external endpoints, API compatibility is a function of the provider —
-if they support the wire format your tool needs, it works. No vLLM version
-to worry about.
+> **`namespace` tools are an OpenAI-only feature today.** Most third-party
+> providers that expose a Responses API accept `function` tools but reject
+> `namespace`. If you need Codex + MCP with an external provider, verify
+> `namespace` tool support before deploying — use the test script at the
+> end of this doc.
 
 ## On-cluster models via llm-d (vLLM)
 
@@ -57,10 +60,7 @@ Tested against llm-d endpoints on OpenShift:
 
 > **No RHOAI image for vLLM 0.25.** As of August 2026, RHOAI ships
 > vLLM 0.18.0. vLLM 0.25+ is only available via upstream container images
-> (e.g. `vllm/vllm-openai`). Do not confuse old RHOAI image tags (like
-> `rhoai/odh-vllm-cuda-rhel9:v2.25.x`, which is a pre-3.x RHOAI version
-> number) with the vLLM engine version — those are unrelated version
-> schemes.
+> (e.g. `vllm/vllm-openai`).
 
 ## Codex compatibility
 
@@ -77,8 +77,9 @@ tools under a named scope (e.g. `compatibility/calc_tax`).
 ### Codex + external endpoint
 
 If your external endpoint supports the Responses API with `namespace` tools
-(e.g. OpenAI API, DeepSeek), Codex 0.146.0 works out of the box — no
-version constraints.
+(e.g. OpenAI's own API), Codex 0.146.0 + MCP works out of the box. Most
+third-party providers (DeepSeek, etc.) do **not** support `namespace` tools
+yet — Codex model-only calls work, but MCP tool calls fail with a 400.
 
 ### Codex + on-cluster llm-d
 
@@ -111,9 +112,13 @@ OpenAI Responses API. It has its own MCP client (not rmcp).
 
 | Requirement | Status |
 |---|---|
-| Messages API at `/v1/messages` | Works on vLLM 0.18.0+ (on-cluster) and external Anthropic-compatible endpoints |
-| Tool calling via Messages API | Requires model support for Anthropic tool-use format |
+| Messages API at `/v1/messages` | Works on vLLM 0.18.0+ (on-cluster, Python frontend only) and external Anthropic-compatible endpoints |
+| Tool calling via Messages API | vLLM translates Anthropic tool format to OpenAI internally — the model itself does not need native Anthropic tool support |
 | MCP client | Built-in (not rmcp) — no `namespace` tool issue |
+
+> **vLLM caveat:** the `/v1/messages` endpoint is only available on vLLM's
+> Python frontend. The Rust frontend (`VLLM_USE_RUST_FRONTEND=1`) does not
+> implement the Messages API.
 
 ### Claude Code + external endpoint
 
@@ -142,25 +147,25 @@ use Streamable HTTP transport. Two issues were identified and fixed:
    2025-06-18` in their initialize response. Older rmcp versions may not
    recognize this version. Fixed by upgrading to Codex 0.146.0 (newer rmcp).
 
-Server image tags with the fix:
-- `compatibility-engine-mcp-rs:3.1.5` — fixed
-- `eligibility-engine-mcp-rs:2.0.2` — **not yet fixed** (apply same change)
+Server image tags deployed by the Helm chart (`mcp-servers/values.yaml`):
+- `compatibility-engine-mcp-rs:3.2.0` — fixed (`statefulMode: false`)
+- `eligibility-engine-mcp-rs:2.4.1` — fixed (`statefulMode: false`)
 
 ## Decision tree
 
 ```
 What is your LLM endpoint?
-├── External hosted API (OpenAI, DeepSeek, etc.)
-│   ├── Supports OpenAI Responses API + namespace tools?
-│   │   └── Yes → Codex 0.146.0 + MCP (full pipeline)
-│   ├── Supports Anthropic Messages API?
-│   │   └── Yes → Claude Code recipe (Messages API + built-in MCP)
-│   └── Supports both?
-│       └── Either tool works — pick based on preference
+├── External hosted API
+│   ├── Supports Responses API + namespace tools? (currently OpenAI only)
+│   │   └── Yes → Codex + MCP works
+│   ├── Supports Responses API (function tools only)?
+│   │   └── Yes → Codex model-only works (no MCP)
+│   └── Supports Anthropic Messages API?
+│       └── Yes → Claude Code + MCP works
 │
 └── On-cluster llm-d (vLLM)
     ├── RHOAI 3.4.x (vLLM 0.18.0)
-    │   ├── Claude Code → Works (Messages API supported)
+    │   ├── Claude Code → Works (Messages API, Python frontend)
     │   ├── Codex model-only (no MCP) → Works (function tools OK)
     │   └── Codex + MCP → Blocked (namespace tools need vLLM 0.25+)
     │

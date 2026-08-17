@@ -13,9 +13,9 @@ compatibility before running a demo.
 | **Anthropic Messages API** | `POST /v1/messages` | Claude Code |
 
 Codex and Claude Code require **different** API formats. You cannot use
-one endpoint for both unless the provider exposes both formats (e.g.
-DeepSeek serves OpenAI at `https://api.deepseek.com` and Anthropic at
-`https://api.deepseek.com/anthropic`).
+one endpoint for both unless your provider exposes both formats (some
+providers offer separate OpenAI-compatible and Anthropic-compatible
+endpoints under different base URLs).
 
 ## Codex: Responses API with namespace tools
 
@@ -30,26 +30,24 @@ This means the LLM endpoint must support **both**:
 
 ### Provider compatibility
 
-| Provider | Responses API | Namespace tools | Minimum version | Notes |
-|---|---|---|---|---|
-| **OpenAI** | Yes | Yes | — | Native support |
-| **vLLM** | Yes (v0.8.0+) | Yes (v0.25.0+) | **v0.25.0** | Older vLLM accepts the Responses API but rejects namespace tools with a 400 error |
-| **DeepSeek** | Yes | Yes | — | Use `https://api.deepseek.com`, model `deepseek-v4-flash` |
-| **Ollama** | No | No | — | Chat Completions only |
-| **LiteLLM** | Partial | No | — | Proxies Chat Completions; does not translate namespace tools |
+| Endpoint type | Responses API | Namespace tools | Notes |
+|---|---|---|---|
+| **OpenAI API** | Yes | Yes | Only provider confirmed to support `namespace` tools natively |
+| **vLLM (on-cluster)** | Yes (v0.8.0+) | Yes (v0.25.0+) | Older vLLM accepts the Responses API but rejects namespace tools with a 400 error. RHOAI 3.4.x ships vLLM 0.18.0; 0.25+ is upstream only |
+| **Most third-party providers** | Yes | **No** | Tested against DeepSeek (Aug 2026) — Responses API works, `namespace` tools rejected (400). Expect similar behaviour from other providers until they add support |
 
-**The vLLM version boundary is the most common gotcha.** vLLM v0.8.0
-added the Responses API, so Codex can connect and start a session — but
-MCP tool calls fail with a 400 because vLLM didn't understand namespace
-tools until v0.25.0. The error is not obvious: Codex reports a generic
-tool-call failure, not "namespace tools unsupported."
+> **`namespace` tools are the key constraint.** Many providers implement
+> the Responses API but reject `namespace` tool definitions — they only
+> accept `function` tools. Codex model-only calls work fine on these
+> providers; only Codex + MCP breaks. Use the test script at the end of
+> this doc to verify before deploying.
 
 ### Verified combinations
 
-| Codex version | LLM provider | MCP server version | Result |
+| Codex version | LLM endpoint | MCP server version | Result |
 |---|---|---|---|
-| 0.146.0 | vLLM 0.27.1 | 3.1.5 | Pass |
-| 0.146.0 | DeepSeek (`deepseek-v4-flash`) | 2.0.2 / 3.1.1 | Pass |
+| 0.146.0 | vLLM 0.27.1 (upstream, on-cluster) | 2.4.1 / 3.2.0 | Pass (full pipeline incl. MCP) |
+| 0.146.0 | DeepSeek (external) | 2.4.1 / 3.2.0 | Pass (model-only — namespace tools rejected) |
 
 ## Claude Code: Anthropic Messages API
 
@@ -58,37 +56,31 @@ sends MCP tools as standard tool definitions with `input_schema` — no
 namespace extension involved.
 
 This means the LLM endpoint must speak the **Anthropic** wire format, not
-OpenAI. Standard OpenAI-compatible endpoints (vLLM, OpenAI's own API)
-will **not** work.
+OpenAI. OpenAI's own API does **not** work (it only speaks its own
+format). vLLM v0.18.0+ does support the Messages API on the Python
+frontend — see the provider table below.
 
-### Provider compatibility
+### Endpoint compatibility
 
-| Provider | Anthropic Messages API | Notes |
+| Endpoint type | Anthropic Messages API | Notes |
 |---|---|---|
-| **Anthropic** | Yes | Native |
-| **DeepSeek** | Yes | Use `https://api.deepseek.com/anthropic`, model `deepseek-chat` (different URL and model name from the OpenAI endpoint) |
+| **Anthropic API** | Yes | Native |
+| **Third-party Anthropic-compatible** | Yes | Some providers expose a separate Anthropic-compatible route (e.g. a `/anthropic` path). Tested against DeepSeek (Aug 2026) |
 | **LiteLLM** | Yes (with `/anthropic` route) | Must be explicitly configured to proxy Anthropic format |
-| **vLLM** | No | OpenAI format only |
-| **OpenAI** | No | Own format only |
+| **vLLM (on-cluster)** | Yes (v0.18.0+, Python frontend only) | Rust frontend does not implement Messages API |
+| **OpenAI API** | No | Own format only |
 
-### DeepSeek dual-endpoint caveat
-
-DeepSeek exposes two separate endpoints with **different base URLs and
-model names** but the **same API key**:
-
-| Format | Base URL | Model name |
-|---|---|---|
-| OpenAI (Codex) | `https://api.deepseek.com` | `deepseek-v4-flash` |
-| Anthropic (Claude Code) | `https://api.deepseek.com/anthropic` | `deepseek-chat` |
-
-Using the wrong combination (e.g. Anthropic base URL with
-`deepseek-v4-flash`) fails silently or returns malformed responses.
+> **Dual-endpoint providers.** Some providers expose both an
+> OpenAI-compatible and an Anthropic-compatible endpoint under different
+> base URLs (same API key). Make sure you configure the right base URL
+> for each tool — the OpenAI URL won't work with Claude Code and vice
+> versa.
 
 ### Verified combinations
 
-| Claude Code version | LLM provider | MCP server version | Result |
+| Claude Code version | LLM endpoint | MCP server version | Result |
 |---|---|---|---|
-| (sandbox default) | DeepSeek (`deepseek-chat`) | 2.0.2 / 3.1.1 | Pass |
+| (sandbox default) | DeepSeek Anthropic endpoint (external) | 2.4.1 / 3.2.0 | Pass (incl. MCP tool use) |
 
 ## Test script
 
@@ -98,9 +90,9 @@ endpoint:
 
 ```bash
 # Set these to match your provider
-OPENAI_BASE_URL="https://api.deepseek.com"
-OPENAI_API_KEY="sk-..."
-OPENAI_MODEL="deepseek-v4-flash"
+OPENAI_BASE_URL="https://your-provider.example.com"
+OPENAI_API_KEY="your-api-key"
+OPENAI_MODEL="your-model-name"
 
 # 1. Basic Responses API support
 echo "=== Testing Responses API ==="
@@ -160,9 +152,9 @@ echo "Endpoint is compatible with Codex 0.146.0+"
 For Claude Code, verify the Anthropic Messages API:
 
 ```bash
-ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-ANTHROPIC_API_KEY="sk-..."
-ANTHROPIC_MODEL="deepseek-chat"
+ANTHROPIC_BASE_URL="https://your-provider.example.com/anthropic"
+ANTHROPIC_API_KEY="your-api-key"
+ANTHROPIC_MODEL="your-model-name"
 
 echo "=== Testing Anthropic Messages API ==="
 HTTP_CODE=$(curl -sk -o /tmp/messages-test -w "%{http_code}" \

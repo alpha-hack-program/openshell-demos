@@ -1001,10 +1001,10 @@ Results: 4 passed, 0 failed
 > above instead.
 >
 > **DeepSeek note:** the Anthropic-compatible endpoint uses a different
-> base URL (`https://api.deepseek.com/anthropic`) and model name
-> (`deepseek-chat`) than the OpenAI endpoint (`https://api.deepseek.com`,
-> `deepseek-v4-flash`). The API key is the same for both. See
-> `.env.example` for the correct values.
+> base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
+> (`https://api.deepseek.com`). Both use model name `deepseek-v4-flash`
+> (or `deepseek-v4-pro`) and the same API key. See `.env.example` for the
+> correct values.
 
 Claude Code (pre-installed in the base sandbox image) calling
 `mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an
