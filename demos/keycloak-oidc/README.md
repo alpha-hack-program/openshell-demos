@@ -604,8 +604,10 @@ tokens. Replace it with your actual Keycloak hostname:
 ```bash
 source .env
 
-sed "s|<keycloak-host>|${KEYCLOAK_HOST}|" providers/user-refresh-profile.yaml \
-  | openshell provider profile import -f -
+TMPFILE=$(mktemp --suffix=.yaml)
+sed "s|<keycloak-host>|${KEYCLOAK_HOST}|" providers/user-refresh-profile.yaml > "$TMPFILE"
+openshell provider profile import -f "$TMPFILE"
+rm -f "$TMPFILE"
 ```
 
 Then create a provider for the user and configure automatic token refresh:
@@ -1085,6 +1087,20 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
      --output-format text
    '
    ```
+
+**Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
+Compatibility Engine — tax calculation). Set the variables and run
+steps 2-3 again:
+
+```bash
+USER_ID="user2"
+SERVER_NAME="mcp-server-b"
+QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
+```
+
+Confirm user2's sandbox can call `mcp-server-b`'s `calc_tax` tool
+successfully, proving that the per-user credential isolation works end to
+end through Claude Code.
 
 ## Configuration reference
 
