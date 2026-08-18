@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .line-default   { stroke: #475569 }
+
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .fill-pink      { fill: #fce7f3 }
+    .stroke-pink    { stroke: #db2777 }
+    .text-pink      { fill: #9d174d }
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+
+    .phase-bg-indigo   { fill: #eef2ff; stroke: #c7d2fe }
+    .phase-text-indigo { fill: #3730a3 }
+    .phase-bg-pink     { fill: #fdf2f8; stroke: #fbcfe8 }
+    .phase-text-pink   { fill: #9d174d }
+    .phase-bg-green    { fill: #f0fdf4; stroke: #bbf7d0 }
+    .phase-text-green  { fill: #166534 }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .line-default   { stroke: #94a3b8 }
+
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .fill-pink      { fill: #4a1942 }
+      .stroke-pink    { stroke: #f472b6 }
+      .text-pink      { fill: #f9a8d4 }
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+
+      .phase-bg-indigo   { fill: #1e1b4b; stroke: #312e81 }
+      .phase-text-indigo { fill: #a5b4fc }
+      .phase-bg-pink     { fill: #3b0a2a; stroke: #831843 }
+      .phase-text-pink   { fill: #f9a8d4 }
+      .phase-bg-green    { fill: #052e16; stroke: #14532d }
+      .phase-text-green  { fill: #86efac }
+    }
+  </style>
+  <defs>
+    <marker id="arrow-indigo" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-default" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="880" height="520" rx="12" class="bg"/>
+  <rect x="0" y="0" width="880" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="880" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="24" y="36" font-size="16" font-weight="700" class="header-text">RBAC Setup — From Admin Bootstrap to Per-User Usage</text>
+  <text x="856" y="36" font-size="11" class="header-muted" text-anchor="end">keycloak-oidc demo</text>
+
+  <!-- Phase 1: Admin flow (once) -->
+  <rect x="20" y="76" width="840" height="120" rx="10" class="phase-bg-indigo" stroke-width="1.5"/>
+  <text x="40" y="98" font-size="13" font-weight="700" class="phase-text-indigo">Admin flow (once)</text>
+
+  <rect x="30" y="116" width="190" height="56" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="125" y="149" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">Deploy Keycloak</text>
+  <line x1="220" y1="144" x2="240" y2="144" class="line-default" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+
+  <rect x="240" y="116" width="190" height="56" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="335" y="149" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">Apply OIDC overlay</text>
+  <line x1="430" y1="144" x2="450" y2="144" class="line-default" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+
+  <rect x="450" y="116" width="190" height="56" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="545" y="149" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">Enable Providers v2</text>
+  <line x1="640" y1="144" x2="660" y2="144" class="line-default" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+
+  <rect x="660" y="116" width="190" height="56" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="755" y="149" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">Deploy MCP servers</text>
+
+  <!-- Connector: Phase 1 -> Phase 2 -->
+  <line x1="440" y1="196" x2="440" y2="216" class="line-default" stroke-width="1.5" marker-end="url(#arrow-default)"/>
+
+  <!-- Phase 2: Per-user onboarding -->
+  <rect x="20" y="216" width="840" height="120" rx="10" class="phase-bg-pink" stroke-width="1.5"/>
+  <text x="40" y="238" font-size="13" font-weight="700" class="phase-text-pink">Per-user onboarding</text>
+
+  <rect x="90" y="256" width="220" height="56" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="200" y="289" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">User logs in via OAuth</text>
+  <line x1="310" y1="284" x2="340" y2="284" class="line-default" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="340" y="256" width="220" height="56" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="450" y="289" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Obtain offline refresh token</text>
+  <line x1="560" y1="284" x2="590" y2="284" class="line-default" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="590" y="256" width="220" height="56" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="700" y="282" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Store token in</text>
+  <text x="700" y="296" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">OpenShell provider</text>
+
+  <!-- Connector: Phase 2 -> Phase 3 -->
+  <line x1="440" y1="336" x2="440" y2="356" class="line-default" stroke-width="1.5" marker-end="url(#arrow-default)"/>
+
+  <!-- Phase 3: Per-user usage -->
+  <rect x="20" y="356" width="840" height="140" rx="10" class="phase-bg-green" stroke-width="1.5"/>
+  <text x="40" y="378" font-size="13" font-weight="700" class="phase-text-green">Per-user usage</text>
+
+  <rect x="30" y="396" width="190" height="64" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="125" y="433" font-size="11" font-weight="600" class="text-green" text-anchor="middle">Create sandbox</text>
+  <line x1="220" y1="428" x2="240" y2="428" class="line-default" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="240" y="396" width="190" height="64" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="335" y="433" font-size="10.5" font-weight="600" class="text-green" text-anchor="middle">Attach provider + policy</text>
+  <line x1="430" y1="428" x2="450" y2="428" class="line-default" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="450" y="396" width="190" height="64" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="545" y="424" font-size="10.5" font-weight="600" class="text-green" text-anchor="middle">Sandbox carries</text>
+  <text x="545" y="438" font-size="10.5" font-weight="600" class="text-green" text-anchor="middle">user's own token</text>
+  <line x1="640" y1="428" x2="660" y2="428" class="line-default" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="660" y="396" width="190" height="64" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="755" y="424" font-size="10.5" font-weight="600" class="text-green" text-anchor="middle">API calls scoped</text>
+  <text x="755" y="438" font-size="10.5" font-weight="600" class="text-green" text-anchor="middle">to user's identity</text>
+</svg>

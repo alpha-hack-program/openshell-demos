@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 660"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .text-faint     { fill: #94a3b8 }
+    .line-subtle    { stroke: #cbd5e1 }
+    .line-default   { stroke: #475569 }
+
+    .fill-blue      { fill: #dbeafe }
+    .stroke-blue    { stroke: #2563eb }
+    .text-blue      { fill: #1e40af }
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .fill-purple    { fill: #f3e8ff }
+    .stroke-purple  { stroke: #9333ea }
+    .text-purple    { fill: #6b21a8 }
+    .fill-amber     { fill: #fef3c7 }
+    .stroke-amber   { stroke: #d97706 }
+    .text-amber     { fill: #92400e }
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+    .fill-teal      { fill: #ccfbf1 }
+    .stroke-teal    { stroke: #0d9488 }
+    .text-teal      { fill: #115e59 }
+
+    .alt-border     { stroke: #94a3b8 }
+    .alt-label-bg   { fill: #e2e8f0 }
+    .alt-label-text { fill: #475569 }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .text-faint     { fill: #64748b }
+      .line-subtle    { stroke: #475569 }
+      .line-default   { stroke: #94a3b8 }
+
+      .fill-blue      { fill: #1e3a5f }
+      .stroke-blue    { stroke: #60a5fa }
+      .text-blue      { fill: #93c5fd }
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .fill-purple    { fill: #2e1a47 }
+      .stroke-purple  { stroke: #a78bfa }
+      .text-purple    { fill: #c4b5fd }
+      .fill-amber     { fill: #3b2f10 }
+      .stroke-amber   { stroke: #fbbf24 }
+      .text-amber     { fill: #fcd34d }
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+      .fill-teal      { fill: #0f3d3a }
+      .stroke-teal    { stroke: #2dd4bf }
+      .text-teal      { fill: #5eead4 }
+
+      .alt-border     { stroke: #475569 }
+      .alt-label-bg   { fill: #334155 }
+      .alt-label-text { fill: #94a3b8 }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0d9488"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="820" height="660" rx="12" class="bg"/>
+  <rect x="0" y="0" width="820" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="820" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="24" y="36" font-size="16" font-weight="700" class="header-text">Per-User Credential Isolation — Architecture</text>
+  <text x="796" y="36" font-size="11" class="header-muted" text-anchor="end">keycloak-oidc demo</text>
+
+  <!-- Container: per-user login -->
+  <rect x="210" y="76" width="340" height="170" rx="10" fill="none" class="alt-border" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="290" y="66" width="180" height="20" rx="4" class="alt-label-bg"/>
+  <text x="380" y="80" font-size="9.5" font-weight="700" class="alt-label-text" text-anchor="middle">Per-user, repeats for each tenant</text>
+
+  <!-- C: User logs in -->
+  <rect x="240" y="106" width="280" height="40" rx="8" class="fill-blue stroke-blue" stroke-width="1.5"/>
+  <text x="380" y="130" font-size="12" font-weight="600" class="text-blue" text-anchor="middle">User logs in</text>
+
+  <line x1="380" y1="146" x2="380" y2="186" class="line-default" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- B: Backend stores refresh token -->
+  <rect x="240" y="186" width="280" height="50" rx="8" class="fill-blue stroke-blue" stroke-width="1.5"/>
+  <text x="380" y="205" font-size="11" font-weight="600" class="text-blue" text-anchor="middle">Backend stores</text>
+  <text x="380" y="220" font-size="11" font-weight="600" class="text-blue" text-anchor="middle">user's refresh token</text>
+
+  <line x1="380" y1="236" x2="380" y2="276" class="line-default" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+
+  <!-- P: Provider instance -->
+  <rect x="250" y="276" width="260" height="44" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="380" y="303" font-size="12" font-weight="600" class="text-indigo" text-anchor="middle">Provider instance user-&lt;id&gt;</text>
+
+  <line x1="380" y1="320" x2="380" y2="360" class="line-default" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Container: OpenShift cluster -->
+  <rect x="190" y="344" width="380" height="190" rx="10" fill="none" class="alt-border" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="200" y="334" width="150" height="20" rx="4" class="alt-label-bg"/>
+  <text x="275" y="348" font-size="9.5" font-weight="700" class="alt-label-text" text-anchor="middle">OpenShift cluster</text>
+
+  <!-- SB: Sandbox created -->
+  <rect x="220" y="364" width="320" height="54" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+  <text x="380" y="386" font-size="11" font-weight="600" class="text-purple" text-anchor="middle">Sandbox created</text>
+  <text x="380" y="401" font-size="11" font-weight="600" class="text-purple" text-anchor="middle">with --provider attached</text>
+
+  <line x1="380" y1="418" x2="380" y2="454" class="line-default" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- GW: OpenShell Gateway -->
+  <rect x="220" y="454" width="320" height="44" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="380" y="481" font-size="12" font-weight="600" class="text-green" text-anchor="middle">OpenShell Gateway</text>
+
+  <!-- GW <--> KC (Keycloak, cylinder) -->
+  <line x1="540" y1="476" x2="606" y2="484" class="line-default" stroke-width="1.5" marker-start="url(#arrow-teal)" marker-end="url(#arrow-teal)"/>
+
+  <ellipse cx="695" cy="462" rx="85" ry="10" class="fill-teal stroke-teal" stroke-width="1.5"/>
+  <rect x="610" y="462" width="170" height="44" class="fill-teal stroke-teal" stroke-width="1.5"/>
+  <line x1="610" y1="462" x2="610" y2="506" class="stroke-teal" stroke-width="1.5"/>
+  <line x1="780" y1="462" x2="780" y2="506" class="stroke-teal" stroke-width="1.5"/>
+  <ellipse cx="695" cy="506" rx="85" ry="10" class="fill-teal stroke-teal" stroke-width="1.5"/>
+  <text x="695" y="482" font-size="12" font-weight="700" class="text-teal" text-anchor="middle">Keycloak</text>
+  <text x="695" y="496" font-size="9" class="text-teal" text-anchor="middle">realm: openshell</text>
+
+  <!-- GW -> API -->
+  <line x1="380" y1="498" x2="380" y2="580" class="line-default" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+  <!-- API: Downstream API call -->
+  <rect x="250" y="580" width="260" height="50" rx="8" class="fill-amber stroke-amber" stroke-width="1.5"/>
+  <text x="380" y="601" font-size="11" font-weight="600" class="text-amber" text-anchor="middle">Downstream API call,</text>
+  <text x="380" y="616" font-size="11" font-weight="600" class="text-amber" text-anchor="middle">user-scoped token</text>
+</svg>

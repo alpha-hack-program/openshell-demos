@@ -71,6 +71,11 @@ One person runs the entire demo, playing three roles: **admin** (steps 1-2),
 
 ### Architecture
 
+![Per-user credential isolation architecture](docs/diagrams/architecture-overview.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 flowchart TB
     subgraph User["Per-user, repeats for each tenant"]
@@ -88,6 +93,8 @@ flowchart TB
     end
 ```
 
+</details>
+
 ### RBAC setup
 
 This demo uses four Keycloak realm roles to separate admin and user
@@ -99,6 +106,11 @@ capabilities:
 | `openshell-user` | Every onboarded user | Connect to sandboxes, run workloads |
 | `mcp-server-a-user` | Users authorized for MCP server A | Access to the Eligibility Engine MCP server |
 | `mcp-server-b-user` | Users authorized for MCP server B | Access to the Compatibility Engine MCP server |
+
+![RBAC setup: admin bootstrap, per-user onboarding, per-user usage](docs/diagrams/rbac-setup-flow.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TB
@@ -122,6 +134,8 @@ flowchart TB
     A4 --> Onboard
     Onboard --> Use
 ```
+
+</details>
 
 ## Part I — OIDC RBAC demo
 
