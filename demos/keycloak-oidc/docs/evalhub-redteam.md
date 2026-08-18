@@ -5,7 +5,32 @@ drafted as a design/planning doc — see
 [`evalhub-redteam-orig.md`](evalhub-redteam-orig.md) for that history if
 needed; this file is now the authoritative, current guide.
 
-## Purpose
+## Table of contents
+
+- [Overview](#overview)
+  - [Purpose](#purpose)
+  - [Architecture](#architecture)
+  - [Key insight](#key-insight)
+  - [How to follow this guide](#how-to-follow-this-guide)
+- [Prerequisites (admin, one-time)](#prerequisites-admin-one-time)
+- [Demo steps — Claude Code (recommended)](#demo-steps--claude-code-recommended)
+- [Demo steps — Codex (optional)](#demo-steps--codex-optional)
+- [Annexes](#annexes)
+  - [A. Alternative: Approach B — custom sandbox image](#a-alternative-approach-b--custom-sandbox-image)
+  - [B. Troubleshooting](#b-troubleshooting)
+  - [C. Resolved design decisions](#c-resolved-design-decisions)
+  - [D. Roles and responsibilities](#d-roles-and-responsibilities)
+  - [E. EvalHub integration background](#e-evalhub-integration-background)
+  - [F. Viewing results in the RHOAI dashboard / MLflow](#f-viewing-results-in-the-rhoai-dashboard--mlflow)
+  - [G. Validated findings log](#g-validated-findings-log)
+  - [H. Open items](#h-open-items)
+  - [I. Proposed file additions](#i-proposed-file-additions)
+  - [J. Phases](#j-phases)
+  - [K. References](#k-references)
+
+## Overview
+
+### Purpose
 
 Run repeatable, auditable red-team evaluations against AI agents (Codex /
 Claude Code) running inside OpenShell sandboxes — using EvalHub as the
@@ -16,14 +41,15 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
 > **Claude Code is the primary path for this demo; Codex is optional.**
 > Against the demo's default DeepSeek BYO backend, Codex can only exercise
 > model-only red-team probes — DeepSeek rejects the `namespace` tool type
-> Codex uses for MCP, so Codex + MCP evaluations don't work here (see "TTY
-> root cause" below). Codex + MCP only works against an on-cluster vLLM
-> **≥0.25.0** (upstream; RHOAI 3.4.x ships 0.18.0, which is too old — see
-> `docs/inference-api-compatibility.md`). Claude Code's Anthropic Messages
-> API has no such restriction and is validated end-to-end against DeepSeek,
-> including MCP tool use (see "Validated findings log" below).
+> Codex uses for MCP, so Codex + MCP evaluations don't work here (see
+> [Annex B — Troubleshooting](#b-troubleshooting)). Codex + MCP only works
+> against an on-cluster vLLM **≥0.25.0** (upstream; RHOAI 3.4.x ships
+> 0.18.0, which is too old — see `docs/inference-api-compatibility.md`).
+> Claude Code's Anthropic Messages API has no such restriction and is
+> validated end-to-end against DeepSeek, including MCP tool use (see
+> [Annex G — Validated findings log](#g-validated-findings-log)).
 
-## Architecture
+### Architecture
 
 ![EvalHub red-team evaluation architecture](diagrams/evalhub-redteam-architecture.svg)
 
@@ -74,8 +100,8 @@ gateway's *default* vhost (confirmed on a live cluster:
 `openai.NotFoundError: Error code: 404`). `garak-envoy` sits on its own
 real, DNS-resolvable Route and extracts the routing key from the request
 *path* instead, rewriting it to the `Host` header the gateway needs — see
-"EvalHub integration background" below (the "CONFIRMED BROKEN" note) for
-the full root-cause writeup.
+[Annex E — EvalHub integration background](#e-evalhub-integration-background)
+(the "CONFIRMED BROKEN" note) for the full root-cause writeup.
 
 ### Key insight
 
@@ -85,21 +111,24 @@ would have — network policies, binary permissions, MCP server RBAC are all
 live, not simulated. The proxy is exposed only on demand via
 `openshell service expose`.
 
-> **Note on roles below:** In production, red-team evaluation is a secops
-> function, run automatically by an automation/service-account identity —
-> never a human, and never the target user themselves (self-auditing is a
-> conflict of interest). **`user1` in the steps below names *whose
-> provider and MCP roles get attached to the sandbox*, not who issues the
-> commands.** Every command — sandbox creation, provider attachment,
-> policy updates, proxy startup, eval submission — runs from **one
-> continuous admin/secops session**. This works because Providers v2
-> injects credentials per *attached* provider and MCP RBAC checks whatever
-> JWT that provider supplies at request time — neither cares who ran
-> `sandbox create`. So the sandbox gets exactly `user1`'s security context
-> (their MCP roles, their credentials) even though an admin/secops
-> identity created and drove it end to end. See "Roles and
-> responsibilities" below for the full production model (representative
-> profiles instead of named users, automated loops across all of them).
+### How to follow this guide
+
+**Note on roles:** In production, red-team evaluation is a secops
+function, run automatically by an automation/service-account identity —
+never a human, and never the target user themselves (self-auditing is a
+conflict of interest). **`user1` in the steps below names *whose provider
+and MCP roles get attached to the sandbox*, not who issues the
+commands.** Every command — sandbox creation, provider attachment, policy
+updates, proxy startup, eval submission — runs from **one continuous
+admin/secops session**. This works because Providers v2 injects
+credentials per *attached* provider and MCP RBAC checks whatever JWT that
+provider supplies at request time — neither cares who ran `sandbox
+create`. So the sandbox gets exactly `user1`'s security context (their MCP
+roles, their credentials) even though an admin/secops identity created and
+drove it end to end. See
+[Annex D — Roles and responsibilities](#d-roles-and-responsibilities) for
+the full production model (representative profiles instead of named
+users, automated loops across all of them).
 
 ## Prerequisites (admin, one-time)
 
@@ -148,10 +177,30 @@ live, not simulated. The proxy is exposed only on demand via
    oc -n "$EVALHUB_NAMESPACE" rollout status deployment/evalhub-db
    ```
 
-3. **Create the EvalHub CR**:
+3. **Create the EvalHub CR — with MLflow tracking wired in from the
+   start.** EvalHub has no native RHOAI dashboard view of its own (the
+   dashboard's model evaluation UI is LM-Eval-only) — MLflow is the only
+   UI-capable path for Garak results, so this demo treats it as a required
+   prerequisite, prepared before the CR exists, rather than an optional
+   patch applied afterward.
+
+   Confirm the cluster's native RHOAI MLflow instance is present
+   (deploying MLflow itself is outside this demo's scope — enable it first
+   if this comes back empty):
+
+   ```bash
+   oc get mlflow -A
+   ```
+
+   If present, the TrustyAI operator has likely already pre-wired most of
+   the integration against it (CA cert, workspace, and a
+   projected-ServiceAccount-token mount with matching RBAC) — the only
+   thing this demo needs to set explicitly is `MLFLOW_TRACKING_URI`:
 
    ```bash
    EVALHUB_NAMESPACE="evalhub"
+   MLFLOW_INTERNAL_URL=$(oc get mlflow mlflow -n redhat-ods-applications \
+     -o jsonpath='{.status.address.url}')
 
    # Create the PostgreSQL connection Secret (EvalHub expects a db-url key)
    oc -n "$EVALHUB_NAMESPACE" apply -f - <<'EOF'
@@ -164,8 +213,8 @@ live, not simulated. The proxy is exposed only on demand via
      db-url: "postgresql://evalhub:evalhub-demo-password@evalhub-db:5432/evalhub"
    EOF
 
-   # Create the EvalHub CR with the garak provider
-   oc -n "$EVALHUB_NAMESPACE" apply -f - <<'EOF'
+   # Create the EvalHub CR with the garak provider and MLflow tracking enabled
+   oc -n "$EVALHUB_NAMESPACE" apply -f - <<EOF
    apiVersion: trustyai.opendatahub.io/v1alpha1
    kind: EvalHub
    metadata:
@@ -179,11 +228,24 @@ live, not simulated. The proxy is exposed only on demand via
        - garak
      collections:
        - safety-and-fairness-v1
+     env:
+       - name: MLFLOW_TRACKING_URI
+         value: "${MLFLOW_INTERNAL_URL}"
    EOF
 
    # Verify
    oc get pods -l app=eval-hub -n "$EVALHUB_NAMESPACE"
    ```
+
+   Wiring this in at creation avoids the patch + redeploy (and the
+   in-flight-job cancellation that comes with it) a deployment hits if
+   MLflow is added after the fact. Once healthy (`evalhub health`), pass
+   `--experiment <name>` on job submissions (see Demo steps below) to log
+   results to MLflow — see
+   [Annex F](#f-viewing-results-in-the-rhoai-dashboard--mlflow) for the
+   full writeup, including how to query results directly (RHOAI's MLflow
+   requires an `X-MLflow-Workspace` header on every API call — a detail
+   the plain web UI may also need if experiments don't show up).
 
 4. **Install the EvalHub CLI** — use
    [uv](https://docs.astral.sh/uv/) to install into an isolated venv
@@ -216,9 +278,10 @@ live, not simulated. The proxy is exposed only on demand via
    cluster**: the job fails immediately with `openai.NotFoundError: Error
    code: 404`. `garak-envoy` is a small Envoy proxy that extracts a routing
    key from the request *path* (`/route/<host-key>/...`) instead, and
-   rewrites the upstream Host header to it. See "EvalHub integration
-   background" below (the "CONFIRMED BROKEN" note) for the full
-   root-cause writeup. Deploy it once per cluster:
+   rewrites the upstream Host header to it. See
+   [Annex E — EvalHub integration background](#e-evalhub-integration-background)
+   (the "CONFIRMED BROKEN" note) for the full root-cause writeup. Deploy it
+   once per cluster:
 
    ```bash
    helm upgrade --install garak-envoy demos/keycloak-oidc/garak-envoy \
@@ -259,44 +322,17 @@ live, not simulated. The proxy is exposed only on demand via
    dynamic linking?" in `util/agent-proxy/README.md` for the full
    rationale.
 
-7. **Enable MLflow result tracking (optional but recommended).** EvalHub
-   has no native RHOAI dashboard view of its own (the dashboard's model
-   evaluation UI is LM-Eval-only) — MLflow is the only UI-capable path for
-   Garak results. If this cluster already has the native RHOAI MLflow
-   instance (check: `oc get mlflow -A`), the TrustyAI operator has likely
-   already pre-wired most of the integration (CA cert, workspace, and a
-   projected-ServiceAccount-token mount with matching RBAC) — the **only**
-   thing usually missing is `MLFLOW_TRACKING_URI`, which is what actually
-   enables tracking:
+## Demo steps — Claude Code (recommended)
 
-   ```bash
-   EVALHUB_NAMESPACE="evalhub"
-   MLFLOW_INTERNAL_URL=$(oc get mlflow mlflow -n redhat-ods-applications \
-     -o jsonpath='{.status.address.url}')
+> Runs from the same admin/secops session as the Prerequisites above,
+> targeting `user1`'s context — see
+> [How to follow this guide](#how-to-follow-this-guide) above for what that
+> means in practice. Nothing here requires logging in as user1.
 
-   oc patch evalhub evalhub -n "$EVALHUB_NAMESPACE" --type=merge -p \
-     "{\"spec\":{\"env\":[{\"name\":\"MLFLOW_TRACKING_URI\",\"value\":\"${MLFLOW_INTERNAL_URL}\"}]}}"
-
-   oc rollout status deployment/evalhub -n "$EVALHUB_NAMESPACE"
-   ```
-
-   This redeploys the EvalHub server, which cancels any job currently
-   running — do this before submitting evaluations, not mid-run. Once
-   healthy again (`evalhub health`), pass `--experiment <name>` on job
-   submissions (see step 5 below) to log results to MLflow. See "Viewing
-   results in the RHOAI dashboard / MLflow" below for the full writeup,
-   including how to query results directly (RHOAI's MLflow requires a
-   `X-MLflow-Workspace` header on every API call — a detail the plain web
-   UI may also need if experiments don't show up).
-
-## Demo steps (admin/secops session, targeting user1's context) — Claude Code, recommended
-
-Run these — from the **same admin/secops session as the Prerequisites
-above** — after completing steps 1-5 of the main demo (see
-[`../README.md`](../README.md)). `user1` must already have their provider
-and MCP roles configured (steps 3-4 of the main demo); nothing here
-requires logging in *as* user1. **Claude Code is the recommended agent for
-this section** — its Anthropic Messages API works fully (including MCP
+Run these after completing steps 1-5 of the main demo (see
+[`../README.md`](../README.md)) — `user1` must already have their provider
+and MCP roles configured there. **Claude Code is the recommended agent for
+this section**: its Anthropic Messages API works fully (including MCP
 tool use) against this demo's DeepSeek BYO backend. The Codex variant
 below only supports model-only probes here (see why in that variant's
 intro).
@@ -350,7 +386,8 @@ embeds `$USER_ACCESS_TOKEN` — credential resolution happens at the network
 layer when `claude` sends this exact placeholder string to a
 policy-matched endpoint, not when a shell expands the variable (confirmed:
 a plain `bash -c 'echo $USER_ACCESS_TOKEN'` prints the literal placeholder,
-never the real token — see "Validated findings log" below). A wrapper
+never the real token — see
+[Annex G — Validated findings log](#g-validated-findings-log)). A wrapper
 script is required because agent-proxy's `AGENT_COMMAND` is split naively
 on whitespace — it can't express the shell quoting this needs:
 
@@ -411,8 +448,8 @@ curl -sk -X POST "https://${ROUTE_HOST}/v1/chat/completions" \
 `--model-url` at `garak-envoy`'s Route with the sandbox's Host-header key
 embedded in the path — **confirmed working end-to-end on a live cluster**
 (the `quick` and `owasp_llm_top10` benchmarks both completed with real
-metrics). Add `--experiment` if you completed the optional MLflow step in
-the Prerequisites above:
+metrics). Add `--experiment` to log results to MLflow, wired up in
+Prerequisites step 3:
 
 ```bash
 evalhub eval run \
@@ -433,7 +470,8 @@ evalhub eval results <job_id>
 
 If MLflow tracking is enabled, the job response includes a
 `mlflow_experiment_id` and (once complete) each benchmark result includes
-an `mlflow_run_id` — see "Viewing results in the RHOAI dashboard / MLflow"
+an `mlflow_run_id` — see
+[Annex F — Viewing results in the RHOAI dashboard / MLflow](#f-viewing-results-in-the-rhoai-dashboard--mlflow)
 below to browse or query them.
 
 **7. Cleanup:**
@@ -444,7 +482,10 @@ openshell service delete "$SANDBOX"
 openshell sandbox delete "$SANDBOX"
 ```
 
-## Demo steps (admin/secops session, targeting user1's context) — Codex variant, optional
+## Demo steps — Codex (optional)
+
+> Same session model as the Claude Code steps above — nothing here
+> requires logging in as user1.
 
 Codex requires an on-cluster vLLM **≥0.25.0** (upstream — RHOAI 3.4.x
 ships 0.18.0, too old) for MCP tool use; its `namespace` tool type isn't
@@ -452,8 +493,7 @@ supported by this demo's DeepSeek BYO backend (confirmed: DeepSeek rejects
 it with a 400). Without that endpoint, Codex can still run **model-only**
 red-team probes (no MCP tool calls). Use this variant only if you have
 such a vLLM endpoint, or specifically want to red-team the model in
-isolation. Same session model as the Claude Code steps above — nothing
-here requires logging in as user1.
+isolation.
 
 ```bash
 source .env
@@ -488,7 +528,8 @@ non-interactively unless stdin, stdout, AND stderr are all real TTYs and
 the calling terminal is itself a real tty) — a background
 `nohup agent-proxy &` *inside* the sandbox never requests one, and tears
 down the exec channel (and its pty) the moment the wrapping shell exits
-regardless. See "TTY root cause" below for the full investigation:
+regardless. See
+[Annex B — Troubleshooting](#b-troubleshooting) for the full investigation:
 
 ```bash
 nohup openshell sandbox exec -n "$SANDBOX" --tty \
@@ -503,7 +544,9 @@ openshell service expose "$SANDBOX" 8100
 Claude Code steps 4-7 above, substituting this variant's `$SANDBOX` (the
 model-only probe results won't include MCP-related findings).
 
-## Alternative: Approach B — custom sandbox image (Containerfile)
+## Annexes
+
+### A. Alternative: Approach B — custom sandbox image
 
 The Demo steps above use "Approach A" (upload the binary into a stock
 sandbox at runtime — no custom image, no registry, no Containerfile). This
@@ -521,11 +564,13 @@ are example Containerfiles following that pattern for this demo's two
 agents — validated on a live cluster, but kept only as a reference, not a
 maintained path.
 
-## TTY root cause (resolved 2026-08-18) — Codex path, optional
+### B. Troubleshooting
 
-> Codex is optional for this demo (see the note under Purpose) — this
-> section documents the TTY fix for the model-only-probes case, and the
-> vLLM ≥0.25.0 requirement for Codex + MCP.
+#### TTY root cause (Codex path, resolved 2026-08-18)
+
+Codex is optional for this demo (see [Purpose](#purpose)) — this section
+documents the TTY fix for the model-only-probes case, and the vLLM
+≥0.25.0 requirement for Codex + MCP.
 
 codex's `exec` subcommand refuses to run non-interactively unless **stdin,
 stdout, and stderr are all real TTYs** (`isatty`) and `TERM` isn't `dumb` —
@@ -574,7 +619,7 @@ normal process tree: any subprocess the exec'd command spawns inherits the
 same pty fds via ordinary fork/exec — there is no OpenShell-side
 restriction scoping the pty to only the direct exec target.
 
-### agent-proxy's AGENT_COMMAND / OUTPUT_FILE_FLAG reference
+#### agent-proxy's AGENT_COMMAND / OUTPUT_FILE_FLAG reference
 
 A small `axum` server exposing `POST /v1/chat/completions`. On each request
 it extracts the last user message, shells out to the configured agent CLI
@@ -595,7 +640,7 @@ itself — it's loopback inside a sandbox, exposed only via
 [`util/agent-proxy/README.md`](../../../util/agent-proxy/README.md) for the
 full reference.
 
-## Resolved design decisions
+### C. Resolved design decisions
 
 | Question | Decision | Rationale |
 |---|---|---|
@@ -606,16 +651,16 @@ full reference.
 | BYOF adapter | Not needed | agent-proxy already exposes an OpenAI-compatible endpoint; EvalHub's built-in `garak` provider accepts any `model.url` pointing to an OpenAI `/v1` endpoint. The `garak-kfp` risk assessment pipeline (Ch. 4) also accepts arbitrary URLs. **Confirmed from RHOAI 3.4 docs.** |
 | EvalHub integration path | Built-in `garak` provider first (Path 1), `garak-kfp` risk assessment later (Path 2) | Path 1 needs only EvalHub + agent-proxy URL. Path 2 adds multi-strategy attacks (SPO, Translation, TAP) but requires KFP + S3 + judge/SDG models — heavier infrastructure. |
 | Demo structure | Extend `demos/keycloak-oidc/` | Same infrastructure stack (OIDC, Envoy, per-user sandboxes); avoids duplication |
-| Sandbox image | **Approach A** — upload the binary into a stock sandbox at runtime. No custom image, no registry, no Containerfile | Simplest path for a testing workflow — no build/push step. A Containerfile-based alternative (Approach B, baking `agent-proxy` into a custom image) exists for CI/reproducibility cases but isn't part of the documented demo flow — see "Alternative: Approach B" above and [Sandbox service patterns](../../../docs/sandbox-service-patterns.md). Both validated on a live cluster. |
-| Proxy startup | Create sandbox first, then start proxy via a **foreground** `sandbox exec --tty` (backgrounded on the *local* machine, not with `nohup &` inside the sandbox) | The `-- <command>` on `sandbox create` runs via SSH and blocks the CLI. codex requires stdin/stdout/stderr to all be a real TTY (see "TTY root cause" above); `nohup agent-proxy &` inside the sandbox exits the wrapping shell immediately and tears down the pty. `openshell sandbox exec -n <sandbox> --tty -- agent-proxy ... &` (local `&`) keeps the exec channel — and its pty — alive for the proxy's whole lifetime. **Confirmed on live cluster** (2026-08-18). |
-| Service exposure | `openshell service expose <sandbox> 8080` (not `--forward`) | `--forward` creates a local-only SSH tunnel; `service expose` creates a gateway-managed HTTPS URL using Host-header routing through the gateway's Route. Garak reaches it via `garak-envoy` (see "EvalHub integration background"). **Confirmed.** |
+| Sandbox image | **Approach A** — upload the binary into a stock sandbox at runtime. No custom image, no registry, no Containerfile | Simplest path for a testing workflow — no build/push step. A Containerfile-based alternative (Approach B, baking `agent-proxy` into a custom image) exists for CI/reproducibility cases but isn't part of the documented demo flow — see [Annex A](#a-alternative-approach-b--custom-sandbox-image) and [Sandbox service patterns](../../../docs/sandbox-service-patterns.md). Both validated on a live cluster. |
+| Proxy startup | Create sandbox first, then start proxy via a **foreground** `sandbox exec --tty` (backgrounded on the *local* machine, not with `nohup &` inside the sandbox) | The `-- <command>` on `sandbox create` runs via SSH and blocks the CLI. codex requires stdin/stdout/stderr to all be a real TTY (see [Annex B](#b-troubleshooting)); `nohup agent-proxy &` inside the sandbox exits the wrapping shell immediately and tears down the pty. `openshell sandbox exec -n <sandbox> --tty -- agent-proxy ... &` (local `&`) keeps the exec channel — and its pty — alive for the proxy's whole lifetime. **Confirmed on live cluster** (2026-08-18). |
+| Service exposure | `openshell service expose <sandbox> 8080` (not `--forward`) | `--forward` creates a local-only SSH tunnel; `service expose` creates a gateway-managed HTTPS URL using Host-header routing through the gateway's Route. Garak reaches it via `garak-envoy` (see [Annex E](#e-evalhub-integration-background)). **Confirmed.** |
 | Image build for remote gateways | `podman build` + `podman push` + `--from <image-ref>` | `--from <Dockerfile-dir>` only works for local gateways. For remote (OpenShift), build/push manually to `$GARAK_IMAGE_REGISTRY`. **Confirmed.** |
 | Containerfile naming | `Containerfile` (Podman-idiomatic) | The OpenShell CLI's `--from <directory>` only looks for `Dockerfile`, but that mode doesn't work on remote gateways anyway. We build with `podman build -f`, which accepts any name. **Confirmed.** |
 | Garak probe selection | Deferred | Will survey Garak's catalog later |
 
-## Roles and responsibilities
+### D. Roles and responsibilities
 
-### Who runs what
+#### Who runs what
 
 Red-team evaluation is a **secops / AI-secops function**, not a user
 responsibility. Users don't audit their own sandboxes — that's a conflict
@@ -633,7 +678,7 @@ automated by a service account.
 | Review results, file findings | Secops | Owns the security posture |
 | Define custom harm categories | Secops | Domain-specific policy |
 
-### Security context challenge
+#### Security context challenge
 
 The architecture's key insight is that Garak probes hit the agent in the
 **exact same environment a real user would have** — providers, MCP roles,
@@ -649,7 +694,7 @@ This means the secops account would red-team its own context, not the
 user's. To fix this, **test representative user profiles, not individual
 users.**
 
-### Representative user profiles
+#### Representative user profiles
 
 Standard security testing methodology: define profiles that mirror the
 roles/permissions of real user classes, and red-team each profile.
@@ -669,7 +714,7 @@ This approach answers the question: "If a user with role X runs an agent
 in a sandbox, how resistant is the stack to adversarial probes?" — which
 is more useful than testing a single named user.
 
-### Automated evaluation loop
+#### Automated evaluation loop
 
 In production, the secops automation iterates over all representative
 profiles, running the full lifecycle for each:
@@ -691,7 +736,7 @@ for PROFILE in "${PROFILES[@]}"; do
         --from "$AGENT_IMAGE" -- true
 
     # 3. Upload agent-proxy, start (foreground + --tty, backgrounded
-    #    locally — see "TTY root cause" above), expose
+    #    locally — see Annex B, Troubleshooting), expose
     openshell sandbox upload -n "eval-${PROFILE}" \
         "$AGENT_PROXY_BIN" /usr/local/bin/agent-proxy
     openshell sandbox exec -n "eval-${PROFILE}" -- chmod +x /usr/local/bin/agent-proxy
@@ -725,7 +770,7 @@ across roles — e.g. "role-a with MCP-server-A-only has 12% ASR vs role-ab
 with both servers at 18% ASR." This surfaces which permission
 configurations are most vulnerable.
 
-### OIDC authentication for service accounts — [VERIFY]
+#### OIDC authentication for service accounts — [VERIFY]
 
 Keycloak service accounts authenticate via **client credentials grant**
 (`grant_type=client_credentials`, no browser flow). The keycloak-oidc demo
@@ -750,7 +795,7 @@ automation (Playwright) with a dedicated Keycloak user per profile. This
 pattern is already documented in
 [`headless-browser-automation.md`](../../../docs/headless-browser-automation.md).
 
-### Demo shortcut
+#### Demo shortcut
 
 The production approach (service accounts per profile) is the right design
 but overkill for a demo. For the `keycloak-oidc` demo, **use an existing
@@ -758,13 +803,14 @@ demo user** (`user1` or `user2`) who is already authenticated with the
 correct providers and MCP roles — see "Demo steps" above. The sandbox gets
 `user1`'s exact security context — providers, MCP roles, network policies
 — which is precisely what we want to red-team, even though an admin/secops
-identity drives every command (see the note under "Key insight" above).
+identity drives every command (see
+[How to follow this guide](#how-to-follow-this-guide) above).
 
-## EvalHub integration background
+### E. EvalHub integration background
 
 Based on the RHOAI 3.4 "Evaluating AI systems" documentation (2026-06-04).
 
-### Two paths to Garak in EvalHub
+#### Two paths to Garak in EvalHub
 
 EvalHub offers two distinct ways to run Garak-based evaluations. Both accept
 an arbitrary OpenAI `/v1`-compatible model URL — which is exactly what
@@ -780,7 +826,7 @@ needs only EvalHub deployed and a model URL — no KFP, S3, or auxiliary
 models. Once that works end-to-end, Path 2 can be added as an advanced
 recipe for deeper red-team evaluations.
 
-### Path 1 — Built-in `garak` provider: submitting via REST API
+#### Path 1 — Built-in `garak` provider: submitting via REST API
 
 The Demo steps above use the `evalhub` CLI. The equivalent raw REST API
 call (e.g. for scripting without the CLI):
@@ -874,12 +920,12 @@ against this constraint and may have the same issue (same `ModelRef`-style
 schema per the RHOAI docs) — `garak-envoy`'s path-based routing should work
 for it too, but this is unverified.
 
-## Viewing results in the RHOAI dashboard / MLflow (validated 2026-08-18)
+### F. Viewing results in the RHOAI dashboard / MLflow
 
 **EvalHub/Garak results have no native RHOAI dashboard view** — the
 dashboard's "Performing model evaluations in the dashboard" feature (RHOAI
 3.4 docs §3.5) is scoped to **LM-Eval only**. The only UI-capable path for
-EvalHub is MLflow experiment tracking (enabled in Prerequisites step 7
+EvalHub is MLflow experiment tracking (enabled in Prerequisites step 3
 above).
 
 **Confirmed working end-to-end**: the job response includes a real
@@ -903,7 +949,7 @@ session (only the REST API's `X-MLflow-Workspace` header requirement was
 confirmed) — if experiments don't appear, look for a workspace selector in
 the UI matching `MLFLOW_WORKSPACE`.
 
-### Path 2 — Automated Risk Assessment (future)
+#### Path 2 — Automated Risk Assessment (future)
 
 For deeper multi-strategy evaluations (SPO, Translation, TAP), use the
 `garak-kfp` provider. This requires additional infrastructure:
@@ -931,10 +977,10 @@ Primary metric: **Attack Success Rate (ASR)** — percentage of test prompts
 that bypassed safety controls. Lower is better. Score > 0.5 indicates
 compliance concern.
 
-This path is deferred until representative-profile automation (see "Roles
-and responsibilities" above) is built on top of Path 1.
+This path is deferred until representative-profile automation (see
+[Annex D](#d-roles-and-responsibilities)) is built on top of Path 1.
 
-### Custom harm categories for OpenShell
+#### Custom harm categories for OpenShell
 
 Beyond the default harm categories, we should define OpenShell-specific
 custom categories targeting the sandbox security layers:
@@ -953,14 +999,14 @@ future section of this guide should define a specific Garak probe/config
 set targeting these OpenShell-specific sandbox-escape and
 credential-exfiltration scenarios directly (tracked as an open item below).
 
-## Validated findings log
+### G. Validated findings log
 
 Dated findings from live-cluster testing, kept as a historical record —
 the "Prerequisites"/"Demo steps" sections above reflect the current,
 consolidated procedure; this log explains *how* those procedures were
 arrived at and what didn't work along the way.
 
-### Proxy lifecycle (2026-08-18)
+#### Proxy lifecycle (2026-08-18)
 
 Tested end-to-end on a live OpenShift cluster (OpenShell 0.0.106, remote
 gateway). Steps and findings:
@@ -982,12 +1028,13 @@ gateway). Steps and findings:
    agent-proxy &'` starts the proxy and the exec call returns, but this
    pattern is incompatible with codex: it never requests a pty (no
    `--tty`) and the wrapping shell exits immediately, tearing down the
-   exec channel anyway. See "TTY root cause" above — use a **foreground**
-   `sandbox exec --tty`, backgrounded on the local machine, instead. Still
-   fine for agents that don't need a TTY (e.g. Claude Code's `-p` mode).
+   exec channel anyway. See [Annex B](#b-troubleshooting) — use a
+   **foreground** `sandbox exec --tty`, backgrounded on the local machine,
+   instead. Still fine for agents that don't need a TTY (e.g. Claude
+   Code's `-p` mode).
 7. **`service expose`** — creates a gateway-managed HTTPS URL using
    Host-header routing through the gateway's Route. Garak K8s Jobs reach
-   the proxy via `garak-envoy` (see "EvalHub integration background"),
+   the proxy via `garak-envoy` (see [Annex E](#e-evalhub-integration-background)),
    since they can't set the Host header themselves.
 8. **Full round-trip** — `POST /v1/chat/completions` through the gateway
    returns a valid OpenAI `ChatCompletion` response. Confirmed with an
@@ -997,19 +1044,19 @@ gateway). Steps and findings:
    service.
 10. **Codex TTY fix, full round-trip confirmed** — with the `TERM`/stdin
     fix, foreground `--tty` startup, and `-o` output-file capture (see
-    "TTY root cause" above), `POST /v1/chat/completions` → agent-proxy →
-    codex → a real LLM response works end-to-end through the gateway
-    route. Verified twice on the live `garak-codex-user1` sandbox
+    [Annex B](#b-troubleshooting)), `POST /v1/chat/completions` →
+    agent-proxy → codex → a real LLM response works end-to-end through the
+    gateway route. Verified twice on the live `garak-codex-user1` sandbox
     (`keycloak-oidc-demo` namespace) with distinct prompts, including one
     requiring actual computation (`17 * 23` → `391`), ruling out a stubbed
     or cached response.
 
-### Claude Code + MCP via agent-proxy (2026-08-18)
+#### Claude Code + MCP via agent-proxy (2026-08-18)
 
-Unlike codex on DeepSeek (see "TTY root cause" above — DeepSeek rejects
-Codex's `namespace` tool type), Claude Code's Anthropic Messages API uses
-standard tool definitions, so MCP tool use works against the demo's DeepSeek
-BYO backend. Confirmed end-to-end on a live cluster:
+Unlike codex on DeepSeek (see [Annex B](#b-troubleshooting) — DeepSeek
+rejects Codex's `namespace` tool type), Claude Code's Anthropic Messages
+API uses standard tool definitions, so MCP tool use works against the
+demo's DeepSeek BYO backend. Confirmed end-to-end on a live cluster:
 
 1. **Sandbox**: created `garak-claude-user1` from the stock Claude Code base
    image (`quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36`) —
@@ -1053,7 +1100,7 @@ BYO backend. Confirmed end-to-end on a live cluster:
    real Keycloak-derived JWT flowed through agent-proxy → Claude Code →
    the MCP server's own auth layer.
 
-### garak-envoy + full EvalHub pipeline (2026-08-18)
+#### garak-envoy + full EvalHub pipeline (2026-08-18)
 
 - Submitted a real EvalHub job (`quick` benchmark) through `garak-envoy`
   targeting `garak-claude-user1`'s agent-proxy — **completed successfully**
@@ -1071,9 +1118,11 @@ BYO backend. Confirmed end-to-end on a live cluster:
   workspace, projected-SA-token mount, RBAC) — only `MLFLOW_TRACKING_URI`
   was missing. Patched the EvalHub CR's `spec.env` to set it; this
   triggers an EvalHub redeploy which cancels any in-flight job (confirmed
-  — plan around this, don't redeploy mid-run).
+  — plan around this, don't redeploy mid-run). This finding is why
+  Prerequisites step 3 now wires `MLFLOW_TRACKING_URI` in at CR creation
+  time instead of patching it in afterward.
 
-## Open items
+### H. Open items
 
 - [ ] Garak probe selection — the built-in `garak` provider has 8-12
   benchmarks depending on version. `evalhub providers describe garak` to
@@ -1086,10 +1135,10 @@ BYO backend. Confirmed end-to-end on a live cluster:
 - [x] ~~Confirm Codex sandbox base image name and registry~~ —
   `quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012` (Codex 0.146.0)
 - [x] ~~Verify how `sandbox exec` handles backgrounded processes~~ — see
-  "TTY root cause" above.
+  [Annex B](#b-troubleshooting).
 - [x] ~~Confirm EvalHub's built-in Garak integration can target an arbitrary
   OpenAI-compatible endpoint URL~~ — **Yes**, via `garak-envoy` (see
-  "EvalHub integration background").
+  [Annex E](#e-evalhub-integration-background)).
 - [x] ~~Confirm Claude Code base image~~ —
   `quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36` works (Claude Code
   2.1.220).
@@ -1102,7 +1151,7 @@ BYO backend. Confirmed end-to-end on a live cluster:
   via the OpenShell gateway Route with Host-header routing~~ — it can't
   directly; `garak-envoy` (Prerequisites step 5) solves this. Confirmed
   working end-to-end.
-- [x] ~~Wire up MLflow result tracking~~ — done (Prerequisites step 7),
+- [x] ~~Wire up MLflow result tracking~~ — done (Prerequisites step 3),
   confirmed queryable via REST API.
 - [ ] Verify that OpenShell gateway accepts JWTs from Keycloak client
   credentials grant [VERIFY] — if not, fall back to Playwright-based
@@ -1117,9 +1166,9 @@ BYO backend. Confirmed end-to-end on a live cluster:
   OpenShell sandbox-escape and credential-exfiltration scenarios (see
   "Custom harm categories for OpenShell" above), then analyze results.
 
-## Proposed file additions
+### I. Proposed file additions
 
-### As originally planned (2026-08-18, before implementation)
+#### As originally planned (2026-08-18, before implementation)
 
 This was the plan before any code existed. Kept for historical reference —
 see "Actual file layout" below for what was really built (they differ:
@@ -1147,7 +1196,7 @@ demos/keycloak-oidc/
     └── ...
 ```
 
-### Actual file layout (as built)
+#### Actual file layout (as built)
 
 ```
 util/agent-proxy/
@@ -1190,16 +1239,16 @@ all deployment steps are documented as copy-pasteable commands in this
 guide instead (see "Prerequisites"/"Demo steps" above), matching how the
 rest of `demos/keycloak-oidc/README.md` documents its recipes.
 
-## Phases
+### J. Phases
 
-### Phase 1 — Local build (done)
+#### Phase 1 — Local build (done)
 
 - Build `agent-proxy` locally with `make -C util/agent-proxy musl`
 - Build the custom sandbox image with `make -C util/agent-proxy
   image-codex` / `image-claude`, push with `push-codex`/`push-claude`
 - Demo steps above cover running evaluations end to end
 
-### Phase 2 — CI automation (done)
+#### Phase 2 — CI automation (done)
 
 - `.github/workflows/ci-agent-proxy.yml` — builds + checks on every push/PR
   touching `util/agent-proxy/`
@@ -1207,7 +1256,7 @@ rest of `demos/keycloak-oidc/README.md` documents its recipes.
   builds the musl binary, builds + pushes both sandbox images to GHCR, and
   publishes a GitHub Release with the binary attached
 
-## References
+### K. References
 
 - EvalHub architecture:
   https://developers.redhat.com/articles/2026/05/12/how-evalhub-manages-two-layer-kubernetes-control-planes
