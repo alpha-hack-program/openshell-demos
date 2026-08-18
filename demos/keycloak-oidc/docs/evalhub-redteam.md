@@ -44,12 +44,12 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
          │                    ▼
          │         OpenShell gateway (Host-header routed)
          │                    │
-         │  ┌─ OpenShell sandbox (custom image) ──────────┐
+         │  ┌─ OpenShell sandbox (stock image) ───────────┐
          │  │                                              │
          │  │  ┌──────────────┐                            │
          │  │  │ agent-proxy  │◄── :8080 (OpenAI-compat)   │
-         │  │  │ (Rust, baked │                            │
-         │  │  │  into image) │                            │
+         │  │  │ (Rust, up-   │                            │
+         │  │  │  loaded bin) │                            │
          │  │  └──────┬───────┘                            │
          │  │         │ shells out to                      │
          │  │         ▼                                    │
@@ -506,59 +506,20 @@ model-only probe results won't include MCP-related findings).
 ## Alternative: Approach B — custom sandbox image (Containerfile)
 
 The Demo steps above use "Approach A" (upload the binary into a stock
-sandbox at runtime — no custom image, no registry, no Containerfile).
-Approach B bakes `agent-proxy` into a custom image instead — best for
-CI/reproducibility and cases where the binary must always be present.
-Both approaches are validated on a live cluster.
+sandbox at runtime — no custom image, no registry, no Containerfile). This
+is the approach this demo actually documents and runs, chosen specifically
+to avoid a build/push step for what is fundamentally a testing workflow.
 
-Following the [bring-your-own-container](https://github.com/NVIDIA/OpenShell/tree/main/examples/bring-your-own-container)
-pattern. Requirements: non-root user, `/sandbox` workspace, `iproute2`
-installed. OpenShell replaces `CMD`/`ENTRYPOINT` with its sandbox supervisor;
-the `-- <command>` is executed **via SSH once the sandbox is ready**, so the
-binary must be baked into the image.
-
-One Containerfile per agent type, each layering `agent-proxy` onto the
-agent's sandbox image:
-
-| Agent | Base image | Containerfile |
-|---|---|---|
-| Codex | `quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012` | `demos/keycloak-oidc/images/codex-garak/Containerfile` |
-| Claude Code | `quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36` | `demos/keycloak-oidc/images/claude-garak/Containerfile` |
-
-Build and push with `make -C util/agent-proxy image-codex push-codex` (or
-`image-claude`/`push-claude`) — see
-[`util/agent-proxy/README.md`](../../../util/agent-proxy/README.md). Manually,
-the equivalent is:
-
-```bash
-GARAK_IMAGE_REGISTRY="${GARAK_IMAGE_REGISTRY:-quay.io/atarazana}"
-
-# Codex
-podman build -t "${GARAK_IMAGE_REGISTRY}/codex-garak:latest" \
-    -f demos/keycloak-oidc/images/codex-garak/Containerfile \
-    demos/keycloak-oidc/images/codex-garak/
-podman push "${GARAK_IMAGE_REGISTRY}/codex-garak:latest"
-openshell sandbox create --name garak-codex-user1 \
-    --from "${GARAK_IMAGE_REGISTRY}/codex-garak:latest"
-
-# Claude Code
-podman build -t "${GARAK_IMAGE_REGISTRY}/claude-garak:latest" \
-    -f demos/keycloak-oidc/images/claude-garak/Containerfile \
-    demos/keycloak-oidc/images/claude-garak/
-podman push "${GARAK_IMAGE_REGISTRY}/claude-garak:latest"
-openshell sandbox create --name garak-claude-user1 \
-    --from "${GARAK_IMAGE_REGISTRY}/claude-garak:latest"
-```
-
-`--from <directory>` on `sandbox create` only works for local gateways and
-requires a file literally named `Dockerfile` — irrelevant for remote
-(OpenShift) gateways either way. For remote gateways, always build/push
-manually with `podman build -f` (any filename) and pass the full image
-reference to `--from`. **Confirmed.**
-
-After creating the sandbox, proxy startup/expose/eval submission/cleanup
-are identical to the Demo steps above (the sandbox name and Containerfile
-build are the only differences from Approach A).
+A Containerfile-based alternative — baking `agent-proxy` into a custom
+image instead of uploading it at runtime — exists for CI/reproducibility
+cases where the binary must always be present. It isn't part of the
+documented demo flow; see [Sandbox service
+patterns](../../../docs/sandbox-service-patterns.md) for the general
+pattern (static musl binaries, Containerfile layout, remote-gateway
+build+push workflow). `demos/keycloak-oidc/images/{codex,claude}-garak/`
+are example Containerfiles following that pattern for this demo's two
+agents — validated on a live cluster, but kept only as a reference, not a
+maintained path.
 
 ## TTY root cause (resolved 2026-08-18) — Codex path, optional
 
@@ -645,7 +606,7 @@ full reference.
 | BYOF adapter | Not needed | agent-proxy already exposes an OpenAI-compatible endpoint; EvalHub's built-in `garak` provider accepts any `model.url` pointing to an OpenAI `/v1` endpoint. The `garak-kfp` risk assessment pipeline (Ch. 4) also accepts arbitrary URLs. **Confirmed from RHOAI 3.4 docs.** |
 | EvalHub integration path | Built-in `garak` provider first (Path 1), `garak-kfp` risk assessment later (Path 2) | Path 1 needs only EvalHub + agent-proxy URL. Path 2 adds multi-strategy attacks (SPO, Translation, TAP) but requires KFP + S3 + judge/SDG models — heavier infrastructure. |
 | Demo structure | Extend `demos/keycloak-oidc/` | Same infrastructure stack (OIDC, Envoy, per-user sandboxes); avoids duplication |
-| Sandbox image | Two approaches: **A) Upload** the binary into a stock sandbox at runtime, or **B) Custom image** with agent-proxy baked in | **A** (upload+expose) is simpler for ad-hoc runs — no image build, no registry, no Containerfile. **B** is best for CI/reproducibility and use cases where the binary must always be present (e.g. Prometheus exporters). Both validated on a live cluster. |
+| Sandbox image | **Approach A** — upload the binary into a stock sandbox at runtime. No custom image, no registry, no Containerfile | Simplest path for a testing workflow — no build/push step. A Containerfile-based alternative (Approach B, baking `agent-proxy` into a custom image) exists for CI/reproducibility cases but isn't part of the documented demo flow — see "Alternative: Approach B" above and [Sandbox service patterns](../../../docs/sandbox-service-patterns.md). Both validated on a live cluster. |
 | Proxy startup | Create sandbox first, then start proxy via a **foreground** `sandbox exec --tty` (backgrounded on the *local* machine, not with `nohup &` inside the sandbox) | The `-- <command>` on `sandbox create` runs via SSH and blocks the CLI. codex requires stdin/stdout/stderr to all be a real TTY (see "TTY root cause" above); `nohup agent-proxy &` inside the sandbox exits the wrapping shell immediately and tears down the pty. `openshell sandbox exec -n <sandbox> --tty -- agent-proxy ... &` (local `&`) keeps the exec channel — and its pty — alive for the proxy's whole lifetime. **Confirmed on live cluster** (2026-08-18). |
 | Service exposure | `openshell service expose <sandbox> 8080` (not `--forward`) | `--forward` creates a local-only SSH tunnel; `service expose` creates a gateway-managed HTTPS URL using Host-header routing through the gateway's Route. Garak reaches it via `garak-envoy` (see "EvalHub integration background"). **Confirmed.** |
 | Image build for remote gateways | `podman build` + `podman push` + `--from <image-ref>` | `--from <Dockerfile-dir>` only works for local gateways. For remote (OpenShift), build/push manually to `$GARAK_IMAGE_REGISTRY`. **Confirmed.** |
@@ -665,7 +626,7 @@ automated by a service account.
 | Duty | Who | Why |
 |---|---|---|
 | Deploy EvalHub (Operator, PostgreSQL, CR) | Cluster admin | Cluster-scoped infrastructure |
-| Build + push custom images (Approach B) | Secops / CI | Registry and build pipeline access |
+| Build + push custom images (Approach B, optional alternative — not used by the demo) | Secops / CI | Registry and build pipeline access |
 | Build agent-proxy static binary | Secops / CI | Cargo + musl toolchain |
 | Create sandbox, upload/start proxy, expose service | **Secops service account** | Red-teaming is not a user duty |
 | Submit EvalHub evaluation jobs | **Secops service account** | Owns the evaluation results and compliance reports |

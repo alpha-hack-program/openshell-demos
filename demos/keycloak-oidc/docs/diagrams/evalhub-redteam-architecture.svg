@@ -154,7 +154,7 @@
   <!-- Sandbox container -->
   <rect x="400" y="404" width="340" height="206" rx="10" fill="none" class="alt-border" stroke-width="1.5" stroke-dasharray="6,3"/>
   <rect x="420" y="394" width="300" height="22" rx="4" class="alt-label-bg"/>
-  <text x="570" y="409" font-size="10" font-weight="700" class="alt-label-text" text-anchor="middle">OpenShell sandbox (custom image)</text>
+  <text x="570" y="409" font-size="10" font-weight="700" class="alt-label-text" text-anchor="middle">OpenShell sandbox (stock image)</text>
 
   <!-- agent-proxy -->
   <rect x="440" y="430" width="260" height="50" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
