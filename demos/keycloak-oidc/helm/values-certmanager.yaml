@@ -18,6 +18,14 @@ securityContext:
 certManager:
   enabled: true
   caSecretName: openshell-ca-tls
+  # Override serverIssuerRef via --set to use a Let's Encrypt (ACME)
+  # ClusterIssuer for the Route's server certificate. The chart creates a
+  # second Certificate from this issuer; the internal cert stays signed by
+  # the chart CA for mTLS. See README section 2a for details.
+  # serverIssuerRef:
+  #   name: letsencrypt-prod
+  #   kind: ClusterIssuer
+  #   group: cert-manager.io
   clientCaFromServerTlsSecret: true
   certificateDuration: 8760h       # 1 year
   certificateRenewBefore: 720h     # 30 days

@@ -71,6 +71,13 @@ Before running anything against a real cluster:
   The root `.env` holds only cluster-wide variables
   (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Check a demo's own
   `.env`/README for which namespace it targets.
+  **Namespace names must not start with `openshell-`.** At least one demo
+  derives its gateway Route hostname as
+  `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a
+  redundant prefix can push the FQDN over the 64-byte X.509 CommonName
+  limit when using an external ACME issuer (e.g. Let's Encrypt) for the
+  Route cert. Use a short demo slug alone, e.g. `keycloak-oidc-demo`, not
+  `openshell-keycloak-oidc-demo`.
 - **Order of operations:** `demos/base/` is a good first demo — it proves
   the chart/cluster combination works at all — but each demo is meant to
   stand on its own. A demo's own README states its prerequisites
@@ -147,7 +154,38 @@ OAuth flows need to be automated. Two docs cover this:
 | [`base`](demos/base/README.md) | Demo-agnostic OpenShell-on-OpenShift install + hello-world sandbox verification | Verified end to end |
 | [`keycloak-oidc`](demos/keycloak-oidc/README.md) | Keycloak as OIDC IdP, per-user credential isolation via Providers v2, MCP servers gated by Keycloak role via an Envoy sidecar | Verified end to end against a live cluster |
 
-## 6. References (repo-wide)
+## 6. Internal documentation (`docs/`)
+
+Read these before working on the relevant area — they capture patterns
+and constraints that aren't obvious from the code alone:
+
+- **[Sandbox service patterns](docs/sandbox-service-patterns.md)** —
+  custom images (static binaries, Containerfile layout, remote gateway
+  build+push workflow), running background services inside sandboxes,
+  `service expose` vs `--forward`, Host-header routing, toolbox
+  workarounds. Start here for anything involving long-running processes
+  in sandboxes (agent-proxy, Prometheus exporters, dev servers).
+- **[Inference API compatibility](docs/inference-api-compatibility.md)** —
+  which LLM API format each agent requires (Codex → OpenAI Responses API
+  with namespace tools; Claude Code → Anthropic Messages API), provider
+  compatibility matrix, vLLM version requirements, and a test script.
+- **[OpenShell flows](docs/openshell-flows.md)** — operational flows
+  by role (admin vs user) and auth mode (mTLS vs OIDC), with SVG
+  diagrams. Useful for understanding the end-to-end lifecycle before
+  writing new demo steps.
+- **[Headless browser automation](docs/headless-browser-automation.md)** —
+  Playwright setup, xdg-open interception, Keycloak form selectors,
+  CLI + Playwright orchestration pattern, and OpenShell CLI quirks.
+- **[Guide testing protocol](docs/guide-testing-protocol.md)** — how to
+  test a demo guide end to end: follow every step literally, handle
+  failures, resolve `[VERIFY]` tags, and report results.
+- **[EvalHub red-team plan](demos/keycloak-oidc/docs/evalhub-redteam.md)** —
+  **DRAFT.** Agent-proxy + Garak + EvalHub for red-team evaluations
+  inside sandboxes. Contains resolved design decisions, validated
+  lifecycle findings, and open items. Lives under `demos/keycloak-oidc/`
+  because the demo extends that stack.
+
+## 7. References (repo-wide)
 
 Demo-specific links live in each demo's own README. These apply across the
 whole repo:
