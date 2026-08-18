@@ -25,6 +25,11 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
 
 ## Architecture
 
+![EvalHub red-team evaluation architecture](diagrams/evalhub-redteam-architecture.svg)
+
+<details>
+<summary>ASCII source</summary>
+
 ```
   RHOAI UI / evalhub CLI
          │
@@ -59,6 +64,8 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
   MLflow ◄── metrics + attack logs
 ```
 
+</details>
+
 **Why `garak-envoy`?** Garak's OpenAI-compatible client can't set a custom
 `Host` header, but `openshell service expose` routes purely by `Host`
 header — multiple sandboxes share one gateway Route, disambiguated only
@@ -69,15 +76,6 @@ real, DNS-resolvable Route and extracts the routing key from the request
 *path* instead, rewriting it to the `Host` header the gateway needs — see
 "EvalHub integration background" below (the "CONFIRMED BROKEN" note) for
 the full root-cause writeup.
-
-A beautified SVG version of this diagram already exists at
-`demos/keycloak-oidc/docs/diagrams/evalhub-redteam-architecture.svg`
-(generated 2026-08-18 via the `diagram` skill). Embed it
-right after the ASCII diagram in the new file:
-
-```markdown
-![EvalHub red-team evaluation architecture](diagrams/evalhub-redteam-architecture.svg)
-```
 
 ### Key insight
 

@@ -120,7 +120,7 @@
   <text x="300" y="167" font-size="12" font-weight="600" class="text-indigo" text-anchor="middle">EvalHub Server</text>
 
   <!-- EvalHub Server -> Garak Job -->
-  <line x1="420" y1="162" x2="456" y2="162" class="line-default" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+  <line x1="420" y1="162" x2="456" y2="162" class="stroke-purple" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
 
   <!-- Garak Job -->
   <rect x="460" y="140" width="220" height="44" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
@@ -128,10 +128,10 @@
   <text x="570" y="173" font-size="9" class="text-purple" text-anchor="middle">(K8s Job)</text>
 
   <!-- EvalHub Server -> MLflow, long vertical line -->
-  <line x1="300" y1="184" x2="300" y2="606" class="line-subtle" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <line x1="300" y1="184" x2="300" y2="606" class="stroke-pink" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
 
   <!-- Garak Job -> garak-envoy -->
-  <line x1="570" y1="184" x2="570" y2="230" class="line-default" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <line x1="570" y1="184" x2="570" y2="230" class="stroke-amber" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
 
   <!-- garak-envoy (highlighted — the workaround) -->
   <rect x="460" y="230" width="220" height="68" rx="8" class="fill-amber stroke-amber" stroke-width="2"/>
@@ -141,7 +141,7 @@
   <text x="570" y="294" font-size="8" font-weight="600" class="text-amber" text-anchor="middle">/route/&lt;host-key&gt;/...</text>
 
   <!-- garak-envoy -> gateway -->
-  <line x1="570" y1="298" x2="570" y2="330" class="line-default" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="570" y1="298" x2="570" y2="330" class="stroke-blue" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- OpenShell gateway -->
   <rect x="460" y="330" width="220" height="44" rx="8" class="fill-blue stroke-blue" stroke-width="1.5"/>
