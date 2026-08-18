@@ -146,16 +146,12 @@
   <rect x="220" y="454" width="320" height="44" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
   <text x="380" y="481" font-size="12" font-weight="600" class="text-green" text-anchor="middle">OpenShell Gateway</text>
 
-  <!-- GW <--> KC (Keycloak, cylinder) -->
-  <line x1="540" y1="476" x2="606" y2="484" class="line-default" stroke-width="1.5" marker-start="url(#arrow-teal)" marker-end="url(#arrow-teal)"/>
+  <!-- GW <--> KC (Keycloak) -->
+  <line x1="540" y1="476" x2="610" y2="476" class="stroke-teal" stroke-width="1.5" marker-start="url(#arrow-teal)" marker-end="url(#arrow-teal)"/>
 
-  <ellipse cx="695" cy="462" rx="85" ry="10" class="fill-teal stroke-teal" stroke-width="1.5"/>
-  <rect x="610" y="462" width="170" height="44" class="fill-teal stroke-teal" stroke-width="1.5"/>
-  <line x1="610" y1="462" x2="610" y2="506" class="stroke-teal" stroke-width="1.5"/>
-  <line x1="780" y1="462" x2="780" y2="506" class="stroke-teal" stroke-width="1.5"/>
-  <ellipse cx="695" cy="506" rx="85" ry="10" class="fill-teal stroke-teal" stroke-width="1.5"/>
-  <text x="695" y="482" font-size="12" font-weight="700" class="text-teal" text-anchor="middle">Keycloak</text>
-  <text x="695" y="496" font-size="9" class="text-teal" text-anchor="middle">realm: openshell</text>
+  <rect x="610" y="452" width="170" height="48" rx="8" class="fill-teal stroke-teal" stroke-width="1.5"/>
+  <text x="695" y="472" font-size="12" font-weight="700" class="text-teal" text-anchor="middle">Keycloak</text>
+  <text x="695" y="487" font-size="9" class="text-teal" text-anchor="middle">realm: openshell</text>
 
   <!-- GW -> API -->
   <line x1="380" y1="498" x2="380" y2="580" class="line-default" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
