@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .card           { fill: #ffffff }
+    .surface        { fill: #f1f5f9 }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .text-faint     { fill: #94a3b8 }
+    .line-subtle    { stroke: #cbd5e1 }
+    .line-default   { stroke: #475569 }
+
+    .fill-purple    { fill: #f3e8ff }
+    .stroke-purple  { stroke: #9333ea }
+    .text-purple    { fill: #6b21a8 }
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .fill-blue      { fill: #dbeafe }
+    .stroke-blue    { stroke: #2563eb }
+    .text-blue      { fill: #1e40af }
+    .fill-pink      { fill: #fce7f3 }
+    .stroke-pink    { stroke: #db2777 }
+    .text-pink      { fill: #9d174d }
+    .fill-amber     { fill: #fef3c7 }
+    .stroke-amber   { stroke: #d97706 }
+    .text-amber     { fill: #92400e }
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+    .fill-red       { fill: #fee2e2 }
+    .stroke-red     { stroke: #dc2626 }
+    .text-red       { fill: #991b1b }
+
+    .alt-border     { stroke: #94a3b8 }
+    .alt-label-bg   { fill: #e2e8f0 }
+    .alt-label-text { fill: #475569 }
+    .phase-bg-blue     { fill: #eff6ff; stroke: #bfdbfe }
+    .phase-text-blue   { fill: #1e40af }
+    .phase-bg-indigo   { fill: #eef2ff; stroke: #c7d2fe }
+    .phase-text-indigo { fill: #3730a3 }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .card           { fill: #1e293b }
+      .surface        { fill: #1e293b }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .text-faint     { fill: #64748b }
+      .line-subtle    { stroke: #475569 }
+      .line-default   { stroke: #94a3b8 }
+
+      .fill-purple    { fill: #2e1a47 }
+      .stroke-purple  { stroke: #a78bfa }
+      .text-purple    { fill: #c4b5fd }
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .fill-blue      { fill: #1e3a5f }
+      .stroke-blue    { stroke: #60a5fa }
+      .text-blue      { fill: #93c5fd }
+      .fill-pink      { fill: #4a1942 }
+      .stroke-pink    { stroke: #f472b6 }
+      .text-pink      { fill: #f9a8d4 }
+      .fill-amber     { fill: #3b2f10 }
+      .stroke-amber   { stroke: #fbbf24 }
+      .text-amber     { fill: #fcd34d }
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+      .fill-red       { fill: #451a1a }
+      .stroke-red     { stroke: #f87171 }
+      .text-red       { fill: #fca5a5 }
+
+      .alt-border     { stroke: #475569 }
+      .alt-label-bg   { fill: #334155 }
+      .alt-label-text { fill: #94a3b8 }
+      .phase-bg-blue     { fill: #172554; stroke: #1e3a5f }
+      .phase-text-blue   { fill: #93c5fd }
+      .phase-bg-indigo   { fill: #1e1b4b; stroke: #312e81 }
+      .phase-text-indigo { fill: #a5b4fc }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="840" rx="12" class="bg"/>
+  <rect x="0" y="0" width="1200" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1200" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="32" y="36" font-size="18" font-weight="700" class="header-text">OIDC Credential Flow — Sandbox Command Execution</text>
+  <text x="1168" y="36" font-size="12" class="header-muted" text-anchor="end">User Flow (OIDC)</text>
+
+  <!-- ═══════════════ Actors ═══════════════ -->
+  <rect x="35" y="76" width="130" height="36" rx="18" class="fill-purple stroke-purple" stroke-width="1.5"/>
+  <text x="100" y="99" font-size="12" font-weight="600" class="text-purple" text-anchor="middle">Sandbox (Codex)</text>
+
+  <rect x="210" y="76" width="180" height="36" rx="18" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="300" y="95" font-size="12" font-weight="600" class="text-indigo" text-anchor="middle">Supervisor</text>
+  <text x="300" y="107" font-size="9" class="text-indigo" text-anchor="middle">(Policy Proxy)</text>
+
+  <rect x="420" y="76" width="180" height="36" rx="18" class="fill-blue stroke-blue" stroke-width="1.5"/>
+  <text x="510" y="95" font-size="12" font-weight="600" class="text-blue" text-anchor="middle">OpenShell</text>
+  <text x="510" y="107" font-size="9" class="text-blue" text-anchor="middle">Gateway</text>
+
+  <rect x="660" y="76" width="120" height="36" rx="18" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="720" y="99" font-size="12" font-weight="600" class="text-pink" text-anchor="middle">Keycloak</text>
+
+  <rect x="835" y="76" width="150" height="36" rx="18" class="fill-amber stroke-amber" stroke-width="1.5"/>
+  <text x="910" y="95" font-size="12" font-weight="600" class="text-amber" text-anchor="middle">Envoy</text>
+  <text x="910" y="107" font-size="9" class="text-amber" text-anchor="middle">Sidecar</text>
+
+  <rect x="1025" y="76" width="130" height="36" rx="18" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="1090" y="99" font-size="12" font-weight="600" class="text-green" text-anchor="middle">MCP App</text>
+
+  <!-- Lifelines -->
+  <line x1="100" y1="112" x2="100" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="300" y1="112" x2="300" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="510" y1="112" x2="510" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="720" y1="112" x2="720" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="910" y1="112" x2="910" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="1090" y1="112" x2="1090" y2="810" class="line-subtle" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- ═══════════════ PHASE A — Background Token Refresh ═══════════════ -->
+  <rect x="20" y="136" width="1160" height="22" rx="4" class="phase-bg-blue" stroke-width="0.5"/>
+  <text x="32" y="151" font-size="10" font-weight="700" class="phase-text-blue">PHASE A — Background Token Refresh (continuous)</text>
+
+  <!-- LOOP container -->
+  <rect x="200" y="164" width="630" height="150" rx="8" fill="none" class="alt-border" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="200" y="164" width="60" height="20" rx="4" class="alt-label-bg"/>
+  <text x="230" y="177" font-size="10" font-weight="700" class="alt-label-text" text-anchor="middle">LOOP</text>
+
+  <!-- Step 1: Gateway monitors token expiry -->
+  <rect x="50" y="188" width="16" height="16" rx="8" fill="#2563eb"/>
+  <text x="58" y="200" font-size="9" font-weight="700" fill="white" text-anchor="middle">1</text>
+
+  <rect x="420" y="188" width="180" height="28" rx="6" class="fill-blue stroke-blue" stroke-width="1"/>
+  <text x="510" y="204" font-size="10" font-weight="600" class="text-blue" text-anchor="middle">Token nearing expiry</text>
+  <text x="510" y="228" font-size="9" class="text-muted" text-anchor="middle">refresh_before_expiry: 300s</text>
+
+  <!-- Step 2: Gateway → Keycloak refresh exchange -->
+  <rect x="50" y="240" width="16" height="16" rx="8" fill="#db2777"/>
+  <text x="58" y="252" font-size="9" font-weight="700" fill="white" text-anchor="middle">2</text>
+
+  <line x1="510" y1="248" x2="708" y2="248" stroke="#db2777" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+  <rect x="530" y="238" width="160" height="20" rx="4" class="bg"/>
+  <text x="610" y="252" font-size="10" class="text-pink" text-anchor="middle">POST /token</text>
+  <text x="610" y="266" font-size="9" class="text-muted" text-anchor="middle">grant_type=refresh_token</text>
+
+  <!-- Step 2 return: Keycloak → Gateway -->
+  <line x1="708" y1="280" x2="522" y2="280" stroke="#db2777" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+  <rect x="544" y="272" width="150" height="16" rx="4" class="fill-pink"/>
+  <text x="619" y="283" font-size="9" class="text-pink" text-anchor="middle">access + refresh (rotated)</text>
+
+  <!-- Step 3: Gateway → Supervisor push -->
+  <rect x="50" y="296" width="16" height="16" rx="8" fill="#4f46e5"/>
+  <text x="58" y="308" font-size="9" font-weight="700" fill="white" text-anchor="middle">3</text>
+
+  <line x1="498" y1="304" x2="312" y2="304" stroke="#4f46e5" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <rect x="330" y="294" width="160" height="20" rx="4" class="bg"/>
+  <text x="410" y="308" font-size="10" class="text-indigo" text-anchor="middle">Push fresh credentials</text>
+
+  <!-- ═══════════════ PHASE B — Runtime Command Execution ═══════════════ -->
+  <rect x="20" y="338" width="1160" height="22" rx="4" class="phase-bg-indigo" stroke-width="0.5"/>
+  <text x="32" y="353" font-size="10" font-weight="700" class="phase-text-indigo">PHASE B — Runtime Command Execution</text>
+
+  <!-- Step 4: Sandbox → Supervisor with placeholder -->
+  <rect x="50" y="378" width="16" height="16" rx="8" fill="#9333ea"/>
+  <text x="58" y="390" font-size="9" font-weight="700" fill="white" text-anchor="middle">4</text>
+
+  <line x1="100" y1="386" x2="288" y2="386" stroke="#9333ea" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="110" y="372" width="170" height="28" rx="4" class="bg"/>
+  <text x="195" y="388" font-size="10" class="text-mid" text-anchor="middle">curl mcp-server:8000</text>
+  <text x="195" y="404" font-size="9" class="text-faint" text-anchor="middle">Bearer $USER_ACCESS_TOKEN</text>
+  <rect x="110" y="412" width="170" height="16" rx="4" class="fill-purple"/>
+  <text x="195" y="423" font-size="8" class="text-purple" text-anchor="middle">openshell:resolve:env:v168... (placeholder)</text>
+
+  <!-- Step 5: Supervisor resolves placeholder -->
+  <rect x="50" y="440" width="16" height="16" rx="8" fill="#4f46e5"/>
+  <text x="58" y="452" font-size="9" font-weight="700" fill="white" text-anchor="middle">5</text>
+
+  <rect x="204" y="438" width="192" height="42" rx="6" class="fill-indigo stroke-indigo" stroke-width="1"/>
+  <text x="300" y="455" font-size="10" font-weight="600" class="text-indigo" text-anchor="middle">Resolve placeholder</text>
+  <text x="300" y="470" font-size="9" class="text-indigo" text-anchor="middle">&#x2192; real Keycloak JWT</text>
+  <text x="300" y="492" font-size="9" class="text-muted" text-anchor="middle">(local &#x2014; no gateway roundtrip)</text>
+
+  <!-- Step 6: Supervisor policy check -->
+  <rect x="50" y="504" width="16" height="16" rx="8" fill="#4f46e5"/>
+  <text x="58" y="516" font-size="9" font-weight="700" fill="white" text-anchor="middle">6</text>
+
+  <rect x="204" y="502" width="192" height="42" rx="6" class="fill-indigo stroke-indigo" stroke-width="1"/>
+  <text x="300" y="519" font-size="10" font-weight="600" class="text-indigo" text-anchor="middle">Sandbox policy check</text>
+  <text x="300" y="535" font-size="9" class="text-indigo" text-anchor="middle">endpoint + binary allowlist</text>
+
+  <!-- Step 7: Supervisor → Envoy forward -->
+  <rect x="50" y="558" width="16" height="16" rx="8" fill="#d97706"/>
+  <text x="58" y="570" font-size="9" font-weight="700" fill="white" text-anchor="middle">7</text>
+
+  <line x1="300" y1="566" x2="898" y2="566" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <rect x="480" y="556" width="220" height="20" rx="4" class="bg"/>
+  <text x="590" y="570" font-size="10" class="text-amber" text-anchor="middle">Forward with real Keycloak JWT</text>
+
+  <!-- Step 8: Envoy jwt_authn -->
+  <rect x="50" y="594" width="16" height="16" rx="8" fill="#d97706"/>
+  <text x="58" y="606" font-size="9" font-weight="700" fill="white" text-anchor="middle">8</text>
+
+  <rect x="820" y="592" width="180" height="36" rx="6" class="fill-amber stroke-amber" stroke-width="1"/>
+  <text x="910" y="607" font-size="9" font-weight="600" class="text-amber" text-anchor="middle">jwt_authn filter</text>
+  <text x="910" y="621" font-size="9" class="text-amber" text-anchor="middle">Verify sig (JWKS) + iss + exp</text>
+
+  <!-- Step 8b: Envoy RBAC -->
+  <rect x="820" y="636" width="180" height="36" rx="6" class="fill-amber stroke-amber" stroke-width="1"/>
+  <text x="910" y="651" font-size="9" font-weight="600" class="text-amber" text-anchor="middle">rbac filter</text>
+  <text x="910" y="665" font-size="9" class="text-amber" text-anchor="middle">realm_access.roles check</text>
+
+  <!-- Step 9: Envoy → MCP App -->
+  <rect x="50" y="686" width="16" height="16" rx="8" fill="#16a34a"/>
+  <text x="58" y="698" font-size="9" font-weight="700" fill="white" text-anchor="middle">9</text>
+
+  <line x1="910" y1="694" x2="1078" y2="694" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="930" y="684" width="130" height="20" rx="4" class="fill-green"/>
+  <text x="995" y="698" font-size="10" class="text-green" text-anchor="middle">127.0.0.1:8001</text>
+
+  <!-- MCP App processes -->
+  <rect x="1020" y="716" width="140" height="28" rx="4" class="fill-green stroke-green" stroke-width="1"/>
+  <text x="1090" y="734" font-size="10" class="text-green" text-anchor="middle">Process tool call</text>
+
+  <!-- Response return -->
+  <line x1="1078" y1="762" x2="112" y2="762" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-green)"/>
+  <rect x="450" y="754" width="220" height="16" rx="4" class="fill-green"/>
+  <text x="560" y="765" font-size="9" class="text-green" text-anchor="middle">200 OK &#x2014; tool result (user-scoped)</text>
+
+  <!-- ═══════════════ Failure box ═══════════════ -->
+  <rect x="40" y="790" width="1120" height="40" rx="8" class="fill-red stroke-red" stroke-width="1"/>
+  <text x="600" y="806" font-size="10" font-weight="600" class="text-red" text-anchor="middle">Failure at any checkpoint blocks the request</text>
+  <text x="600" y="822" font-size="9" class="text-red" text-anchor="middle">No policy &#x2192; blocked  |  Bad/expired JWT &#x2192; 401  |  Missing realm role &#x2192; 403  |  Direct to :8001 &#x2192; unreachable (loopback)</text>
+</svg>
