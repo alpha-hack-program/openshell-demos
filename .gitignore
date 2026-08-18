@@ -8,4 +8,5 @@ old/
 *.token
 target/
 scratch/
-.claude/
+.claude/*
+!.claude/skills/
