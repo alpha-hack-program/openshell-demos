@@ -72,7 +72,7 @@ the full root-cause writeup.
 
 A beautified SVG version of this diagram already exists at
 `demos/keycloak-oidc/docs/diagrams/evalhub-redteam-architecture.svg`
-(generated 2026-08-18 via the `.claude/skills/diagram.md` skill). Embed it
+(generated 2026-08-18 via the `diagram` skill). Embed it
 right after the ASCII diagram in the new file:
 
 ```markdown

@@ -1,4 +1,5 @@
 ---
+name: diagram
 description: Generate clean, professional SVG diagrams from Mermaid syntax or plain-text descriptions. Produces hand-crafted SVG with automatic light/dark mode support.
 ---
 
@@ -12,7 +13,7 @@ written to the `docs/diagrams/` directory.
 ## Before you start
 
 1. Read the theme reference:
-   `.claude/skills/diagram-theme.md`
+   `.claude/skills/diagram/diagram-theme.md`
 2. Look at 1–2 existing diagrams in `docs/diagrams/` to calibrate on the
    visual style (spacing, font sizes, element positioning).
 
