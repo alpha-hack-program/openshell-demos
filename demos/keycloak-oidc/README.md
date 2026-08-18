@@ -1,5 +1,35 @@
 # Keycloak OIDC — per-user credential isolation on OpenShell
 
+## Table of contents
+
+- [Overview](#overview)
+  - [How to follow this guide](#how-to-follow-this-guide)
+  - [Architecture](#architecture)
+  - [RBAC setup](#rbac-setup)
+- [Part I — OIDC RBAC demo](#part-i--oidc-rbac-demo)
+  - [Prerequisites](#prerequisites)
+  - [What this demo deploys](#what-this-demo-deploys)
+  - [Getting started](#getting-started)
+    - [Clone the repo and change to the demo directory](#clone-the-repo-and-change-to-the-demo-directory)
+    - [Log into your OpenShift cluster](#log-into-your-openshift-cluster)
+    - [Set up your `.env` files](#set-up-your-env-files)
+  - [1. Deploy Keycloak](#1-deploy-keycloak)
+  - [2. Create the namespace, grant SCCs, and install OpenShell with OIDC](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc)
+  - [3. Onboard a user](#3-onboard-a-user)
+  - [4. Deploy MCP servers](#4-deploy-mcp-servers)
+  - [5. Run the demo](#5-run-the-demo)
+  - [Definition of done](#definition-of-done)
+- [Part II — Red-team evaluation (EvalHub + Garak)](#part-ii--red-team-evaluation-evalhub--garak)
+- [Annexes](#annexes)
+  - [A. Alternate test clients](#a-alternate-test-clients)
+    - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
+    - [Claude Code + BYO LLM + MCP tool](#claude-code--byo-llm--mcp-tool)
+  - [B. Configuration reference](#b-configuration-reference)
+  - [C. Secrets and security notes](#c-secrets-and-security-notes)
+  - [D. Troubleshooting](#d-troubleshooting)
+  - [E. Open risks](#e-open-risks)
+  - [F. References](#f-references)
+
 ## Overview
 
 This demo deploys OpenShell on OpenShift with **Keycloak as the OIDC identity
@@ -39,7 +69,26 @@ One person runs the entire demo, playing three roles: **admin** (steps 1-2),
 - With Option A (password grant) there is no browser session to worry about
   — just change `USER_ID` and `USER_PASS` in the same terminal.
 
-## RBAC setup
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph User["Per-user, repeats for each tenant"]
+        C[User logs in] --> B[Backend stores<br/>user's refresh token]
+    end
+    B --> P["Provider instance<br/>user-&lt;id&gt;"]
+    P --> SB[Sandbox created<br/>with --provider attached]
+    SB --> GW[OpenShell Gateway]
+    GW <--> KC[(Keycloak<br/>realm: openshell)]
+    GW --> API[Downstream API<br/>call, user-scoped token]
+
+    subgraph OCP["OpenShift cluster"]
+        GW
+        SB
+    end
+```
+
+### RBAC setup
 
 This demo uses four Keycloak realm roles to separate admin and user
 capabilities:
@@ -74,7 +123,9 @@ flowchart TB
     Onboard --> Use
 ```
 
-## Prerequisites
+## Part I — OIDC RBAC demo
+
+### Prerequisites
 
 | Tool / access | Notes |
 |---|---|
@@ -87,7 +138,7 @@ flowchart TB
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
 
-## What this demo deploys
+### What this demo deploys
 
 - `helm/values.yaml` — OpenShift-compatibility overrides plus OIDC
   configuration (`server.oidc.*`, `allowUnauthenticatedUsers: false`).
@@ -100,35 +151,16 @@ flowchart TB
 - Two example MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars
   that gate access by Keycloak realm role.
 
-## Architecture
+### Getting started
 
-```mermaid
-flowchart TB
-    subgraph User["Per-user, repeats for each tenant"]
-        C[User logs in] --> B[Backend stores<br/>user's refresh token]
-    end
-    B --> P["Provider instance<br/>user-&lt;id&gt;"]
-    P --> SB[Sandbox created<br/>with --provider attached]
-    SB --> GW[OpenShell Gateway]
-    GW <--> KC[(Keycloak<br/>realm: openshell)]
-    GW --> API[Downstream API<br/>call, user-scoped token]
-
-    subgraph OCP["OpenShift cluster"]
-        GW
-        SB
-    end
-```
-
-## Getting started
-
-### Clone the repo and change to the demo directory
+#### Clone the repo and change to the demo directory
 
 ```bash
 git clone https://github.com/alpha-hack-program/openshell-demos.git
 cd openshell-demos/demos/keycloak-oidc
 ```
 
-### Log into your OpenShift cluster
+#### Log into your OpenShift cluster
 
 Make sure you're logged in with a user that has **cluster-admin** rights (or
 at least the ability to grant SCCs and create namespaces):
@@ -138,7 +170,7 @@ oc login --server=https://api.<your-cluster>:6443
 oc whoami   # confirm you're logged in
 ```
 
-### Set up your `.env` files
+#### Set up your `.env` files
 
 This demo uses two `.env` files:
 
@@ -196,8 +228,6 @@ after it runs, so you'll come back and complete your `.env` then.
 | `KEYCLOAK_CLIENT_ID_CLI` | `openshell-cli` | Public client for CLI/browser login |
 | `KEYCLOAK_CLIENT_ID_GATEWAY` | `openshell-gateway` | Confidential gateway client |
 | `KEYCLOAK_CLIENT_SECRET` | *(from Keycloak)* | Gateway client secret — never commit |
-
-## Steps
 
 ### 1. Deploy Keycloak
 
@@ -855,7 +885,76 @@ To test the other direction, open a second terminal and repeat with
 if you haven't already). Confirm user2 can reach `mcp-server-b` (`200`)
 but gets `403` from `mcp-server-a`.
 
-#### Test recipe: Codex + BYO LLM + MCP tool
+Alternatively, run the isolation verification script to test all four
+user/server combinations automatically:
+
+```bash
+./scripts/08-verify-isolation.sh
+```
+
+Expected output:
+
+```
+PASS  user1 → mcp-server-a (evaluate_unpaid_leave_eligibility)  HTTP 200 (expected 200)
+PASS  user1 → mcp-server-b  HTTP 403 (expected 403)
+PASS  user2 → mcp-server-a  HTTP 403 (expected 403)
+PASS  user2 → mcp-server-b (calc_tax)  HTTP 200 (expected 200)
+
+Results: 4 passed, 0 failed
+```
+
+> For alternate ways to exercise this same RBAC boundary through a real
+> coding agent (Codex or Claude Code) instead of raw `curl`, see
+> [Annex A](#a-alternate-test-clients).
+
+### Definition of done
+
+- [ ] Keycloak realm `openshell` live with CLI and gateway clients, admin/user roles
+- [ ] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
+- [ ] RBAC mode confirmed: a user-role token cannot perform admin-only operations
+- [ ] Providers v2 enabled
+- [ ] At least two demo users onboarded, each with their own provider
+- [ ] Isolation test passes: user A's sandbox cannot access user B's data
+      even when both sandboxes run concurrently
+- [x] (Stretch) `mcp-servers` chart deployed; a user holding the required
+      Keycloak role can reach their MCP server, a user lacking it cannot
+      — verified via the Envoy sidecar (401/403/200 cases all tested live)
+- [x] (Stretch) A user authorized for one MCP server's role does not
+      thereby gain access to the other — verified both directions
+- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + vLLM 0.27.1 + MCP server 3.1.5
+
+## Part II — Red-team evaluation (EvalHub + Garak)
+
+Run repeatable, auditable adversarial evaluations against agents running
+inside OpenShell sandboxes — using EvalHub as the orchestrator, Garak as
+the adversarial probe engine, and `agent-proxy` (a small Rust server) to
+bridge Garak's OpenAI-compatible API to the CLI-based agent inside the
+sandbox. The proxy runs **inside** the sandbox, so probes hit the agent in
+the exact same environment a real user would have (network policies,
+binary permissions, MCP RBAC all live, not simulated). This part builds on
+the RBAC infrastructure deployed in [Part I](#part-i--oidc-rbac-demo) — run
+that first.
+
+**Validated end-to-end on a live cluster**: Claude Code + real MCP tool
+calls through agent-proxy, a full EvalHub/Garak benchmark run (via a small
+Envoy proxy that works around an EvalHub/Garak routing limitation), and
+MLflow experiment tracking for the results.
+
+See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for the full
+walkthrough — architecture, prerequisites, step-by-step admin/secops
+instructions for both Claude Code (recommended) and Codex (optional)
+agents, validated findings, and the production role model (representative
+service-account profiles instead of named users).
+
+## Annexes
+
+### A. Alternate test clients
+
+Optional recipes that exercise the same RBAC boundary verified in
+[Part I, step 5](#5-run-the-demo) through a real coding agent instead of
+raw `curl`.
+
+#### Codex + BYO LLM + MCP tool
 
 Codex CLI calling an MCP server's tool via your own OpenAI-compatible LLM.
 Codex uses `inference.local` — OpenShell's privacy router — which strips
@@ -872,7 +971,7 @@ server-side.
 > [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md)
 > for the full compatibility matrix and a test script.
 
-**Prerequisites** beyond steps 1-5 above — set `OPENAI_API_KEY`,
+**Prerequisites** beyond Part I, steps 1-5 — set `OPENAI_API_KEY`,
 `OPENAI_BASE_URL`, and `OPENAI_MODEL` in your `.env` (see `.env.example`),
 then in your **admin terminal**:
 
@@ -1063,7 +1162,7 @@ PASS  user2 → mcp-server-b (calc_tax)  HTTP 200 (expected 200)
 Results: 4 passed, 0 failed
 ```
 
-#### Alternative: Claude Code + BYO LLM + MCP tool
+#### Claude Code + BYO LLM + MCP tool
 
 > **Requires an Anthropic Messages API endpoint.** Claude Code uses the
 > Anthropic Messages API format, not OpenAI. This recipe only works if your
@@ -1083,7 +1182,7 @@ Claude Code (pre-installed in the base sandbox image) calling
 `mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an
 Anthropic-compatible LLM endpoint.
 
-**Prerequisites** beyond steps 1-5 above — set `ANTHROPIC_API_KEY`,
+**Prerequisites** beyond Part I, steps 1-5 — set `ANTHROPIC_API_KEY`,
 `ANTHROPIC_BASE_URL`, and `ANTHROPIC_MODEL` in your `.env` (see
 `.env.example`), then in your terminal:
 
@@ -1166,28 +1265,7 @@ Confirm user2's sandbox can call `mcp-server-b`'s `calc_tax` tool
 successfully, proving that the per-user credential isolation works end to
 end through Claude Code.
 
-#### Red-team evaluation with EvalHub + Garak
-
-Run repeatable, auditable adversarial evaluations against agents running
-inside OpenShell sandboxes — using EvalHub as the orchestrator, Garak as
-the adversarial probe engine, and `agent-proxy` (a small Rust server) to
-bridge Garak's OpenAI-compatible API to the CLI-based agent inside the
-sandbox. The proxy runs **inside** the sandbox, so probes hit the agent in
-the exact same environment a real user would have (network policies,
-binary permissions, MCP RBAC all live, not simulated).
-
-**Validated end-to-end on a live cluster**: Claude Code + real MCP tool
-calls through agent-proxy, a full EvalHub/Garak benchmark run (via a small
-Envoy proxy that works around an EvalHub/Garak routing limitation), and
-MLflow experiment tracking for the results.
-
-See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for the full
-walkthrough — architecture, prerequisites, step-by-step admin/secops
-instructions for both Claude Code (recommended) and Codex (optional)
-agents, validated findings, and the production role model (representative
-service-account profiles instead of named users).
-
-## Configuration reference
+### B. Configuration reference
 
 | Variable | Where used | Notes |
 |---|---|---|
@@ -1198,7 +1276,7 @@ service-account profiles instead of named users).
 | `KEYCLOAK_CLIENT_SECRET` | Gateway client secret | Never commit a real value |
 | `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-user.sh` | Short-lived; obtain via your own admin login |
 
-## Secrets and security notes
+### C. Secrets and security notes
 
 - The gateway client secret in `keycloak/realm-export.json` is a hardcoded
   demo value (`openshell-gateway-demo-secret`). In production, generate a
@@ -1219,7 +1297,7 @@ service-account profiles instead of named users).
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — evaluation-only, never expose to a public network.
 
-## Troubleshooting
+### D. Troubleshooting
 
 **Profile `token_url` substitution.** The provider profile
 `providers/user-refresh-profile.yaml` contains `<keycloak-host>` as a
@@ -1247,23 +1325,7 @@ not for production.
 **Envoy image tag.** `envoyproxy/envoy:v1.31-latest` is a moving tag. Pin an
 exact patch release before relying on this beyond a demo.
 
-## Definition of done
-
-- [ ] Keycloak realm `openshell` live with CLI and gateway clients, admin/user roles
-- [ ] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
-- [ ] RBAC mode confirmed: a user-role token cannot perform admin-only operations
-- [ ] Providers v2 enabled
-- [ ] At least two demo users onboarded, each with their own provider
-- [ ] Isolation test passes: user A's sandbox cannot access user B's data
-      even when both sandboxes run concurrently
-- [x] (Stretch) `mcp-servers` chart deployed; a user holding the required
-      Keycloak role can reach their MCP server, a user lacking it cannot
-      — verified via the Envoy sidecar (401/403/200 cases all tested live)
-- [x] (Stretch) A user authorized for one MCP server's role does not
-      thereby gain access to the other — verified both directions
-- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + vLLM 0.27.1 + MCP server 3.1.5
-
-## Open risks
+### E. Open risks
 
 - **This README is a reconstruction, not a transcription** of NVIDIA's own
   examples. Reconcile every command against the real repo before running it.
@@ -1278,57 +1340,7 @@ exact patch release before relying on this beyond a demo.
   mapper per MCP server, so the realm role claim is the *only* thing
   distinguishing access to server A from server B.
 
-## Experimental future work: Path B — SPIRE/SPIFFE token exchange
-
-> **Nothing in this section has ever been deployed or tested.** All commands
-> are **[VERIFY]**.
-
-### What Path B would do differently
-
-Instead of storing a user's refresh token and having the gateway refresh it
-directly, Path B uses SPIFFE workload identity:
-
-1. SPIRE issues JWT-SVIDs to both the sandbox supervisor and the gateway.
-2. The sandbox presents its SVID to the gateway when requesting a provider
-   token.
-3. The gateway authenticates to Keycloak using its own SVID as a client
-   assertion (RFC 7523) and asks for a token exchange (RFC 8693).
-
-This removes the need for a long-lived refresh token per user but requires
-SPIRE infrastructure and Keycloak's SPIFFE federated client authentication.
-
-### Prerequisites (beyond the current demo)
-
-- SPIRE server + agent deployed on the cluster
-- SPIFFE CSI driver for workload identity injection
-- `server.providerTokenGrants.spiffe.enabled=true` in the Helm overlay
-- Keycloak token-exchange feature enabled
-- Keycloak federated client authentication configured to trust the SPIRE
-  trust domain's bundle endpoint
-
-### Steps (all [VERIFY])
-
-```bash
-./scripts/04-deploy-spire.sh
-./scripts/05-register-spire-entries.sh
-```
-
-### Open risks specific to Path B
-
-- **Provider profile schema is unconfirmed.** `token_exchange` is not among
-  the five documented refresh strategies. The shape in
-  `providers/token-exchange-profile.yaml` is inferred from a GitHub design
-  discussion (issue #1987).
-- **Nothing in this repo has ever gotten SPIRE running on this cluster.**
-
-### References (Path B)
-
-- Dynamic token grant design discussion: https://github.com/NVIDIA/OpenShell/issues/1987
-- Keycloak SPIFFE federated client auth: https://www.keycloak.org/2026/01/federated-client-authentication
-- Keycloak SPIFFE playground demo: https://github.com/keycloak/keycloak-playground/tree/main/federated-client-authentication/spiffe
-- SPIRE Kubernetes quickstart: https://spiffe.io/docs/latest/try/getting-started-k8s/
-
-## References
+### F. References
 
 - OpenShift install path: https://docs.nvidia.com/openshell/kubernetes/openshift
 - Access Control / OIDC: https://docs.nvidia.com/openshell/kubernetes/access-control
