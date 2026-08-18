@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 700"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .text-faint     { fill: #94a3b8 }
+    .line-subtle    { stroke: #cbd5e1 }
+    .line-default   { stroke: #475569 }
+
+    .fill-blue      { fill: #dbeafe }
+    .stroke-blue    { stroke: #2563eb }
+    .text-blue      { fill: #1e40af }
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .fill-purple    { fill: #f3e8ff }
+    .stroke-purple  { stroke: #9333ea }
+    .text-purple    { fill: #6b21a8 }
+    .fill-amber     { fill: #fef3c7 }
+    .stroke-amber   { stroke: #d97706 }
+    .text-amber     { fill: #92400e }
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+    .fill-pink      { fill: #fce7f3 }
+    .stroke-pink    { stroke: #db2777 }
+    .text-pink      { fill: #9d174d }
+    .fill-teal      { fill: #ccfbf1 }
+    .stroke-teal    { stroke: #0d9488 }
+    .text-teal      { fill: #115e59 }
+
+    .alt-border     { stroke: #94a3b8 }
+    .alt-label-bg   { fill: #e2e8f0 }
+    .alt-label-text { fill: #475569 }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .text-faint     { fill: #64748b }
+      .line-subtle    { stroke: #475569 }
+      .line-default   { stroke: #94a3b8 }
+
+      .fill-blue      { fill: #1e3a5f }
+      .stroke-blue    { stroke: #60a5fa }
+      .text-blue      { fill: #93c5fd }
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .fill-purple    { fill: #2e1a47 }
+      .stroke-purple  { stroke: #a78bfa }
+      .text-purple    { fill: #c4b5fd }
+      .fill-amber     { fill: #3b2f10 }
+      .stroke-amber   { stroke: #fbbf24 }
+      .text-amber     { fill: #fcd34d }
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+      .fill-pink      { fill: #4a1942 }
+      .stroke-pink    { stroke: #f472b6 }
+      .text-pink      { fill: #f9a8d4 }
+      .fill-teal      { fill: #0f3d3a }
+      .stroke-teal    { stroke: #2dd4bf }
+      .text-teal      { fill: #5eead4 }
+
+      .alt-border     { stroke: #475569 }
+      .alt-label-bg   { fill: #334155 }
+      .alt-label-text { fill: #94a3b8 }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="700" rx="12" class="bg"/>
+  <rect x="0" y="0" width="800" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="800" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="24" y="36" font-size="16" font-weight="700" class="header-text">EvalHub Red-Team Evaluation Architecture</text>
+  <text x="776" y="36" font-size="11" class="header-muted" text-anchor="end">keycloak-oidc demo</text>
+
+  <!-- RHOAI UI / evalhub CLI -->
+  <rect x="180" y="76" width="240" height="40" rx="8" class="fill-blue stroke-blue" stroke-width="1.5"/>
+  <text x="300" y="100" font-size="12" font-weight="600" class="text-blue" text-anchor="middle">RHOAI UI / evalhub CLI</text>
+
+  <line x1="300" y1="116" x2="300" y2="140" class="line-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- EvalHub Server -->
+  <rect x="180" y="140" width="240" height="44" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="300" y="167" font-size="12" font-weight="600" class="text-indigo" text-anchor="middle">EvalHub Server</text>
+
+  <!-- EvalHub Server -> Garak Job -->
+  <line x1="420" y1="162" x2="456" y2="162" class="line-default" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Garak Job -->
+  <rect x="460" y="140" width="220" height="44" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+  <text x="570" y="159" font-size="12" font-weight="600" class="text-purple" text-anchor="middle">Garak Job</text>
+  <text x="570" y="173" font-size="9" class="text-purple" text-anchor="middle">(K8s Job)</text>
+
+  <!-- EvalHub Server -> MLflow, long vertical line -->
+  <line x1="300" y1="184" x2="300" y2="606" class="line-subtle" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-pink)"/>
+
+  <!-- Garak Job -> garak-envoy -->
+  <line x1="570" y1="184" x2="570" y2="230" class="line-default" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+  <!-- garak-envoy (highlighted — the workaround) -->
+  <rect x="460" y="230" width="220" height="68" rx="8" class="fill-amber stroke-amber" stroke-width="2"/>
+  <text x="570" y="253" font-size="13" font-weight="700" class="text-amber" text-anchor="middle">garak-envoy</text>
+  <text x="570" y="269" font-size="9" class="text-amber" text-anchor="middle">real, DNS-resolvable Route</text>
+  <text x="570" y="283" font-size="8" class="text-amber" text-anchor="middle">rewrites Host from URL path</text>
+  <text x="570" y="294" font-size="8" font-weight="600" class="text-amber" text-anchor="middle">/route/&lt;host-key&gt;/...</text>
+
+  <!-- garak-envoy -> gateway -->
+  <line x1="570" y1="298" x2="570" y2="330" class="line-default" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- OpenShell gateway -->
+  <rect x="460" y="330" width="220" height="44" rx="8" class="fill-blue stroke-blue" stroke-width="1.5"/>
+  <text x="570" y="349" font-size="12" font-weight="600" class="text-blue" text-anchor="middle">OpenShell gateway</text>
+  <text x="570" y="363" font-size="9" class="text-blue" text-anchor="middle">(Host-header routed)</text>
+
+  <!-- gateway -> sandbox container -->
+  <line x1="570" y1="374" x2="570" y2="404" class="line-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Sandbox container -->
+  <rect x="400" y="404" width="340" height="206" rx="10" fill="none" class="alt-border" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="420" y="394" width="300" height="22" rx="4" class="alt-label-bg"/>
+  <text x="570" y="409" font-size="10" font-weight="700" class="alt-label-text" text-anchor="middle">OpenShell sandbox (custom image)</text>
+
+  <!-- agent-proxy -->
+  <rect x="440" y="430" width="260" height="50" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="570" y="452" font-size="12" font-weight="600" class="text-green" text-anchor="middle">agent-proxy (Rust)</text>
+  <text x="570" y="468" font-size="9" class="text-green" text-anchor="middle">:8080 &#183; OpenAI-compatible</text>
+
+  <!-- agent-proxy -> CLI agent -->
+  <line x1="570" y1="480" x2="570" y2="506" class="line-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="514" y="486" width="112" height="16" rx="4" class="bg"/>
+  <text x="570" y="498" font-size="8" class="text-muted" text-anchor="middle">shells out to</text>
+
+  <!-- CLI agent -->
+  <rect x="460" y="506" width="220" height="40" rx="8" class="fill-teal stroke-teal" stroke-width="1.5"/>
+  <text x="570" y="530" font-size="12" font-weight="600" class="text-teal" text-anchor="middle">codex / claude (CLI agent)</text>
+
+  <!-- CLI agent -> three security boundaries -->
+  <line x1="469" y1="546" x2="469" y2="558" class="line-subtle" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <line x1="573" y1="546" x2="573" y2="558" class="line-subtle" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <line x1="677" y1="546" x2="677" y2="558" class="line-subtle" stroke-width="1.5" stroke-dasharray="3,2"/>
+
+  <rect x="422" y="558" width="94" height="30" rx="6" class="fill-pink stroke-pink" stroke-width="1"/>
+  <text x="469" y="577" font-size="8" font-weight="600" class="text-pink" text-anchor="middle">MCP servers</text>
+  <text x="469" y="586" font-size="7" class="text-pink" text-anchor="middle">(Envoy)</text>
+
+  <rect x="526" y="558" width="94" height="30" rx="6" class="fill-pink stroke-pink" stroke-width="1"/>
+  <text x="573" y="577" font-size="8" font-weight="600" class="text-pink" text-anchor="middle">network</text>
+  <text x="573" y="586" font-size="7" class="text-pink" text-anchor="middle">policies</text>
+
+  <rect x="630" y="558" width="94" height="30" rx="6" class="fill-pink stroke-pink" stroke-width="1"/>
+  <text x="677" y="577" font-size="8" font-weight="600" class="text-pink" text-anchor="middle">binary</text>
+  <text x="677" y="586" font-size="7" class="text-pink" text-anchor="middle">permissions</text>
+
+  <!-- MLflow -->
+  <rect x="160" y="610" width="220" height="50" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="270" y="633" font-size="13" font-weight="700" class="text-pink" text-anchor="middle">MLflow</text>
+  <text x="270" y="649" font-size="9" class="text-pink" text-anchor="middle">metrics + attack logs</text>
+
+  <!-- Why garak-envoy callout -->
+  <rect x="420" y="628" width="320" height="52" rx="8" class="fill-amber stroke-amber" stroke-width="1"/>
+  <text x="580" y="644" font-size="8.5" font-weight="700" class="text-amber" text-anchor="middle">Why garak-envoy?</text>
+  <text x="580" y="657" font-size="7.5" class="text-amber" text-anchor="middle">Garak's OpenAI client can't set a custom Host header,</text>
+  <text x="580" y="668" font-size="7.5" class="text-amber" text-anchor="middle">but the gateway needs one to route to a specific sandbox.</text>
+</svg>
