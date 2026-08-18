@@ -1,0 +1,35 @@
+name: CI agent-proxy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['util/agent-proxy/**']
+  pull_request:
+    paths: ['util/agent-proxy/**']
+
+defaults:
+  run:
+    working-directory: util/agent-proxy
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      # musl, not the native target — this is the artifact actually
+      # deployed into sandboxes (see util/agent-proxy/README.md)
+      - run: cargo build --release --target x86_64-unknown-linux-musl

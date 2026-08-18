@@ -1,0 +1,18 @@
+apiVersion: v2
+name: garak-envoy
+description: >-
+  Envoy reverse proxy that lets EvalHub's built-in `garak` provider reach an
+  `openshell service expose`d sandbox service. `service expose` routes purely
+  by HTTP Host header (multiple sandboxes share one gateway Route/hostname),
+  but EvalHub's ModelConfig schema and Garak's OpenAI-compatible client have
+  no way to set a custom header. This chart's Envoy extracts a routing key
+  from the request path (`/route/<host-key>/...`), rewrites the upstream
+  `:authority`/Host to it, and forwards to the OpenShell gateway over TLS —
+  so `model-url` just needs a real, DNS-resolvable Route with the key baked
+  into the path. See demos/keycloak-oidc/docs/evalhub-redteam.md ("CONFIRMED
+  BROKEN" note) for the full root-cause writeup. This chart, and the
+  workaround it implements, is this demo's own design — not provided by
+  upstream OpenShell or EvalHub.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

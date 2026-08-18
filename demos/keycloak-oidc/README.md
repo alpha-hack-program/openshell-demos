@@ -188,7 +188,9 @@ after it runs, so you'll come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
-| `OPENSHELL_NAMESPACE` | `openshell-keycloak-oidc` | OpenShift namespace for this demo's gateway |
+| `OPENSHELL_NAMESPACE` | `keycloak-oidc-demo` | OpenShift namespace for this demo's gateway. Must **not** start with `openshell-` — the Route FQDN is derived as `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a redundant prefix can push it over the 64-byte X.509 CommonName limit when using `LETSENCRYPT_CLUSTER_ISSUER` (see AGENTS.md) |
+| `CERT_MANAGER` | `false` | Set `true` to use cert-manager for TLS (requires the Operator) |
+| `LETSENCRYPT_CLUSTER_ISSUER` | *(empty)* | Name of a Let's Encrypt `ClusterIssuer` for CA-signed Route cert (requires `CERT_MANAGER=true`) |
 | `KEYCLOAK_HOST` | `keycloak.apps.ocp.example.com` | Keycloak hostname (set after deploying Keycloak) |
 | `KEYCLOAK_REALM` | `openshell` | Keycloak realm name |
 | `KEYCLOAK_CLIENT_ID_CLI` | `openshell-cli` | Public client for CLI/browser login |
@@ -390,6 +392,71 @@ The Route hostname must also be in the server certificate's SANs — without
 it, TLS handshakes will fail. The `--set` overrides below add it alongside
 the namespace-specific service DNS names.
 
+##### Let's Encrypt TLS (optional)
+
+When using the cert-manager path (`CERT_MANAGER=true`), you can get a
+publicly-trusted CA-signed certificate for the Route instead of the default
+self-signed CA. The chart's `serverIssuerRef` creates a **second** server
+certificate signed by your ACME issuer (for the Route FQDN) while the
+**internal** certificate stays signed by the chart's own CA — mTLS client
+auth keeps working unchanged. The gateway serves the right certificate via
+SNI.
+
+To use this:
+
+1. Set `LETSENCRYPT_CLUSTER_ISSUER` in your `.env` to the name of an
+   existing Let's Encrypt `ClusterIssuer` on your cluster (e.g.
+   `letsencrypt-prod`).
+
+2. If you don't have a ClusterIssuer yet, create one. DNS-01 is recommended
+   for passthrough Routes (HTTP-01 needs port 80, which passthrough doesn't
+   expose). The solver configuration depends on your DNS provider — this
+   example uses Route53, but cert-manager supports
+   [many providers](https://cert-manager.io/docs/configuration/acme/dns01/):
+
+   ```bash
+   oc apply -f - <<'EOF'
+   apiVersion: cert-manager.io/v1
+   kind: ClusterIssuer
+   metadata:
+     name: letsencrypt-prod
+   spec:
+     acme:
+       server: https://acme-v02.api.letsencrypt.org/directory
+       email: your-email@example.com        # Let's Encrypt notifications
+       privateKeySecretRef:
+         name: letsencrypt-prod-account-key
+       solvers:
+         - dns01:
+             route53:                        # replace with your DNS provider
+               region: us-east-1
+               # accessKeyID / secretAccessKeySecretRef or IRSA — see
+               # cert-manager docs for your provider
+   EOF
+
+   # Verify the issuer is ready
+   oc get clusterissuer letsencrypt-prod
+   ```
+
+The helm install snippet below automatically passes `serverIssuerRef` when
+`LETSENCRYPT_CLUSTER_ISSUER` is set. If left empty, the chart uses its own
+self-signed CA for all certificates (the default).
+
+When `serverIssuerRef` is set, `certManager.serverDnsNames` feeds **only**
+the external (ACME) certificate — the internal certificate's SANs come
+from the chart's own defaults automatically, regardless of this value. The
+external certificate's `dnsNames` are used as-is, with no filtering, so
+the list must contain **only** the externally-resolvable Route FQDN — no
+internal names (rejected by the chart's own guard), no IPs, and no bare
+single-label names (both silently accepted by the chart but rejected by
+ACME). That's why the two branches below differ: the self-signed-CA branch
+appends the Route host to the base internal-SAN list, while the Let's
+Encrypt branch replaces `serverDnsNames` wholesale with just the Route
+host. Also see the `OPENSHELL_NAMESPACE` naming constraint above — the
+Route host doubles the `openshell-` prefix if the namespace already starts
+with it, which can push the Let's Encrypt certificate's CommonName over
+the 64-byte X.509 limit.
+
 ```bash
 source .env
 source ../../.env
@@ -401,14 +468,29 @@ ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
 
 if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
   VALUES_FILE=helm/values-certmanager.yaml
-  SAN_SET=(
-    --set "certManager.serverDnsNames[2]=openshell.${OPENSHELL_NAMESPACE}.svc"
-    --set "certManager.serverDnsNames[3]=openshell.${OPENSHELL_NAMESPACE}.svc.cluster.local"
-    --set "certManager.serverDnsNames[4]=${ROUTE_HOST}"
-  )
+  ISSUER_SET=()
+  if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
+    # serverDnsNames feeds ONLY the external (ACME) certificate when
+    # serverIssuerRef is set — replace it wholesale with just the
+    # externally-resolvable Route host (no internal names, no IPs, no
+    # bare names; ACME rejects all three).
+    SAN_SET=(--set "certManager.serverDnsNames={${ROUTE_HOST}}")
+    ISSUER_SET=(
+      --set "certManager.serverIssuerRef.name=${LETSENCRYPT_CLUSTER_ISSUER}"
+      --set "certManager.serverIssuerRef.kind=ClusterIssuer"
+      --set "certManager.serverIssuerRef.group=cert-manager.io"
+    )
+  else
+    SAN_SET=(
+      --set "certManager.serverDnsNames[2]=openshell.${OPENSHELL_NAMESPACE}.svc"
+      --set "certManager.serverDnsNames[3]=openshell.${OPENSHELL_NAMESPACE}.svc.cluster.local"
+      --set "certManager.serverDnsNames[4]=${ROUTE_HOST}"
+    )
+  fi
 else
   VALUES_FILE=helm/values.yaml
   SAN_SET=(--set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}")
+  ISSUER_SET=()
 fi
 
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
@@ -417,7 +499,8 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   -f "$VALUES_FILE" \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
   --set "openshiftRoute.host=${ROUTE_HOST}" \
-  "${SAN_SET[@]}"
+  "${SAN_SET[@]}" \
+  "${ISSUER_SET[@]}"
 ```
 
 Wait for the gateway to come up:
@@ -447,6 +530,17 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+
+# If using the Let's Encrypt path (LETSENCRYPT_CLUSTER_ISSUER set), the CLI's
+# gRPC control channel pins trust to this ca.crt bundle and does NOT fall back
+# to the system trust store. Since $ROUTE_HOST now serves a Let's
+# Encrypt-signed certificate (via SNI) instead of the chart's own CA, append
+# its issuing chain — otherwise every CLI command fails with
+# "invalid peer certificate: UnknownIssuer".
+if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
+  echo | openssl s_client -connect "${ROUTE_HOST}:443" -servername "${ROUTE_HOST}" -showcerts 2>/dev/null \
+    | awk '/-----BEGIN CERTIFICATE-----/{n++} n>=2' >> "$MTLS_DIR/ca.crt"
+fi
 
 openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
 openshell gateway add "https://${ROUTE_HOST}:443" \
@@ -1071,6 +1165,444 @@ QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 Confirm user2's sandbox can call `mcp-server-b`'s `calc_tax` tool
 successfully, proving that the per-user credential isolation works end to
 end through Claude Code.
+
+#### Red-team evaluation with EvalHub + Garak
+
+Run repeatable, auditable adversarial evaluations against agents running
+inside OpenShell sandboxes. EvalHub orchestrates evaluations, Garak probes
+for vulnerabilities, and `agent-proxy` (a small Rust server) bridges Garak's
+OpenAI-compatible API to the CLI-based agent inside the sandbox.
+
+The proxy runs **inside** the sandbox — Garak's adversarial probes hit the
+agent in the exact same environment a real user would have (network policies,
+binary permissions, MCP RBAC). See
+[`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for architecture,
+design decisions, roles/responsibilities, and background.
+
+> **Note:** In production, red-team evaluation is a secops function, run
+> automatically by an automation/service-account identity — never a human,
+> and never the target user themselves (self-auditing is a conflict of
+> interest). **`user1` here names *whose provider and MCP roles get
+> attached to the sandbox*, not who issues the commands.** Every command
+> below — sandbox creation, provider attachment, policy updates, proxy
+> startup, eval submission — runs from **one continuous admin/secops
+> session**. This works because Providers v2 injects credentials per
+> *attached* provider and MCP RBAC checks whatever JWT that provider
+> supplies at request time — neither cares who ran `sandbox create`. So the
+> sandbox gets exactly `user1`'s security context (their MCP roles, their
+> credentials) even though an admin/secops identity created and drove it
+> end to end. See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md)'s
+> "Roles and responsibilities" section for the full production model
+> (representative profiles instead of named users, automated loops across
+> all of them).
+
+##### Prerequisites (admin, one-time)
+
+1. **Enable the TrustyAI component** — EvalHub is deployed by
+   the TrustyAI Operator, which ships with RHOAI but is disabled by
+   default. Enable it in the DataScienceCluster, then wait for the
+   operator and CRDs to appear:
+
+   ```bash
+   # Enable TrustyAI (skip if already Managed)
+   oc patch datasciencecluster default-dsc --type=merge \
+     -p '{"spec":{"components":{"trustyai":{"managementState":"Managed"}}}}'
+
+   # Wait for the TrustyAI operator pod
+   oc -n redhat-ods-applications get pods -l app=trustyai-operator --watch
+   # Ctrl-C once a pod shows Running
+
+   # Confirm the EvalHub CRD exists
+   oc api-resources | grep -i eval
+   ```
+
+   Also confirm that KServe is in `RawDeployment` mode (required by
+   EvalHub):
+
+   ```bash
+   oc get datasciencecluster default-dsc \
+     -o jsonpath='{.spec.components.kserve.rawDeploymentServiceConfig}'
+   # Should print "Headless"
+   ```
+
+2. **Deploy PostgreSQL** — EvalHub needs a PostgreSQL database.
+   Deploy one in the EvalHub namespace (or point to an existing instance).
+   A minimal ephemeral deployment for demo purposes:
+
+   ```bash
+   EVALHUB_NAMESPACE="evalhub"
+   oc create namespace "$EVALHUB_NAMESPACE" 2>/dev/null || true
+
+   oc -n "$EVALHUB_NAMESPACE" new-app \
+     --name=evalhub-db \
+     -e POSTGRESQL_USER=evalhub \
+     -e POSTGRESQL_PASSWORD=evalhub-demo-password \
+     -e POSTGRESQL_DATABASE=evalhub \
+     --image-stream="openshift/postgresql:15-el9"
+
+   oc -n "$EVALHUB_NAMESPACE" rollout status deployment/evalhub-db
+   ```
+
+3. **Create the EvalHub CR**:
+
+   ```bash
+   EVALHUB_NAMESPACE="evalhub"
+
+   # Create the PostgreSQL connection Secret (EvalHub expects a db-url key)
+   oc -n "$EVALHUB_NAMESPACE" apply -f - <<'EOF'
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: evalhub-db-credentials
+   type: Opaque
+   stringData:
+     db-url: "postgresql://evalhub:evalhub-demo-password@evalhub-db:5432/evalhub"
+   EOF
+
+   # Create the EvalHub CR with the garak provider
+   oc -n "$EVALHUB_NAMESPACE" apply -f - <<'EOF'
+   apiVersion: trustyai.opendatahub.io/v1alpha1
+   kind: EvalHub
+   metadata:
+     name: evalhub
+   spec:
+     replicas: 1
+     database:
+       type: postgresql
+       secret: evalhub-db-credentials
+     providers:
+       - garak
+     collections:
+       - safety-and-fairness-v1
+   EOF
+
+   # Verify
+   oc get pods -l app=eval-hub -n "$EVALHUB_NAMESPACE"
+   ```
+
+4. **Install the EvalHub CLI** — use
+   [uv](https://docs.astral.sh/uv/) to install into an isolated venv
+   without polluting your system Python:
+
+   ```bash
+   uv tool install "eval-hub-sdk[cli]"
+   evalhub --version
+   ```
+
+   Configure the CLI to point at your EvalHub instance:
+
+   ```bash
+   EVALHUB_NAMESPACE="evalhub"
+   evalhub config set base_url \
+     "https://$(oc get routes evalhub -o jsonpath='{.spec.host}' -n "$EVALHUB_NAMESPACE")"
+   evalhub config set tenant "$EVALHUB_NAMESPACE"
+   evalhub config set token "$(oc whoami -t)"
+
+   # Verify connectivity
+   evalhub health
+   evalhub providers list
+   ```
+
+5. **Deploy `garak-envoy`.** EvalHub's `garak` provider uses the stock
+   OpenAI Python client, which sends no custom headers — but
+   `openshell service expose` routes purely by HTTP `Host` header (multiple
+   sandboxes share one gateway Route). Without a header, a Garak job can
+   only ever reach the gateway's *default* vhost — **confirmed on a live
+   cluster**: the job fails immediately with `openai.NotFoundError: Error
+   code: 404`. `garak-envoy` is a small Envoy proxy that extracts a routing
+   key from the request *path* (`/route/<host-key>/...`) instead, and
+   rewrites the upstream Host header to it. See
+   [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md)'s "CONFIRMED
+   BROKEN" note for the full root-cause writeup. Deploy it once per
+   cluster:
+
+   ```bash
+   helm upgrade --install garak-envoy demos/keycloak-oidc/garak-envoy \
+     --namespace "$OPENSHELL_NAMESPACE"
+
+   GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" \
+     -o jsonpath='{.spec.host}')
+   echo "garak-envoy route: $GARAK_ENVOY_HOST"
+   ```
+
+6. **Get the `agent-proxy` static binary.** No Rust toolchain needed —
+   download the prebuilt musl binary from GitHub Releases into the same
+   path a local build would produce, so the `AGENT_PROXY_BIN` variable
+   used below works either way:
+
+   ```bash
+   AGENT_PROXY_DIR="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release"
+   mkdir -p "$AGENT_PROXY_DIR"
+   curl -fsSL -o "$AGENT_PROXY_DIR/agent-proxy" \
+     https://github.com/alpha-hack-program/openshell-demos/releases/latest/download/agent-proxy-linux-x86_64-musl
+   chmod +x "$AGENT_PROXY_DIR/agent-proxy"
+   ```
+
+   If you're actively developing `agent-proxy` (or no release exists yet),
+   build from source instead — requires Rust 2024 edition (1.85+) and the
+   `x86_64-unknown-linux-musl` target. See
+   [`util/agent-proxy/README.md`](../../util/agent-proxy/README.md) for the
+   full build/release/image workflow:
+
+   ```bash
+   make -C ../../util/agent-proxy musl
+   ```
+
+   Always use the musl target for anything deployed into a sandbox — a
+   plain `cargo build --release` binary links against whatever glibc your
+   dev machine has, which is typically too new (confirmed: Fedora 44's
+   glibc 2.41) for the sandbox base images.
+
+7. **Enable MLflow result tracking (optional but recommended).** EvalHub
+   has no native RHOAI dashboard view of its own (the dashboard's model
+   evaluation UI is LM-Eval-only) — MLflow is the only UI-capable path for
+   Garak results. If this cluster already has the native RHOAI MLflow
+   instance (check: `oc get mlflow -A`), the TrustyAI operator has likely
+   already pre-wired most of the integration (CA cert, workspace, and a
+   projected-ServiceAccount-token mount with matching RBAC) — the **only**
+   thing usually missing is `MLFLOW_TRACKING_URI`, which is what actually
+   enables tracking:
+
+   ```bash
+   EVALHUB_NAMESPACE="evalhub"
+   MLFLOW_INTERNAL_URL=$(oc get mlflow mlflow -n redhat-ods-applications \
+     -o jsonpath='{.status.address.url}')
+
+   oc patch evalhub evalhub -n "$EVALHUB_NAMESPACE" --type=merge -p \
+     "{\"spec\":{\"env\":[{\"name\":\"MLFLOW_TRACKING_URI\",\"value\":\"${MLFLOW_INTERNAL_URL}\"}]}}"
+
+   oc rollout status deployment/evalhub -n "$EVALHUB_NAMESPACE"
+   ```
+
+   This redeploys the EvalHub server, which cancels any job currently
+   running — do this before submitting evaluations, not mid-run. Once
+   healthy again (`evalhub health`), pass `--experiment <name>` on job
+   submissions (see step 5 below) to log results to MLflow. See
+   [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md)'s "Viewing results
+   in the RHOAI dashboard / MLflow" section for the full writeup, including
+   how to query results directly (RHOAI's MLflow requires a
+   `X-MLflow-Workspace` header on every API call — a detail the plain web
+   UI may also need if experiments don't show up).
+
+##### Demo steps (admin/secops session, targeting user1's context) — Claude Code, recommended
+
+Run these — from the **same admin/secops session as the Prerequisites
+above** — after completing steps 1-5 of the main demo. `user1` must
+already have their provider and MCP roles configured (steps 3-4 of the
+main demo); nothing here requires logging in *as* user1. **Claude Code is
+the recommended agent for this section** — its Anthropic Messages API
+works fully (including MCP tool use) against this demo's DeepSeek BYO
+backend. The Codex variant below only supports model-only probes here (see
+why in that variant's intro).
+
+```bash
+source .env
+source ../../.env
+USER_ID="user1"
+SANDBOX="garak-claude-${USER_ID}"
+CLAUDE_IMAGE="quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36"
+AGENT_PROXY_BIN="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy"
+LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+SERVER_NAME="mcp-server-a"
+# Re-derive if this is a fresh shell from the Prerequisites section:
+GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpath='{.spec.host}')
+```
+
+**1. Create the `byo-claude` provider** (skip if you already created it for
+the "Claude Code + BYO LLM + MCP tool" recipe above):
+
+```bash
+TMPFILE=$(mktemp --suffix=.yaml)
+sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+openshell provider profile import -f "$TMPFILE"
+rm -f "$TMPFILE"
+
+openshell provider create --name byo-claude --type byo-claude \
+  --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+```
+
+**2. Create a sandbox from the stock Claude Code image, attach providers,
+and grant network access:**
+
+```bash
+openshell sandbox create --name "$SANDBOX" --from "$CLAUDE_IMAGE" -- true
+
+openshell sandbox provider attach "$SANDBOX" byo-claude
+openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}"
+
+openshell policy update "$SANDBOX" \
+  --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
+  --binary /usr/local/bin/claude \
+  --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
+  --binary /usr/local/bin/claude \
+  --wait
+```
+
+**3. Upload agent-proxy and an MCP-config wrapper script.** Claude Code's
+`--mcp-config` JSON must be built at *runtime* inside the sandbox, since it
+embeds `$USER_ACCESS_TOKEN` — credential resolution happens at the network
+layer when `claude` sends this exact placeholder string to a
+policy-matched endpoint, not when a shell expands the variable (confirmed:
+a plain `bash -c 'echo $USER_ACCESS_TOKEN'` prints the literal placeholder,
+never the real token). A wrapper script is required because agent-proxy's
+`AGENT_COMMAND` is split naively on whitespace — it can't express the
+shell quoting this needs:
+
+```bash
+cat > /tmp/run-claude.sh << EOF
+#!/bin/bash
+set -e
+MCP_JSON="{\\"mcpServers\\":{\\"eligibility\\":{\\"type\\":\\"http\\",\\"url\\":\\"http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp\\",\\"headers\\":{\\"Authorization\\":\\"Bearer \$USER_ACCESS_TOKEN\\"}}}}"
+exec claude -p "\$1" \\
+  --mcp-config "\$MCP_JSON" \\
+  --strict-mcp-config \\
+  --permission-mode bypassPermissions \\
+  --output-format text
+EOF
+
+openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy
+openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/agent-proxy
+openshell sandbox upload "$SANDBOX" /tmp/run-claude.sh /sandbox/run-claude.sh
+openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/run-claude.sh
+```
+
+**4. Start the proxy in background and expose the service.** Claude Code's
+`-p` mode doesn't need a real TTY (unlike Codex — see the Codex variant
+below), so a plain background start is fine:
+
+```bash
+nohup openshell sandbox exec -n "$SANDBOX" \
+  --env 'AGENT_COMMAND=/sandbox/run-claude.sh' \
+  --env 'OUTPUT_FILE_FLAG=' \
+  --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
+  --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
+  --env "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_MODEL" \
+  --env "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_MODEL" \
+  --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_MODEL" \
+  -- /sandbox/agent-proxy --port 8100 > /tmp/agent-proxy-exec.log 2>&1 &
+PROXY_EXEC_PID=$!
+
+openshell service expose "$SANDBOX" 8100
+```
+
+Verify the proxy is reachable and MCP tool use works — **validated on a
+live cluster**: the eligibility engine returned a real, tool-derived
+answer (not a hallucination), confirmed against `mcp-server-a`'s own
+container logs (`called_by`/`roles` claims matched the authenticated
+user's real JWT):
+
+```bash
+ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
+SERVICE_HOST="default--${SANDBOX}.openshell.localhost"
+
+curl -sk -X POST "https://${ROUTE_HOST}/v1/chat/completions" \
+  -H "Host: ${SERVICE_HOST}" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"My mother is at the hospital, can I get an aid while I am on unpaid leave?"}]}' | jq .
+```
+
+**5. Submit an EvalHub evaluation through `garak-envoy`.** Point
+`--model-url` at `garak-envoy`'s Route with the sandbox's Host-header key
+embedded in the path — **confirmed working end-to-end on a live cluster**
+(the `quick` and `owasp_llm_top10` benchmarks both completed with real
+metrics). Add `--experiment` if you completed the optional MLflow step in
+the Prerequisites above:
+
+```bash
+evalhub eval run \
+  --name "redteam-${USER_ID}" \
+  --model-url "https://${GARAK_ENVOY_HOST}/route/${SERVICE_HOST}" \
+  --model-name "${SANDBOX}-agent-proxy" \
+  --provider garak \
+  -b quick \
+  --experiment "redteam-${USER_ID}"
+```
+
+**6. Track results:**
+
+```bash
+evalhub eval status <job_id>
+evalhub eval results <job_id>
+```
+
+If MLflow tracking is enabled, the job response includes a
+`mlflow_experiment_id` and (once complete) each benchmark result includes
+an `mlflow_run_id` — see
+[`docs/evalhub-redteam.md`](docs/evalhub-redteam.md)'s "Viewing results in
+the RHOAI dashboard / MLflow" section to browse or query them.
+
+**7. Cleanup:**
+
+```bash
+kill "$PROXY_EXEC_PID" 2>/dev/null
+openshell service delete "$SANDBOX"
+openshell sandbox delete "$SANDBOX"
+```
+
+##### Demo steps (admin/secops session, targeting user1's context) — Codex variant, optional
+
+Codex requires an on-cluster vLLM **≥0.25.0** (upstream — RHOAI 3.4.x
+ships 0.18.0, too old) for MCP tool use; its `namespace` tool type isn't
+supported by this demo's DeepSeek BYO backend (confirmed: DeepSeek rejects
+it with a 400). Without that endpoint, Codex can still run **model-only**
+red-team probes (no MCP tool calls). Use this variant only if you have
+such a vLLM endpoint, or specifically want to red-team the model in
+isolation. Same session model as the Claude Code steps above — nothing
+here requires logging in as user1.
+
+```bash
+source .env
+source ../../.env
+USER_ID="user1"
+SANDBOX="garak-codex-${USER_ID}"
+AGENT_IMAGE="quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012"
+AGENT_PROXY_BIN="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy"
+GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpath='{.spec.host}')
+```
+
+**1. Create the sandbox and attach providers:**
+
+```bash
+openshell sandbox create --name "$SANDBOX" --from "$AGENT_IMAGE" -- true
+openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}"
+openshell sandbox provider attach "$SANDBOX" byo-codex
+```
+
+**2. Upload the agent-proxy binary:**
+
+```bash
+openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy
+openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/agent-proxy
+```
+
+**3. Start the proxy in the FOREGROUND with `--tty`, backgrounded on the
+*local* machine.** Codex's `exec` subcommand refuses to run
+non-interactively unless stdin, stdout, AND stderr are all real TTYs and
+`TERM` isn't `dumb` — even with `--dangerously-bypass-approvals-and-sandbox`.
+`sandbox exec` only allocates a pty when `--tty` is passed explicitly (or
+the calling terminal is itself a real tty) — a background
+`nohup agent-proxy &` *inside* the sandbox never requests one, and tears
+down the exec channel (and its pty) the moment the wrapping shell exits
+regardless. See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md)'s "TTY
+root cause" section for the full investigation:
+
+```bash
+nohup openshell sandbox exec -n "$SANDBOX" --tty \
+  --env 'AGENT_COMMAND=codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' \
+  -- /sandbox/agent-proxy --port 8100 > /tmp/agent-proxy-exec.log 2>&1 &
+PROXY_EXEC_PID=$!
+
+openshell service expose "$SANDBOX" 8100
+```
+
+**4. Verify, submit the eval, track results, and clean up** — same as the
+Claude Code steps 4-7 above, substituting this variant's `$SANDBOX` (the
+model-only probe results won't include MCP-related findings).
+
+See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for the custom
+image approach (Approach B), the automated evaluation loop across
+representative user profiles, and the deeper risk assessment path (Path 2
+with KFP + custom harm categories).
 
 ## Configuration reference
 

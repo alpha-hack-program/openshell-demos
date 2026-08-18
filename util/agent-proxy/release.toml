@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "agent-proxy-v{{version}}"
+pre-release-commit-message = "release(agent-proxy): {{version}}"
+tag-message = "agent-proxy v{{version}}"
+pre-release-hook = ["make", "ci"]

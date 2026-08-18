@@ -1,0 +1,18 @@
+# Custom sandbox image for red-team evaluations with Claude Code.
+# Bakes agent-proxy into a Claude Code sandbox so Garak can talk
+# OpenAI-compatible to the agent running inside the sandbox.
+#
+# Before building, put a musl static binary in this directory — the native
+# `target/release` build is too new (glibc) for this base image:
+#   make -C util/agent-proxy image-claude
+# (runs `cargo build --release --target x86_64-unknown-linux-musl`, copies
+# the binary here, then `podman build`)
+#
+# Base image: confirmed — includes claude CLI (2.1.220 as of this writing)
+# at /usr/local/bin/claude and satisfies OpenShell sandbox requirements.
+FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36
+
+COPY agent-proxy /usr/local/bin/agent-proxy
+
+USER sandbox
+WORKDIR /sandbox

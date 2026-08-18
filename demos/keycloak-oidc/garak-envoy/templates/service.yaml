@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: garak-envoy
+  labels:
+    app.kubernetes.io/name: garak-envoy
+spec:
+  selector:
+    app.kubernetes.io/name: garak-envoy
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080

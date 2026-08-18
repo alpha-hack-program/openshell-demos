@@ -1,0 +1,102 @@
+name: Release agent-proxy
+
+on:
+  push:
+    tags: ['agent-proxy-v*']
+
+env:
+  REGISTRY: ghcr.io
+
+defaults:
+  run:
+    working-directory: util/agent-proxy
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v5
+        with:
+          name: agent-proxy-linux-x86_64-musl
+          path: util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy
+
+  # Bakes the musl binary into both sandbox base images and pushes to GHCR
+  # (see demos/keycloak-oidc/docs/evalhub-redteam.md, "Approach B").
+  images:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: agent-proxy-linux-x86_64-musl
+          path: util/agent-proxy/target/x86_64-unknown-linux-musl/release
+      - run: chmod +x util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push codex-garak
+        run: |
+          cp util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy \
+            demos/keycloak-oidc/images/codex-garak/agent-proxy
+          docker build \
+            -t "$REGISTRY/${{ github.repository }}/codex-garak:${{ github.ref_name }}" \
+            -t "$REGISTRY/${{ github.repository }}/codex-garak:latest" \
+            -f demos/keycloak-oidc/images/codex-garak/Containerfile \
+            demos/keycloak-oidc/images/codex-garak/
+          docker push "$REGISTRY/${{ github.repository }}/codex-garak:${{ github.ref_name }}"
+          docker push "$REGISTRY/${{ github.repository }}/codex-garak:latest"
+      - name: Build and push claude-garak
+        run: |
+          cp util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy \
+            demos/keycloak-oidc/images/claude-garak/agent-proxy
+          docker build \
+            -t "$REGISTRY/${{ github.repository }}/claude-garak:${{ github.ref_name }}" \
+            -t "$REGISTRY/${{ github.repository }}/claude-garak:latest" \
+            -f demos/keycloak-oidc/images/claude-garak/Containerfile \
+            demos/keycloak-oidc/images/claude-garak/
+          docker push "$REGISTRY/${{ github.repository }}/claude-garak:${{ github.ref_name }}"
+          docker push "$REGISTRY/${{ github.repository }}/claude-garak:latest"
+
+  release:
+    needs: [build, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: agent-proxy-linux-x86_64-musl
+          path: .
+      - run: |
+          mv agent-proxy agent-proxy-linux-x86_64-musl
+          chmod +x agent-proxy-linux-x86_64-musl
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: agent-proxy-linux-x86_64-musl
