@@ -153,6 +153,7 @@ OAuth flows need to be automated. Two docs cover this:
 |---|---|---|
 | [`base`](demos/base/README.md) | Demo-agnostic OpenShell-on-OpenShift install + hello-world sandbox verification | Verified end to end |
 | [`keycloak-oidc`](demos/keycloak-oidc/README.md) | Keycloak as OIDC IdP, per-user credential isolation via Providers v2, MCP servers gated by Keycloak role via an Envoy sidecar | Verified end to end against a live cluster |
+| [`saw-openclaw`](demos/saw-openclaw/README.md) | SAW (Secure Agent Workspace) with KubeVirt VM isolation, OpenClaw + Gemini inference, includes workarounds for current SAW deployment issues | Verified end to end |
 
 ## 6. Internal documentation (`docs/`)
 

@@ -28,6 +28,7 @@ install. Once that's green, pick another demo.
 |---|---|---|
 | [`base`](demos/base/README.md) | Demo-agnostic OpenShell gateway install + hello-world sandbox verification, plus an optional DeepSeek credential-injection smoke test | Verified end to end |
 | [`keycloak-oidc`](demos/keycloak-oidc/README.md) | Keycloak as OIDC IdP, per-user credential isolation via Providers v2, MCP servers gated by Keycloak role via an Envoy sidecar | Verified end to end (real LLM + real MCP tool calls, cross-user/cross-server isolation confirmed) |
+| [`saw-openclaw`](demos/saw-openclaw/README.md) | SAW (Secure Agent Workspace) with KubeVirt VM isolation, OpenClaw running Gemini inference inside a sandboxed container, includes workarounds for current SAW deployment issues | Verified end to end (inference, code generation, reasoning) |
 
 ## Documentation
 
