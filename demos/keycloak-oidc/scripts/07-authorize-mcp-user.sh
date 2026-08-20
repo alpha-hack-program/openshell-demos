@@ -5,10 +5,12 @@ set -euo pipefail
 #
 # Usage: ./07-authorize-mcp-user.sh <user-id> <mcp-server-a|mcp-server-b>
 #
-# Assumes a sandbox named demo-<user-id> already exists — this script does
-# not create one. Assumes the user was already onboarded via
-# 03-onboard-user.sh, so a `user-<id>` provider already exists and injects
-# their Keycloak access token as a Bearer header on outbound calls.
+# Assumes a sandbox named demo-<user-id> already exists in the user's own
+# workspace (named after <user-id>) — this script does not create one.
+# Assumes the user was already onboarded via 03-onboard-user.sh, which also
+# creates that workspace and grants the user membership, so a `user-<id>`
+# provider already exists and injects their Keycloak access token as a
+# Bearer header on outbound calls.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
@@ -90,7 +92,8 @@ fi
 SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER_NAME" -o jsonpath='{.spec.ports[0].port}')
 openshell policy update "$SANDBOX_NAME" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:${SERVER_PORT}:read-write:rest:enforce" \
-  --binary /usr/bin/curl --wait
+  --binary /usr/bin/curl --wait \
+  --workspace "${USER_ID}"
 
 echo "User ${USER_ID} authorized for ${SERVER_NAME}."
 echo "From inside sandbox ${SANDBOX_NAME}, calls to"

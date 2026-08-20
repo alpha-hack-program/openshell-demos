@@ -67,13 +67,33 @@ for ROLE_NAME in openshell-user offline_access mcp-server-a-user; do
 done
 ```
 
-## 2. Obtain the user's refresh token and register with OpenShell
+## 2. Create the user's own OpenShell workspace
+
+**Do this before either onboarding option below.** Every user needs their
+own workspace — putting multiple users in a shared workspace (including
+`default`) lets a plain `user`-role member `sandbox exec` into *any other*
+user's sandbox in that workspace and use their real credentials, not just
+their own. This isn't a corner case, it's the default outcome of skipping
+this step; see
+[the main README's Workspace isolation section](../README.md#workspace-isolation)
+for the live-verified details. This step is admin-only and only needs to
+run once per user:
+
+```bash
+openshell workspace create --name "${NEW_USER}"
+openshell workspace member add --workspace "${NEW_USER}" --subject "${USER_UUID}" --role user
+```
+
+(`USER_UUID` is the same Keycloak subject captured in step 1 above.)
+
+## 3. Obtain the user's refresh token and register with OpenShell
 
 ### Option A: `onboard` tool (recommended)
 
 The `onboard` tool handles the full flow: opens the browser for the user to
 log in, obtains the refresh token, imports the provider profile, creates
-the provider, configures refresh, and triggers the first rotation.
+the provider, configures refresh, and triggers the first rotation. It
+defaults `--workspace` to the user ID, matching step 2 above:
 
 ```bash
 ../../util/onboard/onboard.sh \
@@ -101,18 +121,23 @@ REFRESH_TOKEN=$(curl -sk -X POST \
   | jq -r '.refresh_token')
 ```
 
-Then register with OpenShell:
+Then register with OpenShell — note both placeholders get substituted
+(`<keycloak-host>` **and** `<openshell-namespace>` — the profile has both)
+and every command carries `--workspace "${NEW_USER}"`:
 
 ```bash
 # Import the provider profile (idempotent — skips if already imported)
-sed "s|<keycloak-host>|${KEYCLOAK_HOST}|" providers/user-refresh-profile.yaml \
-  | openshell provider profile import -f -
+sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
+    -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
+    providers/user-refresh-profile.yaml \
+  | openshell provider profile import -f - --workspace "${NEW_USER}"
 
 # Create the provider
 openshell provider create \
   --name "user-${NEW_USER}" \
   --type user-scoped-api \
-  --credential USER_ACCESS_TOKEN=pending
+  --credential USER_ACCESS_TOKEN=pending \
+  --workspace "${NEW_USER}"
 
 # Configure refresh — binds the user's refresh token to the provider
 openshell provider refresh configure "user-${NEW_USER}" \
@@ -120,39 +145,43 @@ openshell provider refresh configure "user-${NEW_USER}" \
   --strategy oauth2-refresh-token \
   --material client_id="${KEYCLOAK_CLIENT_ID_CLI}" \
   --material refresh_token="${REFRESH_TOKEN}" \
-  --secret-material-key refresh_token
+  --secret-material-key refresh_token \
+  --workspace "${NEW_USER}"
 
 # Trigger the first rotation to verify everything works
 openshell provider refresh rotate "user-${NEW_USER}" \
-  --credential-key USER_ACCESS_TOKEN
+  --credential-key USER_ACCESS_TOKEN \
+  --workspace "${NEW_USER}"
 ```
 
-## 3. Create a sandbox and authorize
+## 4. Create a sandbox and authorize
 
 ```bash
 SERVER_NAME="mcp-server-a"
 MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
-openshell sandbox create --name "demo-${NEW_USER}" -- true
+openshell sandbox create --name "demo-${NEW_USER}" --workspace "${NEW_USER}" -- true
 
-openshell sandbox provider attach "demo-${NEW_USER}" "user-${NEW_USER}"
+openshell sandbox provider attach "demo-${NEW_USER}" "user-${NEW_USER}" --workspace "${NEW_USER}"
 
 openshell policy update "demo-${NEW_USER}" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-  --binary /usr/bin/curl --wait
+  --binary /usr/bin/curl --wait \
+  --workspace "${NEW_USER}"
 ```
 
 Alternatively, use `scripts/07-authorize-mcp-user.sh` which also verifies
-the Keycloak role before updating the policy:
+the Keycloak role before updating the policy (it assumes the sandbox lives
+in a workspace named after the user ID, per step 2 above):
 
 ```bash
 ./scripts/07-authorize-mcp-user.sh "${NEW_USER}" "${SERVER_NAME}"
 ```
 
-## 4. Verify
+## 5. Verify
 
 ```bash
-openshell sandbox exec -n "demo-${NEW_USER}" --env "MCP_URL=${MCP_URL}" \
+openshell sandbox exec -n "demo-${NEW_USER}" --workspace "${NEW_USER}" --env "MCP_URL=${MCP_URL}" \
   -- bash -c 'curl -sS \
     -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \

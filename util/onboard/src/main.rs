@@ -44,6 +44,18 @@ struct Cli {
     #[arg(long)]
     profile: String,
 
+    /// OpenShell namespace, substituted for <openshell-namespace> in the profile (if present)
+    #[arg(long, env = "OPENSHELL_NAMESPACE")]
+    namespace: Option<String>,
+
+    /// OpenShell workspace to create the provider in. Defaults to the user ID —
+    /// each onboarded user gets their own workspace. This does NOT create the
+    /// workspace or grant membership; a platform admin must have already run
+    /// `openshell workspace create` and `openshell workspace member add` for
+    /// this user (see demos/keycloak-oidc/README.md, step 3).
+    #[arg(long, env = "OPENSHELL_WORKSPACE")]
+    workspace: Option<String>,
+
     /// Local port for the OAuth callback listener
     #[arg(long, default_value_t = 9999)]
     port: u16,
@@ -312,6 +324,11 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     let provider_name = format!("user-{}", cli.user_id);
+    let workspace = cli.workspace.clone().unwrap_or_else(|| cli.user_id.clone());
+    log(&format!(
+        "Targeting workspace '{workspace}' (defaults to the user ID; must already \
+         exist with this user as a member — see the README's workspace-creation step)."
+    ));
 
     // Step 1: build auth URL
     log("Building authorization URL...");
@@ -374,7 +391,17 @@ fn run() -> Result<(), String> {
     // Substitute <keycloak-host> in the profile before importing
     let profile_content = std::fs::read_to_string(&cli.profile)
         .map_err(|e| format!("failed to read profile {}: {e}", cli.profile))?;
-    let profile_content = profile_content.replace("<keycloak-host>", &cli.keycloak_host);
+    let mut profile_content = profile_content.replace("<keycloak-host>", &cli.keycloak_host);
+    if let Some(ns) = &cli.namespace {
+        profile_content = profile_content.replace("<openshell-namespace>", ns);
+    }
+    if profile_content.contains("<openshell-namespace>") {
+        eprintln!(
+            "[onboard] WARNING: profile still contains <openshell-namespace> — pass \
+             --namespace or set OPENSHELL_NAMESPACE, or the resulting endpoint hosts \
+             will be invalid."
+        );
+    }
     let tmp_profile = std::env::temp_dir().join("onboard-profile.yaml");
     std::fs::write(&tmp_profile, &profile_content)
         .map_err(|e| format!("failed to write temp profile: {e}"))?;
@@ -390,7 +417,15 @@ fn run() -> Result<(), String> {
     match run_cmd(
         "profile import",
         "openshell",
-        &["provider", "profile", "import", "-f", &tmp_profile_str],
+        &[
+            "provider",
+            "profile",
+            "import",
+            "-f",
+            &tmp_profile_str,
+            "--workspace",
+            &workspace,
+        ],
         cli.dry_run,
         cli.verbose,
     )? {
@@ -411,6 +446,8 @@ fn run() -> Result<(), String> {
             "user-scoped-api",
             "--credential",
             "USER_ACCESS_TOKEN=pending",
+            "--workspace",
+            &workspace,
         ],
         cli.dry_run,
         cli.verbose,
@@ -442,6 +479,8 @@ fn run() -> Result<(), String> {
             &material_refresh,
             "--secret-material-key",
             "refresh_token",
+            "--workspace",
+            &workspace,
         ],
         cli.dry_run,
         cli.verbose,
@@ -458,6 +497,8 @@ fn run() -> Result<(), String> {
             &provider_name,
             "--credential-key",
             "USER_ACCESS_TOKEN",
+            "--workspace",
+            &workspace,
         ],
         cli.dry_run,
         cli.verbose,

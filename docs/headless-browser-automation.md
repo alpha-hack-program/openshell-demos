@@ -127,6 +127,70 @@ const [url, username, password] = process.argv.slice(2);
 })();
 ```
 
+## Running multiple CLI identities concurrently on one machine
+
+**Confirmed** (tested against a live cluster running `demos/keycloak-oidc`,
+openshell CLI 0.0.106): `XDG_CONFIG_HOME` + `XDG_STATE_HOME` overrides alone
+are sufficient to run several fully-isolated `openshell` CLI identities in
+the same shell session on a single Linux machine — no separate VMs,
+containers, or full `$HOME` swap needed. This is useful for testing
+multi-role demos (e.g. an admin plus several end users) headlessly without
+juggling incognito windows or separate machines.
+
+Setup:
+
+```bash
+ROOT=/tmp/openshell-identities
+mkdir -p "$ROOT"/{admin,user1,user2}/{config,state}
+
+# Run every openshell command for a given identity with both vars set:
+XDG_CONFIG_HOME="$ROOT/<identity>/config" XDG_STATE_HOME="$ROOT/<identity>/state" \
+  openshell <command>
+```
+
+Findings from driving three identities (admin + two OIDC users) through
+`gateway add` (Playwright-driven login), `whoami`, provider/sandbox
+commands, and diffing the resulting trees:
+
+- **`whoami` correctly reports each identity** after all three were logged
+  in back-to-back in the same shell — no state bleed between them, even
+  though all three registered a gateway under the *same* name (`openshift`)
+  independently in their own XDG root.
+- **Effective config path is `$XDG_CONFIG_HOME/openshell/...`**, not
+  `$XDG_CONFIG_HOME/.config/openshell/...` — i.e. `XDG_CONFIG_HOME` replaces
+  what would otherwise be `$HOME/.config`, it doesn't get `.config` appended
+  again. Per-identity state lands under
+  `$XDG_CONFIG_HOME/openshell/gateways/<name>/{oidc_token.json,metadata.json,mtls/*}`
+  and `$XDG_CONFIG_HOME/openshell/active_gateway`.
+- **`XDG_STATE_HOME` was not observed to be used** by CLI 0.0.106 for any
+  of gateway login, `settings set`, `provider` commands, or `sandbox
+  create`/`exec` — every file written landed under `XDG_CONFIG_HOME`
+  instead. Keep setting `XDG_STATE_HOME` anyway (the binary does reference
+  it via `strings`, and future versions may use it) but don't rely on it
+  being where state actually shows up today.
+- **`HOME` does not need to be set at all** once both `XDG_CONFIG_HOME` and
+  `XDG_STATE_HOME` are exported — verified with `env -u HOME
+  XDG_CONFIG_HOME=... XDG_STATE_HOME=... openshell gateway list` running
+  cleanly. (The CLI does contain a "HOME is not set" error string, but it's
+  only reached on the fallback path when `XDG_CONFIG_HOME` is absent.)
+- **No leakage outside the two XDG roots was found**: the real
+  `$HOME/.config/openshell` directory (holding unrelated pre-existing
+  gateways) was untouched throughout, and `$HOME/.ssh` saw no new files.
+  Nothing else under `/tmp` outside the chosen roots was touched either.
+- **Gateway RBAC bonus finding**: CLI sessions authenticated as `user1`/
+  `user2` (Keycloak `openshell-user` role) were denied *every* gateway
+  operation tried, including read-only ones like `sandbox list` — not with
+  a role-specific error, but `"not a member of workspace 'default'"`. Only
+  the identity holding `openshell-admin` had workspace membership. In this
+  demo's current setup, per-user CLI sessions can authenticate but cannot
+  self-service anything at the gateway; the admin session does all
+  provider/sandbox/policy management on users' behalf.
+
+**Verdict: XDG_CONFIG_HOME/XDG_STATE_HOME scoping alone is sufficient for
+concurrent multi-identity `openshell` CLI testing on one machine.** Full
+`$HOME` isolation (separate containers/VMs) is not required for this use
+case.
+
 ## OpenShell CLI quirks
 
 - **Sandbox home directory** is `/sandbox`, not `/home/sandbox`.

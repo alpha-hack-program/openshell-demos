@@ -6,6 +6,7 @@
   - [How to follow this guide](#how-to-follow-this-guide)
   - [Architecture](#architecture)
   - [RBAC setup](#rbac-setup)
+  - [Workspace isolation](#workspace-isolation)
 - [Part I — OIDC RBAC demo](#part-i--oidc-rbac-demo)
   - [Prerequisites](#prerequisites)
   - [What this demo deploys](#what-this-demo-deploys)
@@ -55,19 +56,108 @@ correct realm role can reach a given server.
 
 ### How to follow this guide
 
-One person runs the entire demo, playing three roles: **admin** (steps 1-2),
-**user1**, and **user2** (steps 3-4). A few practical tips:
+One person conceptually plays three roles — **admin**, **user1**, **user2**
+— but that does **not** mean you run three equally-privileged CLI sessions
+against a shared pool of resources. Read this before copy-pasting anything
+below; it explains who actually runs each command and why, and it's the
+result of testing the alternative (a shared workspace) and finding it
+breaks isolation. See [Workspace isolation](#workspace-isolation) above for
+the full mechanics.
 
-- **Use separate terminal tabs** — one for admin work, one per user sandbox.
-  The isolation check in step 4 requires user1's sandbox to stay running
-  while you test user2, so you need both open at the same time.
-- **Keycloak sessions are per-browser.** When onboarding multiple users with
-  Option B (the `onboard` tool), log out of Keycloak between users —
-  otherwise the browser reuses the previous session and you get the same
-  user's token again. The tool's success page includes a logout link, or
-  use a private/incognito window for each user.
-- With Option A (password grant) there is no browser session to worry about
-  — just change `USER_ID` and `USER_PASS` in the same terminal.
+**Admin's terminal does steps 1, 2, and 4, plus the provider/policy-setting
+parts of steps 3 and 5** — deploying infrastructure, and anything that
+creates or configures a *provider* or a *policy* (`provider create`,
+`provider refresh configure/rotate`, `policy update`). This is deliberate,
+not incidental: in this demo's RBAC model, provider and policy management
+are Workspace-Admin-or-above operations (see the roles table in
+[Workspace isolation](#workspace-isolation)), and admin is the only
+Platform Admin identity. Every one of these commands passes
+`--workspace "${USER_ID}"` to target the right user's workspace — admin can
+reach into any workspace, so this is how one admin session provisions both
+users without them sharing anything.
+
+**user1/user2 can legitimately self-service `sandbox create`/`sandbox
+exec`/`sandbox list` inside their own workspace once onboarded** —
+confirmed live, this is the one part of the RBAC table's original claim
+("`openshell-user`: connect to sandboxes, run workloads") that holds up
+once each user has their own workspace. If you want to actually run step 5
+as user1/user2 themselves rather than from admin's terminal, you can — see
+the optional per-terminal setup below. The guide's own command blocks stay
+written from admin's terminal throughout, both options work identically
+because workspace scoping doesn't care who's asking, only whose membership
+they hold.
+
+**The one place a real second identity is unavoidable is the Keycloak login
+screen:**
+- Step 2c: **admin** logs in via browser — the admin's own authentication.
+- Step 3, Option B (the `onboard` tool): the browser login inside the tool
+  is **user1/user2 authenticating as themselves** — that's the whole point
+  of Option B, the operator's admin session never sees their password.
+  Workspace creation (before the tool runs) and the token exchange itself
+  still happen from admin's terminal / the tool's own process.
+- Step 3, Option A (password grant): no separate login at all — admin's
+  script authenticates *as* the user directly via the token endpoint,
+  using a password the operator was handed. This is why Option A is
+  marked demo-only.
+
+Practical tips:
+
+- **Keycloak sessions are per-browser.** When onboarding multiple users
+  with Option B, log out of Keycloak between users — otherwise the browser
+  reuses the previous session and you get the same user's token again. The
+  tool's success page includes a logout link, or use a private/incognito
+  window for each user.
+- With Option A there is no browser session to worry about — just change
+  `USER_ID` and `USER_PASS` in the same terminal.
+- Keep user1's sandbox running while you set up and test user2's — the
+  isolation check in step 5 needs both alive at once.
+
+**Optional: run each identity in its own real terminal, scoped with
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME`, and use it to verify the workspace
+isolation claim above yourself instead of taking it on faith:**
+
+```bash
+# Terminal A — admin
+export XDG_CONFIG_HOME=/tmp/oc-admin/config XDG_STATE_HOME=/tmp/oc-admin/state
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+# Terminal B — user1 (separate window/tab)
+export XDG_CONFIG_HOME=/tmp/oc-user1/config XDG_STATE_HOME=/tmp/oc-user1/state
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+# Terminal C — user2 (separate window/tab)
+export XDG_CONFIG_HOME=/tmp/oc-user2/config XDG_STATE_HOME=/tmp/oc-user2/state
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+```
+
+This is entirely optional — skip it and just run every command from one
+terminal as admin, which is exactly equivalent since workspace scoping is
+about membership, not which terminal you typed in. If you do set it up: run
+step 2b/2c's `gateway add` in Terminal A logging in as admin, Terminal B as
+user1, Terminal C as user2 (each triggers its own Keycloak login). After
+step 3 has created `user1`'s and `user2`'s workspaces and granted their
+membership, try from Terminal B:
+
+```bash
+openshell sandbox exec -n demo-user1 --workspace user1 -- echo works   # succeeds — own workspace
+openshell sandbox exec -n demo-user2 --workspace user2 -- echo blocked # denied — not a member of workspace 'user2'
+openshell provider create --name probe --type user-scoped-api --credential USER_ACCESS_TOKEN=pending --workspace user1  # denied — workspace role 'admin' required
+```
+
+The first succeeds (self-service within their own workspace), the second
+is denied (cross-workspace access blocked — this is the fix for the bug
+this guide used to have, where all users shared one workspace), and the
+third is denied (provider management stays admin-only even in your own
+workspace). That's the full RBAC boundary this guide relies on, made
+concrete instead of asserted.
+
+Verified on Linux with openshell CLI 0.0.106 — three concurrent identities,
+no state bleed between them, nothing written outside the chosen directories,
+and the cross-workspace block confirmed in both directions.
+**[VERIFY on macOS]** — the `XDG_CONFIG_HOME`/`XDG_STATE_HOME` mechanism is
+standard, but this session only tested Linux. See
+[`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#running-multiple-cli-identities-concurrently-on-one-machine)
+for the full pattern, including how to drive the login headlessly.
 
 ### Architecture
 
@@ -136,6 +226,43 @@ flowchart TB
 ```
 
 </details>
+
+### Workspace isolation
+
+The table above is about **Keycloak realm roles** — who's allowed to call
+which OpenShell gateway operations at all. That's a separate axis from
+**OpenShell workspaces** — the gateway's own multi-tenancy boundary, which
+this demo relies on just as much and which is easy to get wrong.
+
+A workspace is where sandboxes, providers, provider profiles, policies, and
+inference routes actually live. Per
+[NVIDIA's docs](https://docs.nvidia.com/openshell/sandboxes/manage-workspaces):
+*"Sandboxes, providers, services, policies, settings, and inference routes
+belong to a workspace and are not visible to members of other workspaces"*
+and *"Membership does not grant access to another workspace."* Three roles
+exist:
+
+| Role | Scope | Grants |
+|---|---|---|
+| Platform Admin | Whole gateway | Bypasses workspace membership checks entirely; manages any workspace. Tied to the OIDC `adminRole` claim — this is `openshell-admin` in this demo |
+| Workspace Admin | One workspace | Manage providers, provider profiles, policies, settings, and members **in that workspace only** |
+| Workspace User | One workspace | Create/use sandboxes and services, read providers, use provider attachments — **in that workspace only** |
+
+**The critical, verified consequence: workspace membership is not
+per-sandbox, it's per-workspace.** A `user`-role member of a workspace can
+`sandbox exec`/`sandbox get`/`sandbox list` on *every* sandbox in that
+workspace — not just ones tied to their own provider. Confirmed live: two
+users both granted plain `user` membership in the same shared workspace
+could each `sandbox exec` into the *other's* sandbox and successfully call
+an MCP server using the other user's real, working injected credential —
+completely bypassing the Envoy/Keycloak-role isolation described above.
+
+**This is why each user in this guide gets their own dedicated workspace**
+(named after their `USER_ID` — `user1`, `user2`), not membership in a
+shared one. Step 3 creates it. Every subsequent command that touches a
+user's provider or sandbox passes `--workspace "${USER_ID}"` explicitly —
+don't drop that flag when adapting these commands, and don't grant a second
+user membership in a workspace that already has one.
 
 ## Part I — OIDC RBAC demo
 
@@ -641,6 +768,44 @@ Two options for obtaining the token:
   OAuth flow — the user logs in directly with Keycloak and the operator
   never sees their password.
 
+#### Step 3.0 — Create the user's own workspace (do this first, either option)
+
+**Every user needs their own OpenShell workspace before onboarding.** See
+[Workspace isolation](#workspace-isolation) above for why: workspace
+membership grants access to *every* sandbox in that workspace, not just
+your own, so putting multiple users in one shared workspace (including
+`default`) breaks the per-user isolation this whole demo is about —
+confirmed live. This step is admin-only (creating a workspace and granting
+membership are Platform Admin operations) and only needs to run once per
+user, before either Option A or B below:
+
+```bash
+source .env
+
+USER_ID="user1"
+
+# Look up the user's Keycloak subject (OIDC 'sub' claim = Keycloak user ID)
+KEYCLOAK_ADMIN_TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password" \
+  -d "client_id=admin-cli" \
+  -d "username=${KEYCLOAK_ADMIN_USER}" \
+  -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
+  | jq -r '.access_token')
+
+USER_SUBJECT=$(curl -sk \
+  -H "Authorization: Bearer ${KEYCLOAK_ADMIN_TOKEN}" \
+  "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/users?username=${USER_ID}&exact=true" \
+  | jq -r '.[0].id')
+
+openshell workspace create --name "${USER_ID}"
+openshell workspace member add --workspace "${USER_ID}" --subject "${USER_SUBJECT}" --role user
+```
+
+Repeat with `USER_ID="user2"`. From here on, every `provider`/`sandbox`/
+`policy` command for this user carries `--workspace "${USER_ID}"` — don't
+drop it, and don't reuse one user's workspace for another.
+
 #### Step 3a — Obtain the user's refresh token
 
 **Option A — Password grant (demo only)**
@@ -701,6 +866,24 @@ gateway obtains fresh access tokens from Keycloak on the user's behalf). See
 [step 3b](#step-3b--store-the-refresh-token-in-openshell) for what the
 profile contains and why it matters.
 
+> The profile at `providers/user-refresh-profile.yaml` contains two
+> placeholders (`<keycloak-host>` and `<openshell-namespace>`) — unlike the
+> manual [step 3b](#step-3b--store-the-refresh-token-in-openshell) flow,
+> **you do not need to `sed` them yourself**: `onboard` substitutes both
+> before importing, reading the namespace from `--namespace` or the
+> `OPENSHELL_NAMESPACE` env var (`onboard.sh` already sources this from
+> `.env`). Verified live: running `onboard` unmodified against this demo's
+> `.env` produces a correctly-substituted profile with real endpoint hosts,
+> not literal placeholder text.
+
+> **Workspace targeting.** `onboard` defaults `--workspace` to the user ID
+> (`-u user1` → workspace `user1`), matching
+> [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option)
+> above. It does not create the workspace or grant membership itself — that
+> must already exist, or `provider create` will fail with `"not a member of
+> workspace"`. Override with `--workspace <name>` or `OPENSHELL_WORKSPACE`
+> if you're using a different naming scheme.
+
 Pre-built binaries for Linux (x86_64) and macOS (aarch64) are available from
 [GitHub Releases](../../releases) — download, `chmod +x`, and run.
 
@@ -743,24 +926,27 @@ server endpoint hostnames. Replace both with your actual values:
 ```bash
 source .env
 
+USER_ID="user1"
+
 TMPFILE=$(mktemp --suffix=.yaml)
 sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
     -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
     providers/user-refresh-profile.yaml > "$TMPFILE"
-openshell provider profile import -f "$TMPFILE"
+openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
 rm -f "$TMPFILE"
 ```
 
-Then create a provider for the user and configure automatic token refresh:
+Then create a provider for the user and configure automatic token refresh —
+note `--workspace "${USER_ID}"` on every command, targeting the workspace
+created in [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option):
 
 ```bash
-USER_ID="user1"
-
 # Create the provider — this links the user to the profile's refresh strategy
 openshell provider create \
   --name "user-${USER_ID}" \
   --type user-scoped-api \
-  --credential USER_ACCESS_TOKEN=pending
+  --credential USER_ACCESS_TOKEN=pending \
+  --workspace "${USER_ID}"
 
 # Store the user's refresh token and configure automatic rotation
 openshell provider refresh configure "user-${USER_ID}" \
@@ -768,11 +954,13 @@ openshell provider refresh configure "user-${USER_ID}" \
   --strategy oauth2-refresh-token \
   --material client_id="${KEYCLOAK_CLIENT_ID_CLI}" \
   --material refresh_token="${REFRESH_TOKEN}" \
-  --secret-material-key refresh_token
+  --secret-material-key refresh_token \
+  --workspace "${USER_ID}"
 
 # Trigger the first rotation to verify everything works
 openshell provider refresh rotate "user-${USER_ID}" \
-  --credential-key USER_ACCESS_TOKEN
+  --credential-key USER_ACCESS_TOKEN \
+  --workspace "${USER_ID}"
 ```
 
 From this point forward, the gateway's refresh worker automatically mints
@@ -792,7 +980,9 @@ sandbox with a live credential — they never see a token.
 > which credential key on this particular provider instance.
 
 > The script `scripts/03-onboard-user.sh <user-id> <refresh-token>` wraps
-> these same commands.
+> these same commands — and also does
+> [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option)
+> for you (workspace create + membership), so it's safe to run standalone.
 
 ### 4. Deploy MCP servers
 
@@ -847,6 +1037,7 @@ The `-- true` creates the sandbox without entering an interactive shell:
 ```bash
 openshell sandbox create --name "demo-${USER_ID}" \
   --provider "user-${USER_ID}" \
+  --workspace "${USER_ID}" \
   -- true
 ```
 
@@ -858,14 +1049,15 @@ permissions — those are deployment-specific and applied per-sandbox:
 ```bash
 openshell policy update "demo-${USER_ID}" \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-  --binary /usr/bin/curl --wait
+  --binary /usr/bin/curl --wait \
+  --workspace "${USER_ID}"
 ```
 
 **Verify** — the same request with the user's token should now succeed.
 `$USER_ACCESS_TOKEN` is injected into the sandbox by the provider:
 
 ```bash
-openshell sandbox exec -n "demo-${USER_ID}" --env "MCP_URL=${MCP_URL}" \
+openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "MCP_URL=${MCP_URL}" \
   -- bash -c 'curl -sS \
     -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
@@ -883,7 +1075,7 @@ variables into the sandbox — they are not available inside single quotes:
 ```bash
 OTHER_MCP_URL="http://mcp-server-b.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
-openshell sandbox exec -n "demo-${USER_ID}" --env "OTHER_MCP_URL=${OTHER_MCP_URL}" \
+openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "OTHER_MCP_URL=${OTHER_MCP_URL}" \
   -- bash -c 'curl -so /dev/null -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
@@ -894,7 +1086,8 @@ openshell sandbox exec -n "demo-${USER_ID}" --env "OTHER_MCP_URL=${OTHER_MCP_URL
 # Expected: 403 — valid token, but user1 lacks the mcp-server-b-user role
 ```
 
-To test the other direction, open a second terminal and repeat with
+To test the other direction, open a second terminal (still admin's session
+— see [How to follow this guide](#how-to-follow-this-guide)) and repeat with
 `USER_ID="user2"` and `SERVER_NAME="mcp-server-b"` (onboard user2 first
 if you haven't already). Confirm user2 can reach `mcp-server-b` (`200`)
 but gets `403` from `mcp-server-a`.
@@ -923,19 +1116,41 @@ Results: 4 passed, 0 failed
 
 ### Definition of done
 
-- [ ] Keycloak realm `openshell` live with CLI and gateway clients, admin/user roles
-- [ ] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
-- [ ] RBAC mode confirmed: a user-role token cannot perform admin-only operations
-- [ ] Providers v2 enabled
-- [ ] At least two demo users onboarded, each with their own provider
-- [ ] Isolation test passes: user A's sandbox cannot access user B's data
-      even when both sandboxes run concurrently
+- [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/user roles
+- [x] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
+- [x] RBAC mode confirmed: a user-role token cannot perform admin-only
+      operations — verified live: `user1`/`user2` CLI sessions (role
+      `openshell-user`, `user`-role members of their own workspace) are
+      denied `provider create`/`policy update` in their own workspace with
+      `"workspace role 'admin' required"`, while the `openshell-admin`
+      (Platform Admin) session succeeds at both
+- [x] Each user isolated to their own OpenShell **workspace**, not just
+      their own provider — verified live, and only after fixing a real bug
+      found in this session: putting both users in a shared workspace (even
+      with correct Keycloak roles) let either one `sandbox exec` into the
+      *other's* sandbox and use their real credentials (`200` on an MCP call
+      that should've been `403`). Confirmed blocked both directions once
+      each user got their own workspace (`"not a member of workspace"`).
+      See [Workspace isolation](#workspace-isolation)
+- [x] Providers v2 enabled
+- [x] At least two demo users onboarded, each with their own provider in
+      their own workspace — verified via **Option B** (the `onboard` tool):
+      admin's CLI session created the workspace, ran the tool, and executed
+      the provider commands, while the OAuth browser login was driven as the
+      actual target user (user1/user2), exercising the real admin/user
+      identity split instead of the password-grant shortcut
+- [x] Isolation test passes: user A's sandbox cannot access user B's data
+      even when both sandboxes run concurrently — `08-verify-isolation.sh`
+      (workspace-aware): 4 passed, 0 failed
 - [x] (Stretch) `mcp-servers` chart deployed; a user holding the required
       Keycloak role can reach their MCP server, a user lacking it cannot
       — verified via the Envoy sidecar (401/403/200 cases all tested live)
 - [x] (Stretch) A user authorized for one MCP server's role does not
       thereby gain access to the other — verified both directions
-- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + vLLM 0.27.1 + MCP server 3.1.5
+- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + DeepSeek
+      (`deepseek-v4-flash`) via `inference.local`, both users, both MCP servers
+- [x] (Stretch) Claude Code variant — verified with Claude Code + DeepSeek's
+      Anthropic-compatible endpoint, both users, both MCP servers
 
 ## Part II — Red-team evaluation (EvalHub + Garak)
 
@@ -1002,13 +1217,21 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    ```bash
    openshell provider create --name byo-inference --type openai \
      --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
-     --config "OPENAI_BASE_URL=$OPENAI_BASE_URL"
+     --config "OPENAI_BASE_URL=$OPENAI_BASE_URL" \
+     --workspace "${USER_ID}"
 
    openshell inference set \
      --provider byo-inference \
      --model "$OPENAI_MODEL" \
-     --timeout 120
+     --timeout 120 \
+     --workspace "${USER_ID}"
    ```
+
+   `inference.local` routing is workspace-scoped like everything else (see
+   [Workspace isolation](#workspace-isolation)) — this runs once per user's
+   workspace. Repeating this recipe for user2 means repeating this step too,
+   inside `user2`'s own workspace; there's no shared/global inference route
+   across workspaces in this demo.
 
 2. Import the Codex policy profile and create a second provider for binary
    permissions.
@@ -1048,9 +1271,10 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    Import it and create the provider:
 
    ```bash
-   openshell provider profile import -f providers/byo-codex-profile.yaml
+   openshell provider profile import -f providers/byo-codex-profile.yaml --workspace "${USER_ID}"
    openshell provider create --name byo-codex --type byo-codex \
-     --credential "OPENAI_API_KEY=$OPENAI_API_KEY"
+     --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
+     --workspace "${USER_ID}"
    ```
 
 3. Create and configure the sandbox. Use a custom image with Codex >=
@@ -1088,6 +1312,7 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
      --provider "user-${USER_ID}" \
      --from "${CODEX_IMAGE}" \
      --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml" \
+     --workspace "${USER_ID}" \
      -- true
 
    rm -f "$CODEX_CONFIG"
@@ -1095,6 +1320,7 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    openshell policy update "codex-${USER_ID}" \
      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/local/bin/codex \
+     --workspace "${USER_ID}" \
      --wait
    ```
 
@@ -1103,7 +1329,10 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    > subdirectory inside the target). The sandbox home is `/sandbox`, so
    > Codex's config directory is `/sandbox/.codex/`.
 
-4. Run the test from the **user terminal**:
+4. Run the test — from admin's terminal, or from `user1`'s own CLI session
+   scoped to workspace `user1` (either works identically now that user1 has
+   their own workspace — see
+   [How to follow this guide](#how-to-follow-this-guide)):
 
    ```bash
    source .env
@@ -1114,7 +1343,7 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    # credential isolation, binary permissions). Codex's built-in sandbox
    # is redundant and incompatible with the container environment, so we
    # disable it with --dangerously-bypass-approvals-and-sandbox.
-   openshell sandbox exec -n "codex-${USER_ID}" -- bash -c '
+   openshell sandbox exec -n "codex-${USER_ID}" --workspace "${USER_ID}" -- bash -c '
    codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
      "'"${QUESTION}"'"
    '
@@ -1198,7 +1427,9 @@ Anthropic-compatible LLM endpoint.
 
 **Prerequisites** beyond Part I, steps 1-5 — set `ANTHROPIC_API_KEY`,
 `ANTHROPIC_BASE_URL`, and `ANTHROPIC_MODEL` in your `.env` (see
-`.env.example`), then in your terminal:
+`.env.example`), then, from admin's terminal (provider/policy management
+stays admin-only regardless of workspace — see
+[How to follow this guide](#how-to-follow-this-guide)):
 
 ```bash
 source .env
@@ -1224,32 +1455,39 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    ```bash
    TMPFILE=$(mktemp --suffix=.yaml)
    sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
-   openshell provider profile import -f "$TMPFILE"
+   openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
    rm -f "$TMPFILE"
 
    openshell provider create --name byo-claude --type byo-claude \
-     --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+     --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+     --workspace "${USER_ID}"
    ```
+
+   Like `inference.local` in the Codex recipe, this provider is
+   workspace-scoped — repeating this recipe for user2 means repeating this
+   import/create step inside `user2`'s own workspace too.
 
 2. Attach the provider and grant network access:
 
    ```bash
-   openshell sandbox provider attach "demo-${USER_ID}" byo-claude
+   openshell sandbox provider attach "demo-${USER_ID}" byo-claude --workspace "${USER_ID}"
    openshell policy update "demo-${USER_ID}" \
      --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
      --binary /usr/local/bin/claude \
+     --workspace "${USER_ID}" \
      --wait
    ```
 
-3. Run the test. The provider injects `ANTHROPIC_API_KEY` automatically.
-   Base URL and model overrides are non-secret config, so we pass them via
-   `--env` — OpenShell only injects **credentials** as environment
-   variables, not `--config` values:
+3. Run the test — from admin's terminal, or from this user's own CLI
+   session scoped to their workspace (either works). The provider injects
+   `ANTHROPIC_API_KEY` automatically. Base URL and model overrides are
+   non-secret config, so we pass them via `--env` — OpenShell only injects
+   **credentials** as environment variables, not `--config` values:
 
    ```bash
-   openshell sandbox exec -n "demo-${USER_ID}" \
+   openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" \
      --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
      --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
      --env "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_MODEL" \
@@ -1353,6 +1591,18 @@ exact patch release before relying on this beyond a demo.
 - **Per-server token audience** — Keycloak isn't configured with an audience
   mapper per MCP server, so the realm role claim is the *only* thing
   distinguishing access to server A from server B.
+- **Workspace scoping is manual and easy to get wrong.** Every command that
+  touches a user's provider, sandbox, or policy needs an explicit
+  `--workspace` flag pointed at that user's own workspace — there's no
+  enforcement that stops you from accidentally reusing another user's
+  workspace name, or omitting the flag and silently falling back to
+  `default`. This demo shipped for a while with all users sharing `default`
+  with no membership at all (accidentally safe, since nobody could do
+  anything) — see [Workspace isolation](#workspace-isolation) for what
+  actually broke when membership was granted without separate workspaces.
+  A production system should not rely on operators remembering this flag on
+  every command; wrap it in tooling (as `util/onboard` now defaults
+  `--workspace` to the user ID) rather than leaving it to manual discipline.
 
 ### F. References
 
@@ -1360,5 +1610,6 @@ exact patch release before relying on this beyond a demo.
 - Access Control / OIDC: https://docs.nvidia.com/openshell/kubernetes/access-control
 - Providers v2: https://docs.nvidia.com/openshell/sandboxes/providers-v2
 - Manage Providers: https://docs.nvidia.com/openshell/sandboxes/manage-providers
+- Manage Workspaces and Access: https://docs.nvidia.com/openshell/sandboxes/manage-workspaces
 - Helm chart README: https://github.com/NVIDIA/OpenShell/blob/main/deploy/helm/openshell/README.md
 - OpenShift SCC restriction discussion: https://github.com/NVIDIA/OpenShell/issues/899

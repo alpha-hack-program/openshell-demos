@@ -56,8 +56,8 @@ get_pair_info() {
 }
 
 mcp_request() {
-  local sandbox="$1" mcp_url="$2" body="$3"
-  openshell sandbox exec -n "$sandbox" \
+  local sandbox="$1" mcp_url="$2" body="$3" workspace="$4"
+  openshell sandbox exec -n "$sandbox" --workspace "$workspace" \
     --env "MCP_URL=${mcp_url}" \
     --env "BODY=${body}" \
     -- bash -c 'curl -s -o /tmp/mcp_resp -w "%{http_code}" \
@@ -75,9 +75,10 @@ ERRORS=""
 
 for USER_ID in "${USERS[@]}"; do
   SANDBOX="demo-${USER_ID}"
+  WORKSPACE="${USER_ID}"
 
-  if ! openshell sandbox get "$SANDBOX" &>/dev/null; then
-    echo "SKIP  ${USER_ID} — sandbox ${SANDBOX} not found"
+  if ! openshell sandbox get "$SANDBOX" --workspace "$WORKSPACE" &>/dev/null; then
+    echo "SKIP  ${USER_ID} — sandbox ${SANDBOX} not found in workspace ${WORKSPACE}"
     continue
   fi
 
@@ -85,7 +86,7 @@ for USER_ID in "${USERS[@]}"; do
     MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
     # Ensure the sandbox has a network policy for this server
-    openshell policy update "$SANDBOX" \
+    openshell policy update "$SANDBOX" --workspace "$WORKSPACE" \
       --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
       --binary /usr/bin/curl --wait &>/dev/null || true
 
@@ -94,9 +95,9 @@ for USER_ID in "${USERS[@]}"; do
       EXPECTED=200
 
       # Authorized: initialize the session, then call the domain-specific tool
-      HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$MCP_INIT")
+      HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$MCP_INIT" "$WORKSPACE")
       if [[ "$HTTP_CODE" == "200" ]]; then
-        HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$TOOL_CALL")
+        HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$TOOL_CALL" "$WORKSPACE")
         LABEL="${USER_ID} → ${SERVER_NAME} (${TOOL_NAME})"
       else
         LABEL="${USER_ID} → ${SERVER_NAME} (initialize failed)"
@@ -106,7 +107,7 @@ for USER_ID in "${USERS[@]}"; do
       LABEL="${USER_ID} → ${SERVER_NAME}"
 
       # Unauthorized: initialize is enough — Envoy rejects before the app sees it
-      HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$MCP_INIT")
+      HTTP_CODE=$(mcp_request "$SANDBOX" "$MCP_URL" "$MCP_INIT" "$WORKSPACE")
     fi
 
     if [[ "$HTTP_CODE" == "$EXPECTED" ]]; then

@@ -89,6 +89,8 @@ is populated:
 | `--gateway-client-id` | `KEYCLOAK_CLIENT_ID_GATEWAY` | `openshell-gateway` | Confidential client (not needed for public-client flow) |
 | `--gateway-client-secret` | `KEYCLOAK_CLIENT_SECRET` | — | Confidential client secret (not needed for public-client flow) |
 | `--profile` | — | *required* | Path to the provider profile YAML |
+| `--namespace` | `OPENSHELL_NAMESPACE` | — | Substituted for `<openshell-namespace>` in the profile, if present. `onboard.sh` sources this from `.env` automatically |
+| `--workspace` | `OPENSHELL_WORKSPACE` | the user ID | OpenShell workspace to create the provider in. Each onboarded user should have their **own** workspace — putting multiple users in one shared workspace defeats isolation (a `user`-role member of a workspace can see and act on *every* sandbox in that workspace, not just their own; see [Manage Workspaces and Access](https://docs.nvidia.com/openshell/sandboxes/manage-workspaces)). The tool does not create the workspace or grant membership — a platform admin must have already run `openshell workspace create` and `openshell workspace member add` for this user first |
 | `--port` | — | `9999` | Local port for the OAuth callback listener |
 | `--timeout` | — | `120` | Seconds to wait for the callback |
 | `--token-only` | — | — | Stop after obtaining the refresh token; print it to stdout |
