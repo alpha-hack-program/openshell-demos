@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Usage: ./99-teardown.sh <full|keep-keycloak>
+#   full          - also deletes the Keycloak namespace/realm
+#   keep-keycloak - leaves Keycloak in place for fast re-iteration via
+#                   ./02-apply-oidc-overlay.sh onward
+
+usage() {
+  echo "Usage: $0 <full|keep-keycloak>" >&2
+  exit 1
+}
+
+[[ $# -eq 1 ]] || usage
+MODE="$1"
+case "$MODE" in
+  full|keep-keycloak) ;;
+  *) usage ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
@@ -19,7 +35,7 @@ fi
 GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 
-echo "=== Teardown: demos/keycloak-oidc ==="
+echo "=== Teardown: demos/keycloak-oidc ($MODE) ==="
 echo "Namespace:          $OPENSHELL_NAMESPACE"
 echo "Keycloak namespace: $KEYCLOAK_NAMESPACE"
 echo "Gateway:            $GATEWAY_NAME"
@@ -75,12 +91,16 @@ if oc get ns spire &>/dev/null; then
   oc delete ns spire
 fi
 
-# --- Delete Keycloak namespace --------------------------------------------------
-if oc get ns "$KEYCLOAK_NAMESPACE" &>/dev/null; then
-  echo "Deleting Keycloak namespace $KEYCLOAK_NAMESPACE..."
-  oc delete ns "$KEYCLOAK_NAMESPACE"
+# --- Delete Keycloak namespace (only in full mode) ------------------------------
+if [[ "$MODE" == "full" ]]; then
+  if oc get ns "$KEYCLOAK_NAMESPACE" &>/dev/null; then
+    echo "Deleting Keycloak namespace $KEYCLOAK_NAMESPACE..."
+    oc delete ns "$KEYCLOAK_NAMESPACE"
+  else
+    echo "Keycloak namespace $KEYCLOAK_NAMESPACE does not exist (already removed?)."
+  fi
 else
-  echo "Keycloak namespace $KEYCLOAK_NAMESPACE does not exist (already removed?)."
+  echo "Keeping Keycloak namespace $KEYCLOAK_NAMESPACE (mode: keep-keycloak)."
 fi
 
 # --- Delete demo namespace (removes all remaining resources) --------------------
@@ -92,4 +112,9 @@ else
 fi
 
 echo
-echo "Teardown complete. Cluster and local state for demos/keycloak-oidc have been removed."
+if [[ "$MODE" == "full" ]]; then
+  echo "Teardown complete. Cluster and local state for demos/keycloak-oidc have been removed."
+else
+  echo "Light teardown complete. Keycloak namespace/realm left untouched — re-run"
+  echo "from step 02 (./02-apply-oidc-overlay.sh) to rebuild the OpenShell side."
+fi

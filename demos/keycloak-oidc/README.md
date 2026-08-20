@@ -413,8 +413,8 @@ and registers the gateway endpoint with the `openshell` CLI (2b).
 > resources (`openshell-node-reader` ClusterRole **and** ClusterRoleBinding)
 > that are already owned by the other release. **Tear down the previous
 > installation first** — e.g. `demos/base/scripts/99-teardown.sh` for the
-> base demo, or `demos/keycloak-oidc/scripts/99-teardown.sh` for a prior run
-> of this demo.
+> base demo, or `demos/keycloak-oidc/scripts/99-teardown.sh full` (or
+> `keep-keycloak` to leave Keycloak in place) for a prior run of this demo.
 
 #### 2a. Helm install
 
