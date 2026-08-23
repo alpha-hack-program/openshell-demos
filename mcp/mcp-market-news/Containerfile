@@ -1,0 +1,125 @@
+# syntax=docker/dockerfile:1
+#
+# Builds only `mcp_server` (the interactive service). `news_generator` is
+# meant to run as a separate Kubernetes CronJob against the same
+# data/ PVC — building it into this image would drag Postgres/Anthropic
+# client deps into the always-on service's attack surface for no benefit.
+# If you do want it in-image, add `RUN cargo build --release --bin
+# news_generator` to the builder stage and `COPY` the second binary below.
+
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
+ARG BASE_TAG=9.6
+ARG VERSION=0.1.0
+ARG MAINTAINER="Alpha Hack Group <alpha@github.com>"
+ARG DESCRIPTION="Market News MCP Server - public market-news retrieval by ticker/sector, filtered exactly and semantically"
+ARG APP_NAME=mcp-market-news
+ARG PORT=8002
+ARG SOURCE=https://github.com/alpha-hack-program/openshell-demos
+
+# ---------------------------------------------------------------------------
+# Stage 1: build
+# ---------------------------------------------------------------------------
+FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
+
+# gcc-c++ is required by tokenizers' esaxx-rs (C++ dependency for the
+# unigram tokenizer path); openssl-devel is NOT needed — every TLS-using
+# dependency here (reqwest, hf-hub/ureq, sqlx) is configured to use
+# rustls, not native-tls/openssl, specifically to keep this build simple
+# on a minimal image.
+RUN dnf update -y && \
+    dnf install -y \
+        gcc \
+        gcc-c++ \
+        make \
+        pkg-config && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+ENV RUSTUP_HOME=/opt/rust
+ENV CARGO_HOME=/opt/rust
+ENV PATH=/opt/rust/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
+
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src
+
+# `cargo build --bin mcp_server` alone still needs the full dependency
+# graph resolved (it's a single-package project, not per-bin deps), so
+# there's no meaningful "fetch only what mcp_server needs" step here.
+RUN cargo build --release --bin mcp_server
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE}:${BASE_TAG}
+
+ARG VERSION
+ARG BUILD_DATE
+ARG VCS_REF
+ARG MAINTAINER
+ARG DESCRIPTION
+ARG APP_NAME
+ARG PORT
+ARG SOURCE
+
+LABEL org.opencontainers.image.title="${APP_NAME}" \
+      org.opencontainers.image.description="${DESCRIPTION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.authors="${MAINTAINER}" \
+      org.opencontainers.image.vendor="Alpha Hack Group" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.url="${SOURCE}" \
+      org.opencontainers.image.documentation="${SOURCE}" \
+      io.k8s.description="${DESCRIPTION}" \
+      io.k8s.display-name="${APP_NAME}" \
+      io.openshift.tags="mcp,market-news,rust,server" \
+      maintainer="${MAINTAINER}"
+
+RUN microdnf update -y && \
+    microdnf install -y ca-certificates && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+# Non-root user, matching the rest of this demo family's MCP servers.
+RUN useradd -r -u 1001 -g 0 -s /sbin/nologin \
+    -c "Market News MCP Server user" mcpserver
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/mcp_server /app/mcp_server
+
+# `data/` is meant to be a PersistentVolumeClaim mounted here in
+# Kubernetes, shared with a `news_generator` CronJob — so the pod can
+# restart without losing the corpus, and so a scheduled regeneration
+# doesn't require redeploying this service. It also doubles as the
+# Hugging Face cache dir root below, so the ~90MB model download only
+# happens once across restarts.
+RUN mkdir -p /app/data && chown -R 1001:0 /app && chmod -R g=u /app && chmod +x /app/mcp_server
+
+USER 1001
+
+ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
+ENV PORT=${PORT}
+ENV BIND_ADDRESS=0.0.0.0:${PORT}
+ENV NEWS_JSONL_PATH=/app/data/news.jsonl
+ENV NEWS_TV_PATH=/app/data/news.tv
+# Cache the downloaded embedding model on the same PVC as the corpus, so
+# it survives pod restarts instead of re-downloading ~90MB every time.
+ENV HF_HOME=/app/data/.cache/huggingface
+
+# rmcp's streamable-http transport doesn't expose a dedicated /health
+# endpoint, and GET /mcp legitimately returns 405 (it's a POST-only JSON-RPC
+# endpoint) — so this only checks TCP-level reachability (no `-f`,
+# intentionally not treating the 405 as failure), not protocol correctness.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -s -o /dev/null http://localhost:${PORT}/mcp || exit 1
+
+EXPOSE ${PORT}
+
+CMD ["/app/mcp_server"]

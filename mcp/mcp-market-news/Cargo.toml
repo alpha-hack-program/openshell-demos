@@ -1,0 +1,73 @@
+[package]
+name = "mcp-market-news"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server exposing public market-news retrieval, filtered by ticker/sector and semantic similarity"
+license = "MIT"
+
+[lib]
+name = "mcp_market_news"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp_server"
+path = "src/mcp_server.rs"
+
+[[bin]]
+name = "news_generator"
+path = "src/bin/news_generator.rs"
+
+[dependencies]
+# --- MCP server ---
+rmcp = { version = "1.7", features = [
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+    "auth",
+] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "io-std",
+    "signal",
+    "fs",
+] }
+axum = { version = "0.8", features = ["macros"] }
+http = "1"
+schemars = { version = "1.0" }
+
+# --- Shared ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# --- Database (news_generator: read distinct ticker/sector from positions) ---
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
+
+# --- LLM (news_generator: Anthropic Messages API) ---
+# rustls instead of the default native-tls/openssl backend, to avoid
+# requiring a system OpenSSL install in minimal build environments (UBI9
+# minimal container, sandboxes without libssl-dev, etc).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Embeddings, pure Rust (no ONNX, no external service) ---
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+# default-features=false + "ureq" avoids hf-hub's default "native-tls"
+# feature (which otherwise pulls in openssl-sys / a system OpenSSL). ureq's
+# own default features already include a pure-Rust (rustls) TLS backend.
+hf-hub = { version = "0.4.3", default-features = false, features = ["ureq"] }
+tokenizers = "0.23"
+
+# --- Vector index ---
+turbovec = "1.0.0"
+
+[dev-dependencies]
+tempfile = "3"
