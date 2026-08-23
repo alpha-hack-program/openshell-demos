@@ -1,0 +1,32 @@
+name: CI mcp-portfolio
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mcp/mcp-portfolio/**']
+  pull_request:
+    paths: ['mcp/mcp-portfolio/**']
+
+defaults:
+  run:
+    working-directory: mcp/mcp-portfolio
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  test:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: make build
+      - run: make test

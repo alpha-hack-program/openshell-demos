@@ -126,3 +126,18 @@ podman run --rm -p 8001:8001 \
 ```
 
 Imagen UBI9 minimal, build multi-stage, usuario no-root `1001`.
+
+### Publicación automática (GitHub Actions)
+
+- **CI** (`.github/workflows/ci-mcp-portfolio.yml`): en cada push/PR que toque
+  `mcp/mcp-portfolio/**`, corre `make check` (fmt + clippy) y `make test`.
+- **Release** (`.github/workflows/release-mcp-portfolio.yml`): al empujar un
+  tag `mcp-portfolio-v*`, repite el check y publica la imagen en
+  `ghcr.io/<owner>/<repo>/mcp-portfolio` con dos tags: el nombre del tag
+  (p. ej. `mcp-portfolio-v0.1.0`) y `latest`. Usa `GITHUB_TOKEN`, no requiere
+  secretos adicionales.
+
+```bash
+git tag mcp-portfolio-v0.1.0
+git push origin mcp-portfolio-v0.1.0
+```
