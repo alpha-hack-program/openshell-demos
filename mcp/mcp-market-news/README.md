@@ -329,17 +329,47 @@ changes across versions:
   compiles and its JSON-parsing logic is unit-tested against
   representative LLM output shapes (clean array, array wrapped in prose,
   single object), but the live network calls themselves are unverified.
-- **NOT verified**: the Containerfile was never actually built. `podman`
-  is installed in this sandbox but non-functional (`fatal error, invalid
-  internal status, unable to create a new pause process` — a rootless
-  user-namespace issue in this environment, not something fixable without
-  root/reboot access). The Containerfile mirrors the reference repo's
-  structure closely, with two deliberate changes: rustls instead of
-  native-tls (avoids requiring `openssl-devel`), and `gcc-c++` added to
-  the builder stage (required by `tokenizers`). The `HEALTHCHECK` was
-  adjusted after discovering (by actually curling the running server)
-  that `GET /mcp` returns `405` — `curl -f` would treat that as failure,
-  so the healthcheck drops `-f` and only checks TCP-level reachability.
+- **Containerfile actually built and run** (`podman`, invoked via
+  `flatpak-spawn --host podman` — this sandbox is a toolbox container
+  where the in-container `podman` is non-functional, but the *host*
+  podman works fine through `flatpak-spawn`): `podman build` succeeded
+  end to end (245MB final image), and `podman run` with `data/` bind-
+  mounted (`:Z`) actually started the server as non-root uid 1001
+  (confirmed via `podman exec ... id`) and served real `curl` requests
+  over `/mcp` — same three cases as the host-run test above, all correct.
+  Two real, container-specific bugs were caught this way and fixed
+  before considering it done (see below) — this is exactly why "the code
+  compiles" and "it actually runs as intended" are different claims.
+- **Real bug found and fixed: `Embedder::load()` ignored `HF_HOME`
+  entirely.** `hf_hub::api::sync::Api::new()` calls `ApiBuilder::new()`,
+  which builds its cache from `Cache::default()` (`dirs::home_dir()`),
+  **not** `Cache::from_env()` — `HF_HOME` is only honored by
+  `ApiBuilder::from_env()`, a different constructor. This "worked" under
+  plain `cargo run`/`cargo test` on the host purely by accident, because
+  `$HOME` already had the model cached there from a previous run. It
+  failed loudly the moment this actually ran as the container's non-root
+  user, whose `$HOME` (`/home/mcpserver`) doesn't exist and isn't
+  writable: `Permission denied (os error 13)` out of `Embedder::load`,
+  with the `HF_HOME` env var pointing at the mounted PVC being silently
+  ignored the whole time. Root-caused with a minimal reproduction binary
+  built into the same UBI9 runtime image (isolating hf-hub's own cache
+  resolution from every other moving part), confirmed on docs.rs source
+  that `ApiBuilder::from_env()` is the constructor that actually reads
+  `Cache::from_env()`/`HF_HOME`, fixed in `src/common/embedder.rs`, then
+  re-verified with a full rebuild + container run + curl round-trip.
+  Without the container test, this bug would have shipped invisibly —
+  `cargo test`/`cargo run` on a normal dev machine can't surface it.
+- **Real bug found and fixed: the `HEALTHCHECK` would have falsely
+  failed.** Discovered by actually curling the running server: `GET
+  /mcp` returns `405` (it's a POST-only JSON-RPC endpoint), which `curl
+  -f` treats as failure. Fixed by dropping `-f` so the healthcheck only
+  checks TCP-level reachability. (Also confirmed, by inspecting the
+  build log, that `ubi9-minimal`'s default `ca-certificates` install
+  does ship a working `curl` — `curl-minimal` — so no extra package was
+  needed for this to work; `podman` itself separately warned that
+  `HEALTHCHECK` is ignored for OCI-format images and needs `--format
+  docker` to actually take effect, which is a `podman build`-time
+  concern, not a Containerfile bug.)
 
 ## Open risks
 
@@ -362,11 +392,20 @@ changes across versions:
   separate, concurrent session this project intentionally did not touch).
   If that schema differs, `load_tickers_and_sectors` in
   `src/bin/news_generator.rs` will need adjusting.
-- **Containerfile is unbuilt** (see "What was verified" above) — review
-  it once a working container runtime is available, particularly the
-  `HEALTHCHECK` and whether `microdnf install ca-certificates` alone
-  provides a usable `curl` in `ubi9-minimal` (the reference repo assumes
-  this too, without installing `curl` explicitly).
+- **`podman build --format docker` not yet tried.** The image builds and
+  runs correctly, but `podman` warned that `HEALTHCHECK` is ignored for
+  the default OCI image format. If the `HEALTHCHECK` needs to actually
+  take effect (vs. just being present for humans/tooling reading the
+  Containerfile), build with `--format docker` or rely on a Kubernetes
+  liveness/readiness probe instead, which is the more idiomatic choice
+  for this demo's actual OpenShift target anyway.
+- **The `HF_HOME`-ignored bug class may have siblings.** Given that one
+  env var was silently ignored by a constructor that looks like it
+  should honor it, it's worth double-checking whether any other
+  env-var-driven config in this project (or the sibling MCP servers, if
+  they share this pattern) has a similar "looks configured, isn't
+  actually read" gap — this was only caught here because the container
+  test happened to exercise a `$HOME` that doesn't exist.
 
 ## References
 

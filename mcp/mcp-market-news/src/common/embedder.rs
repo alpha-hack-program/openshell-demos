@@ -32,7 +32,18 @@ impl Embedder {
     pub fn load() -> anyhow::Result<Self> {
         let device = Device::Cpu;
 
-        let api = hf_hub::api::sync::Api::new()?;
+        // NOTE: `hf_hub::api::sync::Api::new()` calls `ApiBuilder::new()`,
+        // which builds its cache from `Cache::default()` — i.e. always
+        // `dirs::home_dir()/.cache/huggingface`, completely ignoring
+        // `HF_HOME`. This was confirmed the hard way: it "worked" in a
+        // plain `cargo run` because `$HOME` happened to already have the
+        // model cached from an earlier run, and only failed loudly once
+        // this ran as a non-root container user whose `$HOME`
+        // (`/home/mcpserver`) doesn't exist and isn't writable — the
+        // `HF_HOME` pointing at the mounted PVC was silently never used.
+        // `ApiBuilder::from_env()` is the one that actually reads
+        // `HF_HOME` (see `Cache::from_env()` in the hf-hub 0.4.3 source).
+        let api = hf_hub::api::sync::ApiBuilder::from_env().build()?;
         let repo = api.model(MODEL_ID.to_string());
 
         let config_path = repo.get("config.json")?;
