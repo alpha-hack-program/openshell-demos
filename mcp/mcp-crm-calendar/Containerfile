@@ -1,4 +1,17 @@
-FROM registry.access.redhat.com/ubi9/rust-toolset:1-latest AS builder
+# UBI9 has no official rust-toolset image (unlike python/nodejs/ruby),
+# so the builder stage is plain ubi9/ubi + rustup, same as the reference
+# repo (alpha-hack-program/elegibility-engine-mcp-rs).
+FROM registry.access.redhat.com/ubi9/ubi:9.6 AS builder
+
+RUN dnf install -y gcc gcc-c++ make pkg-config && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+ENV RUSTUP_HOME=/opt/rust
+ENV CARGO_HOME=/opt/rust
+ENV PATH=/opt/rust/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain stable --no-modify-path
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
@@ -7,7 +20,7 @@ COPY migrations ./migrations
 
 RUN cargo build --release --bin mcp_server
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
 
 COPY --from=builder /build/target/release/mcp_server /usr/local/bin/mcp_server
 COPY --from=builder /build/migrations /opt/app-root/migrations
