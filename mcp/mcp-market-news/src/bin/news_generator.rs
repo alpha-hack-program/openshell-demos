@@ -7,11 +7,11 @@
 //! Pipeline:
 //! 1. Read distinct `(ticker, sector)` pairs from the shared Postgres
 //!    `positions` table (`DATABASE_URL`).
-//! 2. Ask Claude (`ANTHROPIC_API_KEY`, model `claude-sonnet-4-6`) for a
-//!    batch of background-noise headlines covering those tickers/sectors,
-//!    plus two hand-guided "seeded" items that guarantee the demo always
-//!    has something to find (see the prompts below, reproduced verbatim in
-//!    the README).
+//! 2. Ask an OpenAI-compatible chat-completions endpoint (`OPENAI_BASE_URL`,
+//!    `OPENAI_API_KEY`, `OPENAI_MODEL`) for a batch of background-noise
+//!    headlines covering those tickers/sectors, plus two hand-guided
+//!    "seeded" items that guarantee the demo always has something to find
+//!    (see the prompts below, reproduced verbatim in the README).
 //! 3. Embed every item (`headline + body`) with the pure-Rust
 //!    [`mcp_market_news::common::embedder::Embedder`] and add the vectors
 //!    to a `turbovec::TurboQuantIndex`.
@@ -20,14 +20,20 @@
 
 use chrono::Utc;
 use mcp_market_news::common::embedder::{Embedder, EMBEDDING_DIM};
-use mcp_market_news::common::news_service::{NewsItem, INDEX_BIT_WIDTH};
+use mcp_market_news::common::news_service::{load_jsonl, NewsItem, INDEX_BIT_WIDTH};
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 use turbovec::TurboQuantIndex;
 
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
+const DEFAULT_GENERATION_INTERVAL_MINUTES: u64 = 5;
+const DEFAULT_GENERATION_BATCH_SIZE: usize = 5;
+
+/// Default base URL when `OPENAI_BASE_URL` isn't set — plain OpenAI. Points
+/// at an OpenAI-*compatible* endpoint (e.g. a self-hosted vLLM route) by
+/// overriding `OPENAI_BASE_URL`; does not include a trailing `/v1`, same
+/// convention as `docs/inference-api-compatibility.md`.
+const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
 
 const DEFAULT_JSONL_PATH: &str = "data/news.jsonl";
 const DEFAULT_TV_PATH: &str = "data/news.tv";
@@ -50,6 +56,20 @@ struct GeneratedNewsItem {
 fn batch1_prompt(tickers_and_sectors: &str) -> String {
     format!(
         "Generate 35 short fictional financial news headlines for these tickers/sectors: \
+         {tickers_and_sectors}. Each item: `headline` (one sentence), `body` (2-3 sentences), \
+         `ticker` (can be null if sector-level), `sector`, `sentiment` (positive/negative/neutral). \
+         Most should be normal, low-impact market noise, not extraordinary events. Return only \
+         a JSON array, no extra text."
+    )
+}
+
+/// Drip-feed prompt used by `GENERATION_MODE=loop` — same shape as
+/// [`batch1_prompt`] but with a caller-supplied item count instead of a
+/// fixed 35, so `GENERATION_BATCH_SIZE` controls how much "new" news shows
+/// up each cycle.
+fn topup_prompt(count: usize, tickers_and_sectors: &str) -> String {
+    format!(
+        "Generate {count} short fictional financial news headlines for these tickers/sectors: \
          {tickers_and_sectors}. Each item: `headline` (one sentence), `body` (2-3 sentences), \
          `ticker` (can be null if sector-level), `sector`, `sentiment` (positive/negative/neutral). \
          Most should be normal, low-impact market noise, not extraordinary events. Return only \
@@ -97,15 +117,24 @@ async fn load_tickers_and_sectors(database_url: &str) -> anyhow::Result<String> 
     Ok(rendered.join(", "))
 }
 
-/// Calls the Anthropic Messages API with a single user-turn prompt and
-/// returns the raw text of the first content block.
-async fn call_anthropic(
+/// Calls an OpenAI-compatible `/v1/chat/completions` endpoint with a single
+/// user-turn prompt and returns the raw text of the first choice.
+///
+/// Chat Completions, not the Responses API used elsewhere in this repo for
+/// Codex/namespace-tool compatibility (see
+/// `docs/inference-api-compatibility.md`) — this call has no tool use at
+/// all, and Chat Completions is the more broadly supported format across
+/// self-hosted/third-party OpenAI-compatible endpoints (older vLLM
+/// included).
+async fn call_openai(
     client: &reqwest::Client,
+    base_url: &str,
     api_key: &str,
+    model: &str,
     prompt: &str,
 ) -> anyhow::Result<String> {
     let body = serde_json::json!({
-        "model": ANTHROPIC_MODEL,
+        "model": model,
         "max_tokens": 16000,
         "messages": [
             { "role": "user", "content": prompt }
@@ -113,10 +142,9 @@ async fn call_anthropic(
     });
 
     let resp = client
-        .post(ANTHROPIC_API_URL)
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Content-Type", "application/json")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_VERSION)
+        .bearer_auth(api_key)
         .json(&body)
         .send()
         .await?;
@@ -124,13 +152,13 @@ async fn call_anthropic(
     let status = resp.status();
     let payload: serde_json::Value = resp.json().await?;
     if !status.is_success() {
-        anyhow::bail!("Anthropic API error ({status}): {payload}");
+        anyhow::bail!("OpenAI-compatible API error ({status}): {payload}");
     }
 
-    payload["content"][0]["text"]
+    payload["choices"][0]["message"]["content"]
         .as_str()
         .map(String::from)
-        .ok_or_else(|| anyhow::anyhow!("unexpected Anthropic response shape: {payload}"))
+        .ok_or_else(|| anyhow::anyhow!("unexpected chat-completions response shape: {payload}"))
 }
 
 /// The model is asked to "return only a JSON array, no extra text", but we
@@ -200,6 +228,84 @@ fn build_and_write_index(
     Ok(())
 }
 
+/// `GENERATION_MODE=loop`: an alternative to running this binary as a
+/// one-shot Kubernetes `CronJob` (see module docs) — instead, run it as a
+/// long-lived process that generates a fresh drip-feed batch immediately on
+/// startup, then again every `interval`, forever, so a demo session sees
+/// "new" news arrive over time without anyone re-running the generator by
+/// hand. The full corpus (existing + drip-fed items) is always rewritten to
+/// `jsonl_path`/`tv_path` in place, using the exact same
+/// `write_jsonl`/`build_and_write_index` path as the one-shot mode, so
+/// `mcp_server` doesn't need to know which mode produced its corpus.
+///
+/// A failed cycle (LLM call, parsing, or write error) is logged and
+/// skipped rather than crashing the process — a transient failure
+/// shouldn't take down a service meant to run unattended for the length of
+/// a demo session.
+#[allow(clippy::too_many_arguments)]
+async fn run_loop(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    tickers_and_sectors: &str,
+    jsonl_path: &str,
+    tv_path: &str,
+    interval: Duration,
+    batch_size: usize,
+) -> anyhow::Result<()> {
+    let embedder = Embedder::load()?;
+    let mut corpus = if std::path::Path::new(jsonl_path).exists() {
+        load_jsonl(jsonl_path)?
+    } else {
+        Vec::new()
+    };
+    tracing::info!(
+        existing = corpus.len(),
+        interval_secs = interval.as_secs(),
+        batch_size,
+        "Starting continuous news generation loop"
+    );
+
+    loop {
+        tracing::info!(batch_size, "Generating drip-feed batch");
+        let cycle_result = call_openai(
+            client,
+            base_url,
+            api_key,
+            model,
+            &topup_prompt(batch_size, tickers_and_sectors),
+        )
+        .await
+        .and_then(|text| parse_generated_items(&text));
+
+        match cycle_result {
+            Ok(generated) => {
+                let new_items = to_news_items(generated);
+                tracing::info!(count = new_items.len(), "Generated new items");
+                corpus.extend(new_items);
+
+                if let Err(e) = write_jsonl(&corpus, jsonl_path) {
+                    tracing::error!(error = %e, "Failed to write news.jsonl this cycle");
+                } else if let Err(e) = build_and_write_index(&embedder, &corpus, tv_path) {
+                    tracing::error!(error = %e, "Failed to rebuild TurboVec index this cycle");
+                } else {
+                    tracing::info!(total = corpus.len(), path = jsonl_path, "Corpus updated");
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Generation cycle failed, will retry next interval")
+            }
+        }
+
+        tracing::info!(
+            seconds = interval.as_secs(),
+            "Sleeping until next generation cycle"
+        );
+        tokio::time::sleep(interval).await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -210,8 +316,12 @@ async fn main() -> anyhow::Result<()> {
 
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| anyhow::anyhow!("DATABASE_URL is not set — cannot read positions table"))?;
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY is not set — cannot call Claude"))?;
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY is not set — cannot call the LLM endpoint"))?;
+    let base_url =
+        std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| DEFAULT_OPENAI_BASE_URL.to_string());
+    let model = std::env::var("OPENAI_MODEL")
+        .map_err(|_| anyhow::anyhow!("OPENAI_MODEL is not set — cannot call the LLM endpoint"))?;
 
     let jsonl_path =
         std::env::var("NEWS_JSONL_PATH").unwrap_or_else(|_| DEFAULT_JSONL_PATH.to_string());
@@ -223,18 +333,54 @@ async fn main() -> anyhow::Result<()> {
 
     let client = reqwest::Client::new();
 
-    tracing::info!("Requesting batch 1 (background noise) from Claude");
-    let batch1_text =
-        call_anthropic(&client, &api_key, &batch1_prompt(&tickers_and_sectors)).await?;
+    let generation_mode = std::env::var("GENERATION_MODE").unwrap_or_else(|_| "once".to_string());
+    if generation_mode == "loop" {
+        let interval_minutes: u64 = std::env::var("GENERATION_INTERVAL_MINUTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_GENERATION_INTERVAL_MINUTES);
+        let batch_size: usize = std::env::var("GENERATION_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_GENERATION_BATCH_SIZE);
+
+        tracing::info!(
+            interval_minutes,
+            batch_size,
+            "GENERATION_MODE=loop — running as a continuous drip-feed service"
+        );
+        return run_loop(
+            &client,
+            &base_url,
+            &api_key,
+            &model,
+            &tickers_and_sectors,
+            &jsonl_path,
+            &tv_path,
+            Duration::from_secs(interval_minutes * 60),
+            batch_size,
+        )
+        .await;
+    }
+
+    tracing::info!(model, base_url, "Requesting batch 1 (background noise)");
+    let batch1_text = call_openai(
+        &client,
+        &base_url,
+        &api_key,
+        &model,
+        &batch1_prompt(&tickers_and_sectors),
+    )
+    .await?;
     let batch1 = to_news_items(parse_generated_items(&batch1_text)?);
     tracing::info!(count = batch1.len(), "Batch 1 generated");
 
-    tracing::info!("Requesting seeded item 1 (NDFR exact-ticker hit) from Claude");
-    let seed1_text = call_anthropic(&client, &api_key, SEED_PROMPT_1).await?;
+    tracing::info!("Requesting seeded item 1 (NDFR exact-ticker hit)");
+    let seed1_text = call_openai(&client, &base_url, &api_key, &model, SEED_PROMPT_1).await?;
     let seed1 = to_news_items(parse_generated_items(&seed1_text)?);
 
-    tracing::info!("Requesting seeded item 2 (generic logistics, semantic-only hit) from Claude");
-    let seed2_text = call_anthropic(&client, &api_key, SEED_PROMPT_2).await?;
+    tracing::info!("Requesting seeded item 2 (generic logistics, semantic-only hit)");
+    let seed2_text = call_openai(&client, &base_url, &api_key, &model, SEED_PROMPT_2).await?;
     let seed2 = to_news_items(parse_generated_items(&seed2_text)?);
 
     let mut all_items = batch1;

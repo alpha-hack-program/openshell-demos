@@ -32,6 +32,7 @@ tokio = { version = "1", features = [
     "io-std",
     "signal",
     "fs",
+    "time",
 ] }
 axum = { version = "0.8", features = ["macros"] }
 http = "1"

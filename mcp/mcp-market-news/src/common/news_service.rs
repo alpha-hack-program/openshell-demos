@@ -187,7 +187,10 @@ impl NewsService {
     }
 }
 
-fn load_jsonl(path: impl AsRef<std::path::Path>) -> anyhow::Result<Vec<NewsItem>> {
+/// Also used by `news_generator`'s continuous (`GENERATION_MODE=loop`) mode
+/// to read back the corpus it previously wrote, so a restart resumes
+/// appending instead of starting the drip-feed from scratch.
+pub fn load_jsonl(path: impl AsRef<std::path::Path>) -> anyhow::Result<Vec<NewsItem>> {
     let content = std::fs::read_to_string(path)?;
     let mut items = Vec::new();
     for (line_no, line) in content.lines().enumerate() {

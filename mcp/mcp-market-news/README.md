@@ -36,7 +36,7 @@ mcp-market-news/
 │   │   ├── news_service.rs   # get_relevant_news: two-stage filter logic
 │   │   └── mod.rs
 │   ├── bin/
-│   │   └── news_generator.rs # batch job: Postgres + Claude -> news.jsonl + news.tv
+│   │   └── news_generator.rs # batch job: Postgres + OpenAI-compatible LLM -> news.jsonl + news.tv
 │   ├── lib.rs                 # exposes `common` to both bins + tests
 │   └── mcp_server.rs          # MCP server (rmcp, streamable-http)
 ├── tests/
@@ -130,15 +130,14 @@ Run separately, before each demo session (or as a Kubernetes `CronJob`
 against the same PVC `mcp_server` reads from) — **not** started by the
 interactive service.
 
-Pipeline:
+Pipeline (default `GENERATION_MODE=once`):
 
 1. Reads distinct `(ticker, sector)` pairs from the shared portfolio
    Postgres database (`DATABASE_URL`), via `SELECT DISTINCT ticker, sector
    FROM positions`.
-2. Asks Claude (`ANTHROPIC_API_KEY`, model `claude-sonnet-4-6`, via the
-   Anthropic Messages API over `reqwest` — Rust has no official Anthropic
-   SDK, so this is raw HTTP against `POST https://api.anthropic.com/v1/messages`)
-   for two batches:
+2. Asks an OpenAI-*compatible* `/v1/chat/completions` endpoint
+   (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, via `reqwest` —
+   plain HTTP, no SDK) for two batches:
    - **Batch 1 — background noise (35 items).**
    - **Batch 2 — two hand-guided seeded items**, so the demo always has
      something to find regardless of what's in the noise batch.
@@ -146,6 +145,49 @@ Pipeline:
    `turbovec::TurboQuantIndex`.
 4. Writes `data/news.jsonl` (source of truth, one JSON object per line)
    and `data/news.tv` (persisted index).
+
+Chat Completions, not the Responses API `docs/inference-api-compatibility.md`
+documents for Codex/namespace-tool compatibility — this call has no tool
+use at all, and Chat Completions is the more broadly supported format
+across self-hosted/third-party OpenAI-compatible endpoints (older vLLM
+included). `OPENAI_BASE_URL` defaults to `https://api.openai.com` and does
+**not** include a trailing `/v1` (same convention as that doc) — the code
+appends `/v1/chat/completions` itself.
+
+### Continuous mode (`GENERATION_MODE=loop`)
+
+An alternative to running this binary as a one-shot job or Kubernetes
+`CronJob`: set `GENERATION_MODE=loop` and it instead runs as a long-lived
+process that generates a fresh drip-feed batch of `GENERATION_BATCH_SIZE`
+items (default 5) immediately on startup, then again every
+`GENERATION_INTERVAL_MINUTES` (default 5), forever — so a running demo
+session sees "new" news arrive on its own without anyone re-running the
+generator by hand. Each cycle:
+
+- Uses the same `topup_prompt` shape as batch 1, just with a caller-supplied
+  item count instead of the fixed 35, reusing `SELECT DISTINCT ticker,
+  sector FROM positions` loaded once at startup.
+- Appends the new items to the full in-memory corpus (seeded by reading
+  back any existing `data/news.jsonl` on startup, so a restart resumes
+  rather than starting the feed over) and rewrites `data/news.jsonl` +
+  rebuilds `data/news.tv` in place via the exact same
+  `write_jsonl`/`build_and_write_index` path the one-shot mode uses —
+  `mcp_server` doesn't need to know which mode produced its corpus.
+- Logs and skips a failed cycle (LLM call, parsing, or write error) rather
+  than crashing — a transient failure shouldn't take down a process meant
+  to run unattended for an entire demo session.
+
+Does **not** generate the two guaranteed seeded items (`NDFR` exact-ticker
+hit, generic-logistics semantic hit) — those are a one-shot-mode-only
+concern for bootstrapping a fresh corpus. Run `GENERATION_MODE=once` at
+least once first if you need those guarantees present.
+
+```bash
+GENERATION_MODE=loop \
+GENERATION_INTERVAL_MINUTES=5 \
+GENERATION_BATCH_SIZE=5 \
+  cargo run --release --bin news_generator
+```
 
 ### Generation prompts (verbatim)
 
@@ -174,6 +216,16 @@ Pipeline:
 > "logistics" sector (e.g. a port regulatory change). This item tests
 > semantic filtering, not exact ticker matching.
 
+**Continuous mode (`GENERATION_MODE=loop`) drip-feed prompt** — same shape
+as batch 1, `{count}` filled in from `GENERATION_BATCH_SIZE`:
+
+> Generate {count} short fictional financial news headlines for these
+> tickers/sectors: {tickers_and_sectors}. Each item: `headline` (one
+> sentence), `body` (2-3 sentences), `ticker` (can be null if
+> sector-level), `sector`, `sentiment` (positive/negative/neutral). Most
+> should be normal, low-impact market noise, not extraordinary events.
+> Return only a JSON array, no extra text.
+
 Each generated item gets a real generation timestamp (`Utc::now()` at
 generation time — not fabricated) and a fresh `uuid::Uuid::new_v4()` id.
 
@@ -182,7 +234,12 @@ generation time — not fabricated) and a fresh `uuid::Uuid::new_v4()` id.
 | Variable | Used by | Purpose |
 |---|---|---|
 | `DATABASE_URL` | `news_generator` | Postgres connection string for the shared `positions` table |
-| `ANTHROPIC_API_KEY` | `news_generator` | Anthropic Messages API key |
+| `OPENAI_API_KEY` | `news_generator` | API key for the OpenAI-compatible chat-completions endpoint |
+| `OPENAI_BASE_URL` | `news_generator` | Base URL, no trailing `/v1` (default `https://api.openai.com`); point at a self-hosted/vLLM endpoint to swap providers |
+| `OPENAI_MODEL` | `news_generator` | Model name to request (required — no default, since it's provider-specific) |
+| `GENERATION_MODE` | `news_generator` | `once` (default) for the one-shot batch, or `loop` for the continuous drip-feed service — see "Continuous mode" above |
+| `GENERATION_INTERVAL_MINUTES` | `news_generator` | Loop mode only: minutes between drip-feed cycles (default `5`) |
+| `GENERATION_BATCH_SIZE` | `news_generator` | Loop mode only: items generated per cycle (default `5`) |
 | `NEWS_JSONL_PATH` | both | Path to the corpus (default `data/news.jsonl`) |
 | `NEWS_TV_PATH` | both | Path to the TurboVec index (default `data/news.tv`) |
 | `BIND_ADDRESS` | `mcp_server` | Listen address (default `127.0.0.1:8002`) |
@@ -206,10 +263,10 @@ JSONL parsing, and the LLM-response JSON extraction logic in
 `news_generator` (clean array, array wrapped in prose/code fences, single
 object for the seed prompts).
 
-### Building a local test corpus (no Postgres, no Anthropic key needed)
+### Building a local test corpus (no Postgres, no LLM API key needed)
 
 `news_generator`'s own pipeline needs a live Postgres `positions` table
-and `ANTHROPIC_API_KEY` — neither was available in the environment this
+and `OPENAI_API_KEY` — neither was available in the environment this
 server was built in (see "What was verified" below). `tests/fixture.rs`
 exercises the *same* embedding + indexing code (`Embedder`,
 `TurboQuantIndex`) against a small hand-authored corpus instead, so the
@@ -362,10 +419,20 @@ changes across versions:
     unrelated `paste` "unmaintained" advisory warning, plus the
     already-documented `RUSTSEC-2023-0071` ignore in
     `.cargo/audit.toml` — neither is new from this migration).
-- **Anthropic model id and API shape**: confirmed via the `claude-api`
-  skill that `claude-sonnet-4-6` is a current, real model id, and that
-  Rust has no official Anthropic SDK (raw HTTP against `POST /v1/messages`
-  is the correct approach, per that skill's guidance).
+- **LLM provider swapped from Anthropic to OpenAI-compatible (2026-08-23)**:
+  `news_generator` originally called the Anthropic Messages API directly
+  (model `claude-sonnet-4-6`). It now calls a generic OpenAI-compatible
+  `/v1/chat/completions` endpoint instead (`OPENAI_BASE_URL`/
+  `OPENAI_API_KEY`/`OPENAI_MODEL`), matching the env var convention already
+  used elsewhere in this repo for BYO-LLM setups (see
+  `docs/inference-api-compatibility.md`) — so any self-hosted vLLM route or
+  third-party OpenAI-compatible provider works, not just a paid Anthropic
+  key. Chat Completions specifically, not the Responses API that same doc
+  documents for Codex/namespace-tool compatibility, since this call does no
+  tool use at all and Chat Completions is the more broadly supported format
+  (older vLLM included). Compiles and passes `cargo check`/`clippy`/`fmt`
+  clean; the live call itself is unverified (see "NOT verified" below —
+  same constraint as before the swap, just a different missing credential).
 - **Both binaries actually compile and link**: `cargo check --bins`,
   `cargo build --release --bins`, `cargo clippy --bins --tests -D
   warnings`, and `cargo fmt --check` all pass clean in this environment
@@ -378,12 +445,15 @@ changes across versions:
   risks" below. All three (exact ticker match, semantic-only match with
   no ticker, and a no-match case) returned the expected narrowed results
   with `called_by`/`roles` attached.
-- **NOT verified**: `news_generator`'s actual Postgres query and Anthropic
-  API call were never executed — this sandbox had no `DATABASE_URL`, no
-  live Postgres `positions` table, and no `ANTHROPIC_API_KEY`. The code
-  compiles and its JSON-parsing logic is unit-tested against
-  representative LLM output shapes (clean array, array wrapped in prose,
-  single object), but the live network calls themselves are unverified.
+- **NOT verified**: `news_generator`'s actual Postgres query and LLM API
+  call (both `once` and `loop` mode) were never executed — this sandbox had
+  no `DATABASE_URL`, no live Postgres `positions` table, and no
+  `OPENAI_API_KEY`. The code compiles and its JSON-parsing logic is
+  unit-tested against representative LLM output shapes (clean array, array
+  wrapped in prose, single object), but the live network calls themselves,
+  the loop's sleep/retry cycle, and its corpus-resume-on-restart behavior
+  are all unverified beyond compiling and passing `clippy`/`fmt`/`cargo
+  check`.
 - **Containerfile actually built and run against the `hf-hub 0.4.3`-era
   code** (`podman`, invoked via `flatpak-spawn --host podman` — this
   sandbox is a toolbox container where the in-container `podman` is

@@ -1,4 +1,4 @@
-.PHONY: build build-server build-generator test lint fmt fmt-check check audit generate-news run clean image-build image-run help \
+.PHONY: build build-server build-generator test lint fmt fmt-check check audit generate-news generate-news-loop run clean image-build image-run help \
         release-patch release-minor release-major release-dry-run
 
 all: build
@@ -41,13 +41,20 @@ check: fmt-check lint test ## CI gate: formatting, clippy, tests
 audit:
 	cargo audit
 
-# Batch corpus generation. Requires DATABASE_URL (shared portfolio Postgres)
-# and ANTHROPIC_API_KEY. Run this before starting mcp_server — it is NOT
-# started automatically by the service. See README.md for the exact prompts
-# used and for how to build a local test fixture instead when those two
-# env vars aren't available.
+# One-shot batch corpus generation. Requires DATABASE_URL (shared portfolio
+# Postgres), OPENAI_API_KEY, and OPENAI_MODEL (OPENAI_BASE_URL defaults to
+# api.openai.com). Run this before starting mcp_server — it is NOT started
+# automatically by the service. See README.md for the exact prompts used
+# and for how to build a local test fixture instead when those env vars
+# aren't available.
 generate-news: build-generator
 	./target/release/news_generator
+
+# Continuous drip-feed mode: generates GENERATION_BATCH_SIZE items every
+# GENERATION_INTERVAL_MINUTES, forever, starting immediately. Same env vars
+# as generate-news. See README.md ("Continuous mode") for details.
+generate-news-loop: build-generator
+	GENERATION_MODE=loop ./target/release/news_generator
 
 # Run the MCP server locally (expects data/news.jsonl + data/news.tv to
 # already exist — run `make generate-news` first).
@@ -101,7 +108,8 @@ help:
 	@echo "  make fmt-check        - cargo fmt --check"
 	@echo "  make check            - CI gate: fmt-check + lint + test"
 	@echo "  make audit            - cargo audit (requires cargo-audit)"
-	@echo "  make generate-news    - Run the news_generator batch job"
+	@echo "  make generate-news    - Run the news_generator batch job (one-shot)"
+	@echo "  make generate-news-loop - Run news_generator as a continuous drip-feed service"
 	@echo "  make run              - Run mcp_server locally"
 	@echo "  make image-build      - Build the mcp_server container image"
 	@echo "  make image-run        - Run the container image locally"
