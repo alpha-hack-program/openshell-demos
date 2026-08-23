@@ -1,0 +1,24 @@
+FROM registry.access.redhat.com/ubi9/rust-toolset:1-latest AS builder
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+
+RUN cargo build --release --bin mcp_server
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+COPY --from=builder /build/target/release/mcp_server /usr/local/bin/mcp_server
+COPY --from=builder /build/migrations /opt/app-root/migrations
+
+WORKDIR /opt/app-root
+
+RUN chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
+
+USER 1001
+
+ENV BIND_ADDRESS=0.0.0.0:8004
+EXPOSE 8004
+
+ENTRYPOINT ["/usr/local/bin/mcp_server"]
