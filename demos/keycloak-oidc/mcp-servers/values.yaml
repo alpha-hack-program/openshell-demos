@@ -145,16 +145,16 @@ servers:
     database: true
     resources: {}
   # mcp-market-news's mcp_server binary does NOT read DATABASE_URL at
-  # request time — it serves from data/news.jsonl + data/news.tv, which are
-  # only produced by the separate `news_generator` batch binary (needs
-  # DATABASE_URL + ANTHROPIC_API_KEY, not built into this image, not run by
-  # this chart). Deployed anyway per explicit instruction, but this pod will
-  # fail to serve real queries until those files are seeded some other way
-  # — known gap, not silently swept under the rug.
+  # request time — it serves from data/news.jsonl + data/news.tv. Tag
+  # "latest" previously crashlooped (`Error: No such file or directory` in
+  # NewsService::load — those two files didn't exist in the image and
+  # nothing seeded them). 0.1.2 is a rebuilt image meant to fix that.
+  # Pinned (not "latest") for the same IfNotPresent-staleness reason as
+  # mcp-portfolio/mcp-crm-calendar above — see that comment.
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "latest"
+      tag: "0.1.2"
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
