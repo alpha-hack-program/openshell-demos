@@ -13,15 +13,16 @@ error. This keeps the operation to a single tool call.
 ## Usage
 
 ```bash
-.claude/skills/branch-sync/scripts/branch-sync.sh <branch-name> [--push] [--create]
+.claude/skills/branch-sync/scripts/branch-sync.sh <branch-name> [--no-push] [--create]
 ```
 
 - `<branch-name>` — the branch to bring up to date with `main` (e.g.
   `v0.0.106`).
 - `--create` — create `<branch-name>` from `main` if it doesn't exist yet
   locally or on `origin`. Without this flag, a missing branch is an error.
-- `--push` — push the branch to `origin` after a clean merge. Without this
-  flag the branch is left updated locally only.
+- `--no-push` — skip pushing to `origin` after a clean merge. **The script
+  pushes to `origin/<branch-name>` by default** — pass this flag to leave
+  the sync local only.
 
 The script requires a clean working tree and refuses to run if there are
 uncommitted changes. It leaves the repo checked out on `<branch-name>` when
@@ -44,7 +45,8 @@ status with extra git commands.
 
 ## Confirm before pushing
 
-Per this repo's [`AGENTS.md`](../../../AGENTS.md) conventions, don't push to
-`origin` without the user's explicit go-ahead for that specific push. Ask
-before adding `--push`, unless the user already asked for it in the same
-request.
+This script pushes to `origin` by default. Per this repo's
+[`AGENTS.md`](../../../AGENTS.md) conventions, don't push without the user's
+go-ahead: invoking this skill on the user's explicit request to sync a
+branch counts as that go-ahead, so no separate confirmation is needed. If
+the user only wants a local sync, pass `--no-push`.
