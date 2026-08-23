@@ -1,6 +1,6 @@
 IMAGE ?= mcp-crm-calendar:latest
 
-.PHONY: build test lint fmt audit run image
+.PHONY: build test lint fmt fmt-check check audit run image
 
 build:
 	cargo build --release
@@ -13,6 +13,11 @@ lint:
 
 fmt:
 	cargo fmt --all
+
+fmt-check:
+	cargo fmt --all --check
+
+check: fmt-check lint test ## CI gate: formatting, clippy, tests
 
 audit:
 	cargo audit
