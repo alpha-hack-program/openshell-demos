@@ -133,9 +133,15 @@ Imagen UBI9 minimal, build multi-stage, usuario no-root `1001`.
   `mcp/mcp-portfolio/**`, corre `make check` (fmt + clippy) y `make test`.
 - **Release** (`.github/workflows/release-mcp-portfolio.yml`): al empujar un
   tag `mcp-portfolio-v*`, repite el check y publica la imagen en
-  `ghcr.io/<owner>/<repo>/mcp-portfolio` con dos tags: el nombre del tag
-  (p. ej. `mcp-portfolio-v0.1.0`) y `latest`. Usa `GITHUB_TOKEN`, no requiere
-  secretos adicionales.
+  `quay.io/atarazana/mcp-portfolio` — el mismo registro que ya usan
+  `elegibility-engine-mcp-rs` y `compatibility-engine-mcp-rs` en
+  `demos/keycloak-oidc/mcp-servers/values.yaml` — con dos tags: la versión
+  sin el prefijo del tag de git (p. ej. tag `mcp-portfolio-v0.1.0` → imagen
+  `0.1.0`) y `latest`. **Requiere los secretos de repo `REGISTRY_USER` y
+  `REGISTRY_PASSWORD`** (credenciales de `quay.io/atarazana`), igual que la
+  CI de `elegibility-engine-mcp-rs`. Configúralos en *Settings → Secrets and
+  variables → Actions* antes de empujar el primer tag — no existen todavía
+  en este repo.
 
 ```bash
 git tag mcp-portfolio-v0.1.0

@@ -1,4 +1,5 @@
-.PHONY: build build-server build-generator test lint fmt fmt-check audit generate-news run clean image-build image-run help
+.PHONY: build build-server build-generator test lint fmt fmt-check check audit generate-news run clean image-build image-run help \
+        release-patch release-minor release-major release-dry-run
 
 all: build
 
