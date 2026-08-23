@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# Builds only `mcp_server` (the interactive service). `news_generator` is
-# meant to run as a separate Kubernetes CronJob against the same
-# data/ PVC — building it into this image would drag Postgres/Anthropic
-# client deps into the always-on service's attack surface for no benefit.
-# If you do want it in-image, add `RUN cargo build --release --bin
-# news_generator` to the builder stage and `COPY` the second binary below.
+# Builds both `mcp_server` (the interactive service) and `news_generator`
+# (the batch/loop corpus generator) into the same image. They're deployed
+# as separate containers sharing a PVC (see demos/keycloak-oidc/mcp-servers'
+# Helm chart: an initContainer runs news_generator once, a sidecar runs it
+# with GENERATION_MODE=loop) — one image, two entrypoints, so there's only
+# one thing to build/tag/push.
 
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
 ARG BASE_TAG=9.6
@@ -23,9 +23,9 @@ FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
 
 # gcc-c++ is required by tokenizers' esaxx-rs (C++ dependency for the
 # unigram tokenizer path); openssl-devel is NOT needed — every TLS-using
-# dependency here (reqwest, hf-hub/ureq, sqlx) is configured to use
-# rustls, not native-tls/openssl, specifically to keep this build simple
-# on a minimal image.
+# dependency here (reqwest, hf-hub, sqlx) is configured to use rustls, not
+# native-tls/openssl, specifically to keep this build simple on a minimal
+# image.
 RUN dnf update -y && \
     dnf install -y \
         gcc \
@@ -45,10 +45,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src
 
-# `cargo build --bin mcp_server` alone still needs the full dependency
-# graph resolved (it's a single-package project, not per-bin deps), so
-# there's no meaningful "fetch only what mcp_server needs" step here.
-RUN cargo build --release --bin mcp_server
+# Both binaries share one dependency graph (single-package project), so
+# building them together costs nothing extra over building one.
+RUN cargo build --release --bins
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime
@@ -92,14 +91,17 @@ RUN useradd -r -u 1001 -g 0 -s /sbin/nologin \
 WORKDIR /app
 
 COPY --from=builder /build/target/release/mcp_server /app/mcp_server
+COPY --from=builder /build/target/release/news_generator /app/news_generator
 
 # `data/` is meant to be a PersistentVolumeClaim mounted here in
-# Kubernetes, shared with a `news_generator` CronJob — so the pod can
-# restart without losing the corpus, and so a scheduled regeneration
-# doesn't require redeploying this service. It also doubles as the
-# Hugging Face cache dir root below, so the ~90MB model download only
-# happens once across restarts.
-RUN mkdir -p /app/data && chown -R 1001:0 /app && chmod -R g=u /app && chmod +x /app/mcp_server
+# Kubernetes, shared between the `mcp_server` container, a `news_generator`
+# initContainer (one-shot, blocks pod startup until the corpus exists), and
+# a `news_generator` sidecar (GENERATION_MODE=loop) in the same pod — so a
+# pod restart doesn't lose the corpus. It also doubles as the Hugging Face
+# cache dir root below, so the ~90MB model download only happens once
+# across restarts and is shared by all three containers.
+RUN mkdir -p /app/data && chown -R 1001:0 /app && chmod -R g=u /app && \
+    chmod +x /app/mcp_server /app/news_generator
 
 USER 1001
 

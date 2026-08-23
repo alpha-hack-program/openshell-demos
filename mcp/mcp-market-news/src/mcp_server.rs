@@ -5,14 +5,23 @@
 //! hot query path never touches disk again. Both files are produced ahead
 //! of time by the separate `news_generator` batch binary (run it first —
 //! see the README) — in Kubernetes, `data/` is meant to be a PVC shared
-//! between this service and a `news_generator` CronJob so a pod restart
-//! doesn't lose the corpus.
+//! between this service and a `news_generator` CronJob (or a
+//! `GENERATION_MODE=loop` sidecar) so a pod restart doesn't lose the
+//! corpus.
+//!
+//! A background task reloads `news.jsonl`/`news.tv` from disk every
+//! `NEWS_RELOAD_INTERVAL_MINUTES` (default 5; `0` disables it) and swaps
+//! the result in atomically, so a `news_generator` sidecar's ongoing
+//! drip-feed writes actually reach traffic without restarting this
+//! process. The `Embedder` itself is loaded once and reused across
+//! reloads (see `NewsService::load_with_embedder`) — only the corpus and
+//! index are re-read.
 //!
 //! Unlike the sibling MCP servers in this demo family, this server applies
 //! NO per-caller data isolation — market news is public data. `called_by`
 //! and `roles` are still attached to every response for consistency.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use rmcp::transport::{
     streamable_http_server::{session::local::LocalSessionManager, StreamableHttpService},
@@ -34,6 +43,7 @@ use mcp_market_news::common::news_service::{NewsItem, NewsService};
 const BIND_ADDRESS: &str = "127.0.0.1:8002";
 const DEFAULT_JSONL_PATH: &str = "data/news.jsonl";
 const DEFAULT_TV_PATH: &str = "data/news.tv";
+const DEFAULT_RELOAD_INTERVAL_MINUTES: u64 = 5;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetRelevantNewsParams {
@@ -110,15 +120,21 @@ fn streamable_http_config() -> StreamableHttpServerConfig {
     cfg
 }
 
+/// The inner `Arc<NewsService>` is swapped out wholesale by the periodic
+/// reload task in `main` — readers clone it out from under the `RwLock`
+/// and never hold the lock across a query, so a slow query can't block a
+/// reload (or vice versa).
+type SharedNewsService = Arc<RwLock<Arc<NewsService>>>;
+
 #[derive(Clone)]
 pub struct MarketNewsServer {
     tool_router: ToolRouter<Self>,
-    service: Arc<NewsService>,
+    service: SharedNewsService,
 }
 
 #[tool_router]
 impl MarketNewsServer {
-    pub fn new(service: Arc<NewsService>) -> Self {
+    pub fn new(service: SharedNewsService) -> Self {
         Self {
             tool_router: Self::tool_router(),
             service,
@@ -149,9 +165,11 @@ impl MarketNewsServer {
     ) -> Result<CallToolResult, McpError> {
         let caller = extract_caller_from_parts(&parts);
 
-        let news: Vec<NewsItem> = match self
-            .service
-            .get_relevant_news(&params.tickers, &params.sectors)
+        // Snapshot the current corpus without holding the lock across the
+        // query — a reload can swap in a fresh `Arc<NewsService>` at any
+        // time, but this handler always sees a consistent one.
+        let service = self.service.read().unwrap().clone();
+        let news: Vec<NewsItem> = match service.get_relevant_news(&params.tickers, &params.sectors)
         {
             Ok(news) => news,
             Err(e) => {
@@ -210,8 +228,45 @@ async fn main() -> anyhow::Result<()> {
     let tv_path = std::env::var("NEWS_TV_PATH").unwrap_or_else(|_| DEFAULT_TV_PATH.to_string());
 
     tracing::info!(jsonl_path, tv_path, "Loading market news corpus and index");
-    let service = Arc::new(NewsService::load(&jsonl_path, &tv_path)?);
-    tracing::info!("Market news corpus and index loaded");
+    let initial = NewsService::load(&jsonl_path, &tv_path)?;
+    tracing::info!(
+        items = initial.item_count(),
+        "Market news corpus and index loaded"
+    );
+    let service: SharedNewsService = Arc::new(RwLock::new(Arc::new(initial)));
+
+    let reload_interval_minutes: u64 = std::env::var("NEWS_RELOAD_INTERVAL_MINUTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_RELOAD_INTERVAL_MINUTES);
+    if reload_interval_minutes > 0 {
+        let reload_service = service.clone();
+        let reload_jsonl_path = jsonl_path.clone();
+        let reload_tv_path = tv_path.clone();
+        tokio::spawn(async move {
+            let interval = std::time::Duration::from_secs(reload_interval_minutes * 60);
+            loop {
+                tokio::time::sleep(interval).await;
+                // Reuse the currently-loaded Embedder — reloading only
+                // needs to re-read the corpus/index, not the ~90MB model.
+                let embedder = reload_service.read().unwrap().embedder();
+                match NewsService::load_with_embedder(&reload_jsonl_path, &reload_tv_path, embedder)
+                {
+                    Ok(fresh) => {
+                        let items = fresh.item_count();
+                        *reload_service.write().unwrap() = Arc::new(fresh);
+                        tracing::info!(items, "Reloaded market news corpus");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to reload market news corpus, keeping previous data");
+                    }
+                }
+            }
+        });
+        tracing::info!(reload_interval_minutes, "Periodic corpus reload enabled");
+    } else {
+        tracing::info!("NEWS_RELOAD_INTERVAL_MINUTES=0 — periodic corpus reload disabled");
+    }
 
     let bind_address = std::env::var("BIND_ADDRESS").unwrap_or_else(|_| BIND_ADDRESS.to_string());
     tracing::info!(

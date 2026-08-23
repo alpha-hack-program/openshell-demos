@@ -200,12 +200,20 @@ fn to_news_items(generated: Vec<GeneratedNewsItem>) -> Vec<NewsItem> {
         .collect()
 }
 
+/// Writes to `{path}.tmp` then `rename()`s over `path` — `rename` is atomic
+/// on the same filesystem, so `mcp_server`'s periodic reload (see
+/// `mcp_server.rs`) never observes a partially-written file. Without this,
+/// a reload racing an in-progress write could read a truncated JSONL.
 fn write_jsonl(items: &[NewsItem], path: &str) -> anyhow::Result<()> {
     use std::io::Write;
-    let mut file = std::fs::File::create(path)?;
-    for item in items {
-        writeln!(file, "{}", serde_json::to_string(item)?)?;
+    let tmp_path = format!("{path}.tmp");
+    {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        for item in items {
+            writeln!(file, "{}", serde_json::to_string(item)?)?;
+        }
     }
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
@@ -222,9 +230,12 @@ fn build_and_write_index(
         index.add(&vector);
     }
 
+    // Same atomic write-then-rename as `write_jsonl` above, same reason.
+    let tmp_path = format!("{path}.tmp");
     index
-        .write(path)
-        .map_err(|e| anyhow::anyhow!("failed to write TurboVec index to {path}: {e}"))?;
+        .write(&tmp_path)
+        .map_err(|e| anyhow::anyhow!("failed to write TurboVec index to {tmp_path}: {e}"))?;
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 

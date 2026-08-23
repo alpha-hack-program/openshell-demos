@@ -173,9 +173,23 @@ generator by hand. Each cycle:
   rebuilds `data/news.tv` in place via the exact same
   `write_jsonl`/`build_and_write_index` path the one-shot mode uses —
   `mcp_server` doesn't need to know which mode produced its corpus.
+  Both writes are atomic (`{path}.tmp` + `rename()`), so a concurrent
+  reader (see "Live reload in mcp_server" below) never observes a
+  partially-written file.
 - Logs and skips a failed cycle (LLM call, parsing, or write error) rather
   than crashing — a transient failure shouldn't take down a process meant
   to run unattended for an entire demo session.
+
+**Live reload in `mcp_server`.** On its own, a `GENERATION_MODE=loop`
+process only updates the files on disk — `mcp_server` needs to actually
+notice. It does: a background task re-reads `news.jsonl`/`news.tv` every
+`NEWS_RELOAD_INTERVAL_MINUTES` (default 5, matching the generator's own
+default cadence; `0` disables it) and atomically swaps in the refreshed
+corpus, so a `news_generator` sidecar's drip-feed reaches live traffic
+without restarting `mcp_server`. The embedding model itself is loaded once
+and reused across reloads (`NewsService::load_with_embedder`) — a reload
+only re-reads the (tiny) corpus/index files, not the ~90MB model. See
+"Environment variables" below for `NEWS_RELOAD_INTERVAL_MINUTES`.
 
 Does **not** generate the two guaranteed seeded items (`NDFR` exact-ticker
 hit, generic-logistics semantic hit) — those are a one-shot-mode-only
@@ -242,6 +256,7 @@ generation time — not fabricated) and a fresh `uuid::Uuid::new_v4()` id.
 | `GENERATION_BATCH_SIZE` | `news_generator` | Loop mode only: items generated per cycle (default `5`) |
 | `NEWS_JSONL_PATH` | both | Path to the corpus (default `data/news.jsonl`) |
 | `NEWS_TV_PATH` | both | Path to the TurboVec index (default `data/news.tv`) |
+| `NEWS_RELOAD_INTERVAL_MINUTES` | `mcp_server` | Minutes between live corpus reloads from disk (default `5`); `0` disables reload entirely — see "Live reload in mcp_server" above |
 | `BIND_ADDRESS` | `mcp_server` | Listen address (default `127.0.0.1:8002`) |
 | `MCP_DISABLE_HOST_CHECK` | `mcp_server` | Set `true`/`1` for local/curl testing (disables the streamable-http allowed-hosts check) |
 | `MCP_STATEFUL_MODE` | `mcp_server` | Set `true`/`1` to require session initialization before tool calls |
@@ -450,10 +465,23 @@ changes across versions:
   no `DATABASE_URL`, no live Postgres `positions` table, and no
   `OPENAI_API_KEY`. The code compiles and its JSON-parsing logic is
   unit-tested against representative LLM output shapes (clean array, array
-  wrapped in prose, single object), but the live network calls themselves,
-  the loop's sleep/retry cycle, and its corpus-resume-on-restart behavior
-  are all unverified beyond compiling and passing `clippy`/`fmt`/`cargo
-  check`.
+  wrapped in prose, single object), but the live LLM/Postgres calls
+  themselves and the loop's sleep/retry cycle are unverified beyond
+  compiling and passing `clippy`/`fmt`/`cargo check`.
+- **`mcp_server`'s live reload actually verified end to end** (2026-08-23):
+  started `mcp_server` against the `tests/fixture.rs` corpus with
+  `NEWS_RELOAD_INTERVAL_MINUTES=1`, confirmed a query for a ticker not yet
+  in the corpus returned empty, appended a new item with that ticker
+  directly to `data/news.jsonl`/`data/news.tv` (atomically, same
+  write-then-rename approach `news_generator` uses) while the server kept
+  running, waited past the 1-minute mark, and confirmed both the
+  `"Reloaded market news corpus"` log line and a re-query now returning
+  the new item — all without restarting the process. This is real
+  verification of the reload mechanism itself (the `RwLock<Arc<NewsService>>`
+  swap, the atomic-write race-avoidance, `load_with_embedder` reusing the
+  already-loaded model); it does not substitute for verifying the
+  `news_generator` sidecar's own live LLM call, which remains unverified
+  per the bullet above.
 - **Containerfile actually built and run against the `hf-hub 0.4.3`-era
   code** (`podman`, invoked via `flatpak-spawn --host podman` — this
   sandbox is a toolbox container where the in-container `podman` is
