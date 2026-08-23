@@ -221,14 +221,34 @@ GENERATION_BATCH_SIZE=5 \
 
 > Generate 1 fictional financial news item explicitly mentioning ticker
 > `NDFR` (logistics sector) describing a clear high-impact event (tariff
-> change, operational incident, etc). Same format as above.
+> change, operational incident, etc). Fields: `headline` (one sentence),
+> `body` (2-3 sentences), `ticker` (must be "NDFR"), `sector` (must be
+> "logistics"), `sentiment` (positive/negative/neutral). Return only a
+> single JSON object with those five fields, no extra text, no markdown
+> formatting.
 
 **Batch 2, seeded item 2 — guaranteed semantic-only hit:**
 
 > Generate 1 fictional financial news item that does NOT mention any
 > ticker by name, but describes an event generically affecting the
 > "logistics" sector (e.g. a port regulatory change). This item tests
-> semantic filtering, not exact ticker matching.
+> semantic filtering, not exact ticker matching. Fields: `headline` (one
+> sentence), `body` (2-3 sentences), `ticker` (must be null), `sector`
+> (must be "logistics"), `sentiment` (positive/negative/neutral). Return
+> only a single JSON object with those five fields, no extra text, no
+> markdown formatting.
+
+Both seed prompts were originally phrased as "same format as above" /
+with no format instruction at all, relying on conversational continuity
+with batch 1's prompt — but each `call_openai` request is a separate,
+stateless API call with no shared history, so the model never actually
+saw "above". This surfaced in production (2026-08-23): DeepSeek
+(`deepseek-v4-flash`) returned a markdown-formatted news article for the
+seed-1 request instead of JSON, which crashed `news_generator` via
+`parse_generated_items`'s error path — losing the whole run, including
+the 35 already-successful batch-1 items, since the process exits on the
+first parse failure. Fixed by making both seed prompts fully
+self-contained, matching batch 1's explicit field/format instructions.
 
 **Continuous mode (`GENERATION_MODE=loop`) drip-feed prompt** — same shape
 as batch 1, `{count}` filled in from `GENERATION_BATCH_SIZE`:

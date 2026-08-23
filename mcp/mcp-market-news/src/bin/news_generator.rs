@@ -79,11 +79,19 @@ fn topup_prompt(count: usize, tickers_and_sectors: &str) -> String {
 
 /// Seeded item #1 — guaranteed exact-ticker hit. Reproduced verbatim in
 /// README.md.
-const SEED_PROMPT_1: &str = "Generate 1 fictional financial news item explicitly mentioning ticker `NDFR` (logistics sector) describing a clear high-impact event (tariff change, operational incident, etc). Same format as above.";
+///
+/// Self-contained on purpose: each `call_openai` request is a separate,
+/// stateless API call with no shared conversation history, so an earlier
+/// version of this prompt saying "same format as above" referred to
+/// nothing the model could actually see — observed in production (2026-08-23)
+/// causing DeepSeek to return a markdown news article instead of JSON,
+/// which crashed `news_generator` via `parse_generated_items`'s error path.
+const SEED_PROMPT_1: &str = "Generate 1 fictional financial news item explicitly mentioning ticker `NDFR` (logistics sector) describing a clear high-impact event (tariff change, operational incident, etc). Fields: `headline` (one sentence), `body` (2-3 sentences), `ticker` (must be \"NDFR\"), `sector` (must be \"logistics\"), `sentiment` (positive/negative/neutral). Return only a single JSON object with those five fields, no extra text, no markdown formatting.";
 
 /// Seeded item #2 — guaranteed semantic-only hit (no ticker mentioned).
-/// Reproduced verbatim in README.md.
-const SEED_PROMPT_2: &str = "Generate 1 fictional financial news item that does NOT mention any ticker by name, but describes an event generically affecting the \"logistics\" sector (e.g. a port regulatory change). This item tests semantic filtering, not exact ticker matching.";
+/// Reproduced verbatim in README.md. Self-contained for the same reason as
+/// `SEED_PROMPT_1` above.
+const SEED_PROMPT_2: &str = "Generate 1 fictional financial news item that does NOT mention any ticker by name, but describes an event generically affecting the \"logistics\" sector (e.g. a port regulatory change). This item tests semantic filtering, not exact ticker matching. Fields: `headline` (one sentence), `body` (2-3 sentences), `ticker` (must be null), `sector` (must be \"logistics\"), `sentiment` (positive/negative/neutral). Return only a single JSON object with those five fields, no extra text, no markdown formatting.";
 
 /// Reads distinct `(ticker, sector)` pairs from the shared portfolio
 /// database and renders them as a comma-separated list for the batch-1
