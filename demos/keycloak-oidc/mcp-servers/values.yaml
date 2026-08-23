@@ -70,6 +70,30 @@ postgres:
   password: "mcpdemo-demo-password"
   resources: {}
 
+# Config for the news_generator initContainer + GENERATION_MODE=loop
+# sidecar that back mcp-market-news (see that server's `newsGenerator:
+# true` flag below, and templates/deployment.yaml for the actual
+# containers/PVC). Kept at the TOP level, not inside `servers:`, so
+# `openaiApiKey` can be safely overridden with a plain `--set
+# newsGenerator.openaiApiKey=...` from 06-deploy-mcp-servers.sh — putting
+# it inside a `servers[N]` list entry would hit the documented `--set`
+# list-merge gotcha above.
+newsGenerator:
+  # Secret — intentionally left empty here, never commit a real key.
+  # 06-deploy-mcp-servers.sh passes it via --set, sourced from this demo's
+  # own .env (OPENAI_API_KEY), the same way keycloak.issuer above is
+  # derived from KEYCLOAK_HOST.
+  openaiApiKey: ""
+  # Reuses this demo's existing BYO-LLM DeepSeek endpoint (see
+  # demos/keycloak-oidc/.env and the README's "Codex + BYO LLM" recipe) —
+  # not secret, safe to default here; override via --set if you want a
+  # different provider/model.
+  openaiBaseUrl: "https://api.deepseek.com"
+  openaiModel: "deepseek-v4-flash"
+  intervalMinutes: 5
+  batchSize: 5
+  pvcSize: "1Gi"
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
@@ -145,20 +169,27 @@ servers:
     database: true
     resources: {}
   # mcp-market-news's mcp_server binary does NOT read DATABASE_URL at
-  # request time — it serves from data/news.jsonl + data/news.tv. Tag
-  # "latest" previously crashlooped (`Error: No such file or directory` in
-  # NewsService::load — those two files didn't exist in the image and
-  # nothing seeded them). 0.1.2 is a rebuilt image meant to fix that.
-  # Pinned (not "latest") for the same IfNotPresent-staleness reason as
-  # mcp-portfolio/mcp-crm-calendar above — see that comment.
+  # request time — it serves from data/news.jsonl + data/news.tv. Tags
+  # 0.1.2/0.1.3 crashlooped (`Error: No such file or directory` in
+  # NewsService::load) on EVERY tag, including these — the image never
+  # contained those two files and nothing in this chart ever created
+  # them; bumping the tag alone could not fix it. The actual fix is
+  # `newsGenerator: true` below: a PVC + initContainer (runs
+  # news_generator once, blocks pod startup until the corpus exists) + a
+  # GENERATION_MODE=loop sidecar (keeps it fresh) + mcp_server's own
+  # periodic reload (NEWS_RELOAD_INTERVAL_MINUTES, added in the same
+  # release as this fix) picking up the sidecar's writes without a
+  # restart. See templates/deployment.yaml and the top-level
+  # `newsGenerator:` block below for the actual wiring.
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "0.1.2"
+      tag: "0.1.4"     # [VERIFY] not yet built/pushed — see newsGenerator comment below
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
     requiredRole: "mcp-market-news-user"
     statefulMode: false
     database: false
+    newsGenerator: true
     resources: {}

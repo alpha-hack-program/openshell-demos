@@ -18,14 +18,24 @@ fi
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 : "${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
+# Backs mcp-market-news's news_generator initContainer/sidecar (see
+# mcp-servers/values.yaml's top-level newsGenerator: block) — passed via
+# --set on a top-level values key, never baked into values.yaml or passed
+# as servers[N].something, per that file's documented --set list gotcha.
+: "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env (used by mcp-market-news news_generator)}"
+
+HELM_SET_ARGS=(
+  --set "keycloak.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
+  --set "newsGenerator.openaiApiKey=${OPENAI_API_KEY}"
+)
 
 helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
   --namespace "$OPENSHELL_NAMESPACE" \
-  --set "keycloak.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
+  "${HELM_SET_ARGS[@]}"
 
 mapfile -t SERVERS < <(
   helm template mcp-servers "$DEMO_DIR/mcp-servers" \
-    --set "keycloak.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+    "${HELM_SET_ARGS[@]}" \
     --show-only templates/serviceaccount.yaml \
     | awk '/^  name: /{print $2}'
 )
