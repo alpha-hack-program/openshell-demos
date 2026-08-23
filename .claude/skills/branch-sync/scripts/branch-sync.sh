@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # Sync current main into a named branch (e.g. a version branch).
-# Usage: branch-sync.sh <branch-name> [--push] [--create]
+# Usage: branch-sync.sh <branch-name> [--no-push] [--create]
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <branch-name> [--push] [--create]" >&2
-  echo "  --push    push the branch to origin after a clean merge" >&2
-  echo "  --create  create <branch-name> from main if it doesn't exist yet" >&2
+  echo "Usage: $0 <branch-name> [--no-push] [--create]" >&2
+  echo "  --no-push  don't push the branch to origin after a clean merge (default: push)" >&2
+  echo "  --create   create <branch-name> from main if it doesn't exist yet" >&2
   exit 1
 }
 
 [ $# -ge 1 ] || usage
 
 BRANCH="$1"; shift
-PUSH=0
+PUSH=1
 CREATE=0
 for arg in "$@"; do
   case "$arg" in
-    --push) PUSH=1 ;;
+    --no-push) PUSH=0 ;;
     --create) CREATE=1 ;;
     *) usage ;;
   esac
@@ -64,7 +64,7 @@ if [ "$PUSH" -eq 1 ]; then
   git push -q origin "$BRANCH"
   PUSH_RESULT="pushed to origin/$BRANCH"
 else
-  PUSH_RESULT="not pushed (rerun with --push to push)"
+  PUSH_RESULT="not pushed (--no-push)"
 fi
 
 echo "OK: '$BRANCH' synced with main ($MERGE_RESULT); $PUSH_RESULT"
