@@ -60,10 +60,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 candle-core = "0.11"
 candle-nn = "0.11"
 candle-transformers = "0.11"
-# default-features=false + "ureq" avoids hf-hub's default "native-tls"
-# feature (which otherwise pulls in openssl-sys / a system OpenSSL). ureq's
-# own default features already include a pure-Rust (rustls) TLS backend.
-hf-hub = { version = "0.4.3", default-features = false, features = ["ureq"] }
+# hf-hub 1.0 is an async-first rewrite (HFClient); "blocking" pulls in the
+# synchronous HFClientSync/HFRepositorySync surface we actually use, and
+# "rustls-tls" (-> reqwest/rustls) avoids requiring a system OpenSSL install,
+# same rationale as the reqwest dependency above.
+hf-hub = { version = "1.0", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
 tokenizers = "0.23"
 
 # --- Vector index ---

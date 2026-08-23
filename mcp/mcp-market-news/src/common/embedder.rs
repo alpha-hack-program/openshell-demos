@@ -32,28 +32,32 @@ impl Embedder {
     pub fn load() -> anyhow::Result<Self> {
         let device = Device::Cpu;
 
-        // NOTE: `hf_hub::api::sync::Api::new()` calls `ApiBuilder::new()`,
-        // which builds its cache from `Cache::default()` — i.e. always
-        // `dirs::home_dir()/.cache/huggingface`, completely ignoring
-        // `HF_HOME`. This was confirmed the hard way: it "worked" in a
-        // plain `cargo run` because `$HOME` happened to already have the
-        // model cached from an earlier run, and only failed loudly once
-        // this ran as a non-root container user whose `$HOME`
-        // (`/home/mcpserver`) doesn't exist and isn't writable — the
-        // `HF_HOME` pointing at the mounted PVC was silently never used.
-        // `ApiBuilder::from_env()` is the one that actually reads
-        // `HF_HOME` (see `Cache::from_env()` in the hf-hub 0.4.3 source).
-        let api = hf_hub::api::sync::ApiBuilder::from_env().build()?;
-        let repo = api.model(MODEL_ID.to_string());
+        let (owner, name) = MODEL_ID
+            .split_once('/')
+            .expect("MODEL_ID must be of the form \"owner/name\"");
+        let client = hf_hub::HFClientSync::new()?;
+        let repo = client.model(owner, name);
 
-        let config_path = repo.get("config.json")?;
+        let config_path = repo
+            .download_file()
+            .filename("config.json")
+            .send()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let config: BertConfig = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
 
-        let tokenizer_path = repo.get("tokenizer.json")?;
+        let tokenizer_path = repo
+            .download_file()
+            .filename("tokenizer.json")
+            .send()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let tokenizer =
             Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        let weights_path = repo.get("model.safetensors")?;
+        let weights_path = repo
+            .download_file()
+            .filename("model.safetensors")
+            .send()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         // Safety: we trust the file we just fetched from the Hub cache; this
         // is the standard candle pattern for loading safetensors weights.
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, &device)? };

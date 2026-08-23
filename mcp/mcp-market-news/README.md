@@ -260,8 +260,8 @@ With no `Authorization` header, `called_by` is `"unknown"` and `roles` is
 See `Cargo.toml` for pinned dependency versions. Notably:
 
 - `rmcp = "1.7"` — same major version as the reference repo.
-- `hf-hub = "0.4.3"` (not the current `1.0.0`, which is a full API rewrite
-  — see "What was verified" below).
+- `hf-hub = "1.0"` — migrated off the `0.4.3` stopgap pin; see "What was
+  verified" below for what the migration actually involved.
 - `reqwest`/`hf-hub` are configured for **rustls**, not the default
   native-tls/openssl backend, so building doesn't require a system OpenSSL
   install (only a C++ compiler, for `tokenizers`' `esaxx-rs`).
@@ -303,10 +303,65 @@ changes across versions:
 - **`candle-transformers`/`candle-nn` 0.11.0**: `BertModel::load`,
   `Config`, `DTYPE`, and `VarBuilder::from_mmaped_safetensors` signatures
   read directly from source — matched the spec's illustrative snippet.
-- **`hf-hub`**: the current `1.0.0` release is a *complete rewrite*
-  (`HFClient`-based, async-first) with no `api::sync::Api` module at all —
-  incompatible with the spec's snippet. Pinned `0.4.3` instead, the last
-  version with the classic sync `Api`/`ApiRepo` surface the spec assumes.
+- **`hf-hub` 1.0.0 migration (2026-08-23)**: this project previously pinned
+  `0.4.3` as a stopgap because `1.0.0` is a *complete rewrite* (`HFClient`-
+  based, async-first) with no `api::sync::Api` module at all. It has since
+  been migrated to `1.0` proper, confirmed by actually building and
+  running against it, not just reading docs.rs:
+  - Cargo.toml: `default-features = false, features = ["ureq"]` (the
+    `ureq` feature doesn't exist in 1.0 — it hard-depends on `reqwest`
+    now) became `features = ["blocking", "rustls-tls"]`. `blocking` is
+    required to get any synchronous API at all; `rustls-tls` maps to
+    `reqwest/rustls`, same rationale as this project's own `reqwest`
+    dependency above.
+  - `src/common/embedder.rs`: `hf_hub::api::sync::Api::new()` /
+    `api.model("org/name")` / `repo.get("file")` became
+    `hf_hub::HFClientSync::new()` / `client.model("org", "name")` (owner
+    and name are now two separate arguments, not one slash-joined string)
+    / `repo.download_file().filename("file").send()` (builder pattern).
+    `.send()`'s `HFResult<PathBuf>` doesn't implement `std::error::Error`
+    in a way `?` composes with directly against `anyhow::Result`, so each
+    call is `.map_err(|e| anyhow::anyhow!(e.to_string()))?`'d, same
+    pattern already used for `tokenizers`' error type in this file.
+  - The planned diff needed **no changes** beyond that — no additional
+    compiler errors turned up once the above was in place.
+    `cargo build --release --bins`, `cargo check`, `cargo clippy --bins
+    --tests -- -D warnings`, and `cargo fmt --check` all pass clean.
+  - **`hf-xet` needed nothing extra.** It, `bon`, `globset`,
+    `tokio-retry`, `sha2`, and `hyper` all pulled in and built fine with
+    only the `gcc-c++` this project already required for `tokenizers`'
+    `esaxx-rs` — no new system packages, on the host. The container image
+    has **not** been rebuilt against this heavier dependency tree yet —
+    see "Open risks".
+  - **The nested-tokio-runtime claim holds.** `Embedder::load()` is called
+    synchronously from inside `#[tokio::main] async fn main()` in
+    `mcp_server.rs`. `HFClientSync::download_file().send()` — which
+    internally runs `hf-xet`'s transfer machinery on its own background
+    thread/runtime — was called from exactly that context (via
+    `tests/fixture.rs` and via `mcp_server` actually starting and serving
+    requests) without a "cannot start a runtime from within a runtime"
+    panic or any restructuring of `main()`.
+  - **Verified against a real Hugging Face download, twice, on the host**:
+    once against a pre-existing local HF cache (fast, cache-hit path), and
+    once with `HF_HOME` pointed at an empty temp directory to force a
+    genuine fresh download (~88MB landed in `<HF_HOME>/hub/...` plus an
+    `<HF_HOME>/xet/` staging directory used by `hf-xet`'s chunked
+    transfer) — both the `#[ignore]`d unit test in `embedder.rs` and
+    `tests/fixture.rs` passed in both cases. This also confirms
+    `HFClientSync::new()` honors `HF_HOME` correctly out of the box —
+    superseding the `ApiBuilder::from_env()` workaround the 0.4.3-era
+    code needed (see the retired bug note below).
+  - `cargo test` (12 unit tests, none touching `hf-hub`) still passes
+    unchanged.
+  - `mcp_server` was started on the host (`cargo run --release --bin
+    mcp_server`) against the corpus `tests/fixture.rs` built, and
+    re-queried live with the three `curl` cases from "Testing"/"What was
+    verified" above (exact ticker match, semantic-only match, no-match) —
+    all three returned the same expected shapes as before the migration.
+  - `cargo audit` is unaffected by this change (one pre-existing,
+    unrelated `paste` "unmaintained" advisory warning, plus the
+    already-documented `RUSTSEC-2023-0071` ignore in
+    `.cargo/audit.toml` — neither is new from this migration).
 - **Anthropic model id and API shape**: confirmed via the `claude-api`
   skill that `claude-sonnet-4-6` is a current, real model id, and that
   Rust has no official Anthropic SDK (raw HTTP against `POST /v1/messages`
@@ -329,47 +384,58 @@ changes across versions:
   compiles and its JSON-parsing logic is unit-tested against
   representative LLM output shapes (clean array, array wrapped in prose,
   single object), but the live network calls themselves are unverified.
-- **Containerfile actually built and run** (`podman`, invoked via
-  `flatpak-spawn --host podman` — this sandbox is a toolbox container
-  where the in-container `podman` is non-functional, but the *host*
-  podman works fine through `flatpak-spawn`): `podman build` succeeded
-  end to end (245MB final image), and `podman run` with `data/` bind-
-  mounted (`:Z`) actually started the server as non-root uid 1001
-  (confirmed via `podman exec ... id`) and served real `curl` requests
-  over `/mcp` — same three cases as the host-run test above, all correct.
-  Two real, container-specific bugs were caught this way and fixed
-  before considering it done (see below) — this is exactly why "the code
+- **Containerfile actually built and run against the `hf-hub 0.4.3`-era
+  code** (`podman`, invoked via `flatpak-spawn --host podman` — this
+  sandbox is a toolbox container where the in-container `podman` is
+  non-functional, but the *host* podman works fine through
+  `flatpak-spawn`): `podman build` succeeded end to end (245MB final
+  image), and `podman run` with `data/` bind-mounted (`:Z`) actually
+  started the server as non-root uid 1001 (confirmed via `podman exec
+  ... id`) and served real `curl` requests over `/mcp` — same three
+  cases as the host-run test above, all correct. Two real,
+  container-specific bugs were caught this way and fixed before
+  considering it done (see below) — this is exactly why "the code
   compiles" and "it actually runs as intended" are different claims.
-- **Real bug found and fixed: `Embedder::load()` ignored `HF_HOME`
-  entirely.** `hf_hub::api::sync::Api::new()` calls `ApiBuilder::new()`,
-  which builds its cache from `Cache::default()` (`dirs::home_dir()`),
-  **not** `Cache::from_env()` — `HF_HOME` is only honored by
-  `ApiBuilder::from_env()`, a different constructor. This "worked" under
-  plain `cargo run`/`cargo test` on the host purely by accident, because
-  `$HOME` already had the model cached there from a previous run. It
-  failed loudly the moment this actually ran as the container's non-root
-  user, whose `$HOME` (`/home/mcpserver`) doesn't exist and isn't
-  writable: `Permission denied (os error 13)` out of `Embedder::load`,
-  with the `HF_HOME` env var pointing at the mounted PVC being silently
-  ignored the whole time. Root-caused with a minimal reproduction binary
-  built into the same UBI9 runtime image (isolating hf-hub's own cache
-  resolution from every other moving part), confirmed on docs.rs source
-  that `ApiBuilder::from_env()` is the constructor that actually reads
-  `Cache::from_env()`/`HF_HOME`, fixed in `src/common/embedder.rs`, then
-  re-verified with a full rebuild + container run + curl round-trip.
-  Without the container test, this bug would have shipped invisibly —
-  `cargo test`/`cargo run` on a normal dev machine can't surface it.
+  **This container verification predates the `hf-hub` 1.0 migration and
+  has not been re-run since** — the migration was only verified on the
+  host (see above). Given `hf-hub` 1.0 pulls in a noticeably heavier
+  dependency tree (`hf-xet`, `bon`, `globset`, `tokio-retry`, `sha2`,
+  `hyper`), re-running the full `podman build` + `run` + `curl` cycle
+  before shipping this is the single most important follow-up — see
+  "Open risks".
+- **Retired bug (pre-migration, `hf-hub 0.4.3`): `Embedder::load()`
+  ignored `HF_HOME` entirely.** `hf_hub::api::sync::Api::new()` called
+  `ApiBuilder::new()`, which built its cache from `Cache::default()`
+  (`dirs::home_dir()`), **not** `Cache::from_env()` — `HF_HOME` was only
+  honored by `ApiBuilder::from_env()`, a different constructor. This
+  "worked" under plain `cargo run`/`cargo test` on the host purely by
+  accident, because `$HOME` already had the model cached there from a
+  previous run. It failed loudly the moment this ran as the container's
+  non-root user, whose `$HOME` (`/home/mcpserver`) doesn't exist and
+  isn't writable: `Permission denied (os error 13)` out of
+  `Embedder::load`, with the `HF_HOME` env var pointing at the mounted
+  PVC being silently ignored the whole time. Root-caused with a minimal
+  reproduction binary built into the same UBI9 runtime image, fixed at
+  the time by switching to `ApiBuilder::from_env()`, then re-verified
+  with a full rebuild + container run + curl round-trip. **This code
+  path no longer exists** — the `hf-hub` 1.0 migration replaced it with
+  `HFClientSync::new()`, independently confirmed above to honor
+  `HF_HOME` correctly via a real cold-cache download test. Kept here as
+  a record of why the container test mattered: without it, this class of
+  bug would have shipped invisibly, since `cargo test`/`cargo run` on a
+  normal dev machine can't surface a `$HOME`-doesn't-exist condition.
 - **Real bug found and fixed: the `HEALTHCHECK` would have falsely
   failed.** Discovered by actually curling the running server: `GET
   /mcp` returns `405` (it's a POST-only JSON-RPC endpoint), which `curl
   -f` treats as failure. Fixed by dropping `-f` so the healthcheck only
-  checks TCP-level reachability. (Also confirmed, by inspecting the
-  build log, that `ubi9-minimal`'s default `ca-certificates` install
-  does ship a working `curl` — `curl-minimal` — so no extra package was
-  needed for this to work; `podman` itself separately warned that
-  `HEALTHCHECK` is ignored for OCI-format images and needs `--format
-  docker` to actually take effect, which is a `podman build`-time
-  concern, not a Containerfile bug.)
+  checks TCP-level reachability. Still current — the migration didn't
+  touch the Containerfile. (Also confirmed, by inspecting the build log,
+  that `ubi9-minimal`'s default `ca-certificates` install does ship a
+  working `curl` — `curl-minimal` — so no extra package was needed for
+  this to work; `podman` itself separately warned that `HEALTHCHECK` is
+  ignored for OCI-format images and needs `--format docker` to actually
+  take effect, which is a `podman build`-time concern, not a
+  Containerfile bug.)
 
 ## Open risks
 
@@ -392,6 +458,17 @@ changes across versions:
   separate, concurrent session this project intentionally did not touch).
   If that schema differs, `load_tickers_and_sectors` in
   `src/bin/news_generator.rs` will need adjusting.
+- **Container not re-verified against `hf-hub 1.0`.** The `podman build`
+  + `run` + `curl` cycle documented above was run against the `0.4.3`-era
+  code; the `1.0` migration was only verified on the host. `hf-hub 1.0`
+  pulls in a noticeably heavier dependency tree (`hf-xet`, `bon`,
+  `globset`, `tokio-retry`, `sha2`, `hyper`) — worth specifically
+  checking that `hf-xet`'s transfer machinery (which spins up its own
+  multi-threaded runtime for Xet uploads/downloads) behaves the same
+  under the container's non-root user and restricted `$HOME` as it did
+  on the host, and that the final image size hasn't grown enough to
+  matter. Re-run the full container cycle before considering this demo
+  ready.
 - **`podman build --format docker` not yet tried.** The image builds and
   runs correctly, but `podman` warned that `HEALTHCHECK` is ignored for
   the default OCI image format. If the `HEALTHCHECK` needs to actually
@@ -399,13 +476,6 @@ changes across versions:
   Containerfile), build with `--format docker` or rely on a Kubernetes
   liveness/readiness probe instead, which is the more idiomatic choice
   for this demo's actual OpenShift target anyway.
-- **The `HF_HOME`-ignored bug class may have siblings.** Given that one
-  env var was silently ignored by a constructor that looks like it
-  should honor it, it's worth double-checking whether any other
-  env-var-driven config in this project (or the sibling MCP servers, if
-  they share this pattern) has a similar "looks configured, isn't
-  actually read" gap — this was only caught here because the container
-  test happened to exercise a `$HOME` that doesn't exist.
 
 ## References
 
