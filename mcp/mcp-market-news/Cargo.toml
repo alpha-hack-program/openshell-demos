@@ -1,6 +1,6 @@
 [package]
 name = "mcp-market-news"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "MCP server exposing public market-news retrieval, filtered by ticker/sector and semantic similarity"
 license = "MIT"
