@@ -1,4 +1,5 @@
-.PHONY: build test lint fmt fmt-check audit check ci run image-build clean help
+.PHONY: build test lint fmt fmt-check audit check ci run image-build clean help \
+        release-patch release-minor release-major release-dry-run
 
 build:
 	cargo build --release --bin mcp_server
@@ -31,6 +32,24 @@ image-build:
 clean:
 	cargo clean
 
+# Release management with cargo-release. Tags as mcp-portfolio-vX.Y.Z and
+# pushes, which triggers .github/workflows/release-mcp-portfolio.yml.
+release-patch:
+	@echo "Creating patch release (x.y.Z+1)..."
+	cargo release patch --execute
+
+release-minor:
+	@echo "Creating minor release (x.Y+1.0)..."
+	cargo release minor --execute
+
+release-major:
+	@echo "Creating major release (X+1.0.0)..."
+	cargo release major --execute
+
+release-dry-run:
+	@echo "Dry run - showing what would happen..."
+	cargo release patch --dry-run
+
 help:
 	@echo "Usage:"
 	@echo "  make build        - Build the mcp_server release binary"
@@ -44,3 +63,9 @@ help:
 	@echo "  make run          - Build and run mcp_server locally"
 	@echo "  make image-build  - Build the container image"
 	@echo "  make clean        - Remove build artifacts"
+	@echo ""
+	@echo "Release Commands (uses cargo-release):"
+	@echo "  make release-patch   - Create patch release (0.1.0 -> 0.1.1)"
+	@echo "  make release-minor   - Create minor release (0.1.0 -> 0.2.0)"
+	@echo "  make release-major   - Create major release (0.1.0 -> 1.0.0)"
+	@echo "  make release-dry-run - Show what release-patch would do"
