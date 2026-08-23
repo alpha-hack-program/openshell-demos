@@ -10,6 +10,29 @@ use common::portfolio_service::PortfolioService;
 
 const BIND_ADDRESS: &str = "127.0.0.1:8001";
 
+/// Schema is applied once for the whole demo by the mcp-servers Helm chart's
+/// post-install/post-upgrade hook Job (see
+/// demos/keycloak-oidc/mcp-servers/templates/schema-init-job.yaml), not by
+/// this binary. This just fails fast with a clear message if that hook
+/// hasn't run yet, instead of surfacing a confusing "relation does not
+/// exist" error from the first tool call.
+async fn assert_schema_ready(pool: &sqlx::PgPool, tables: &[&str]) -> anyhow::Result<()> {
+    for table in tables {
+        let exists: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(format!("public.{table}"))
+            .fetch_one(pool)
+            .await?;
+        if exists.is_none() {
+            anyhow::bail!(
+                "required table `{table}` not found in the database — has the \
+                 mcp-servers-schema-init Helm hook run? (`helm upgrade --install` applies it \
+                 automatically)"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn streamable_http_config() -> StreamableHttpServerConfig {
     let disable_check = std::env::var("MCP_DISABLE_HOST_CHECK")
         .map(|v| {
@@ -72,8 +95,8 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(10)
         .connect(&database_url)
         .await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
-    tracing::info!("esquema de base de datos verificado");
+    assert_schema_ready(&pool, &["clients", "positions", "performance_snapshots"]).await?;
+    tracing::info!("database schema verified");
 
     let bind_address = std::env::var("BIND_ADDRESS").unwrap_or_else(|_| BIND_ADDRESS.to_string());
     tracing::info!(

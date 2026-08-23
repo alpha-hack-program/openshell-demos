@@ -1,0 +1,78 @@
+{{- $postgres := .Values.postgres -}}
+{{- $needed := false -}}
+{{- range .Values.servers -}}
+  {{- if .database -}}{{- $needed = true -}}{{- end -}}
+{{- end -}}
+{{- if $needed }}
+# Runs once per `helm install`/`upgrade`, after mcp-postgres (a normal,
+# non-hook resource in postgres.yaml) has been submitted to the API server.
+# post-install/post-upgrade (not pre-*) is deliberate: a pre-install hook
+# would fire before postgres.yaml's Deployment even exists. Since Postgres
+# might not be Ready yet when this hook starts, the container itself
+# retries pg_isready before applying anything — see the wait loop below.
+#
+# mcp-portfolio/mcp-crm-calendar pods are normal resources too, so they
+# start in parallel with this Job and will fail their own fail-fast schema
+# check a few times (CrashLoopBackOff) until this Job finishes — expected,
+# self-healing within Kubernetes' normal restart backoff, not a bug.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mcp-servers-schema-init
+  labels:
+    app.kubernetes.io/name: mcp-servers-schema-init
+    app.kubernetes.io/part-of: mcp-servers
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # Jobs are immutable — without this, the second `helm upgrade --install`
+    # in the demo fails outright trying to recreate the same Job name.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-servers-schema-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: schema-init
+          image: "{{ $postgres.image.repository }}:{{ $postgres.image.tag }}"
+          imagePullPolicy: {{ $postgres.image.pullPolicy | default "IfNotPresent" }}
+          env:
+            - name: PGHOST
+              value: "mcp-postgres"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ $postgres.database | quote }}
+            - name: PGUSER
+              value: {{ $postgres.user | quote }}
+            - name: PGPASSWORD
+              value: {{ $postgres.password | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              echo "Waiting for mcp-postgres to accept connections..."
+              for i in $(seq 1 30); do
+                if pg_isready -q; then break; fi
+                echo "  not ready yet ($i/30), retrying in 4s"
+                sleep 4
+              done
+              pg_isready
+              echo "Applying schema from /sql/0001_init.sql..."
+              psql -v ON_ERROR_STOP=1 -f /sql/0001_init.sql
+              echo "Applying seed from /sql/0002_meetings_seed.sql..."
+              psql -v ON_ERROR_STOP=1 -f /sql/0002_meetings_seed.sql
+              echo "Schema and seed data applied."
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            name: mcp-servers-schema-sql
+{{- end }}

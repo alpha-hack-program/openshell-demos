@@ -40,9 +40,8 @@ COPY Cargo.* .
 # Fetch dependencies
 RUN cargo fetch
 
-# Copy the source code and migrations
+# Copy the source code
 COPY src/ ./src
-COPY migrations/ ./migrations
 
 # Build the application
 RUN cargo build --release --bin mcp_server
@@ -92,8 +91,9 @@ RUN useradd -r -u 1001 -g 0 -s /sbin/nologin \
 # Set working directory
 WORKDIR /app
 
-# Copy the binary from builder stage. Migrations are embedded at compile
-# time by the sqlx::migrate! macro, so nothing else is needed at runtime.
+# Copy the binary from builder stage. Schema is applied once for the whole
+# demo by the mcp-servers Helm chart's schema-init hook Job, not by this
+# binary — nothing else is needed at runtime.
 COPY --from=builder /build/target/release/mcp_server /app/mcp_server
 
 # Set permissions

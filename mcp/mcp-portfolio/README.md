@@ -51,10 +51,17 @@ ocurrió. Cada intento de acceso fuera del libro se registra con
 ## Base de datos
 
 El esquema (compartido con los otros tres MCP de la demo: market-news,
-kyc-compliance, crm-calendar) vive en `migrations/0001_init.sql` y se aplica
-automáticamente al arrancar con `sqlx::migrate!`. Usa `CREATE TABLE IF NOT
-EXISTS` y `ON CONFLICT ... DO NOTHING`, así que es seguro que cualquiera de
-los cuatro servicios sea el primero en arrancar.
+kyc-compliance, crm-calendar) ya **no** lo aplica este binario. Vive en
+`demos/keycloak-oidc/mcp-servers/templates/schema-init-configmap.yaml` y lo
+aplica una única vez por `helm install`/`upgrade` el Job de
+`schema-init-job.yaml` (hook `post-install,post-upgrade`). Al arrancar, este
+servicio solo comprueba que `clients`, `positions` y `performance_snapshots`
+existen — si no, falla rápido con un mensaje claro en vez de fallar de forma
+confusa en la primera llamada a una herramienta. Ese cambio elimina el
+problema que tenía el diseño anterior (cada servicio con su propia copia de
+`migrations/0001_init.sql` ejecutada vía `sqlx::migrate!`): si dos copias
+divergían aunque fuera en un byte, `sqlx` rechazaba el checksum de la que
+arrancara segunda.
 
 `mcp-portfolio` solo lee de `bankers`, `clients`, `positions` y
 `performance_snapshots`.

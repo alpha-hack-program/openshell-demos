@@ -1,5 +1,6 @@
 {{- $keycloak := .Values.keycloak -}}
 {{- $envoy := .Values.envoy -}}
+{{- $postgres := .Values.postgres -}}
 {{- range .Values.servers }}
 apiVersion: apps/v1
 kind: Deployment
@@ -54,16 +55,26 @@ spec:
               value: {{ $keycloak.clientId | quote }}
             - name: MCP_REQUIRED_ROLE
               value: {{ .requiredRole | quote }}
-            # No BIND_ADDRESS set here deliberately — the app then defaults
-            # to its own 127.0.0.1:<internalPort> binding, which is exactly
-            # what we want now that Envoy, not the app, is the externally
-            # reachable, authenticating entrypoint in this pod.
+            # Explicit loopback bind: some images (e.g. this repo's own
+            # mcp-portfolio/mcp-crm-calendar/mcp-market-news, whose
+            # Containerfiles bake ENV BIND_ADDRESS=0.0.0.0:<port>) do NOT
+            # default to loopback on their own, which would make the app
+            # reachable on the pod IP directly, bypassing Envoy's jwt_authn
+            # + rbac checks entirely. Setting it here overrides any such
+            # image default and keeps the app loopback-only regardless.
+            - name: BIND_ADDRESS
+              value: "127.0.0.1:{{ .internalPort }}"
             - name: MCP_DISABLE_HOST_CHECK
               value: "true"
             - name: MCP_STATEFUL_MODE
               value: {{ .statefulMode | default false | quote }}
             - name: RUST_LOG
               value: "debug"
+            {{- if .database }}
+            # Shared postgres — see values.yaml's postgres: block comment.
+            - name: DATABASE_URL
+              value: "postgres://{{ $postgres.user }}:{{ $postgres.password }}@mcp-postgres:5432/{{ $postgres.database }}"
+            {{- end }}
           resources:
             {{- toYaml (.resources | default dict) | nindent 12 }}
       volumes:

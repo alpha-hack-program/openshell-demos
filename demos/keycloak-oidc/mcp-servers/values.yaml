@@ -30,6 +30,46 @@ envoy:
   # Fine for evaluation, never for production.
   insecureSkipVerifyJwks: true
 
+# Shared PostgreSQL instance for the mcp-portfolio / mcp-crm-calendar /
+# mcp-market-news family. Schema + seed data are NOT applied by any of those
+# services anymore — they're owned once, centrally, by
+# templates/schema-init-configmap.yaml + templates/schema-init-job.yaml (a
+# post-install/post-upgrade Helm hook Job). Each service just does a
+# fail-fast existence check for the tables it needs on startup. This
+# replaced an earlier design where mcp-portfolio and mcp-crm-calendar each
+# ran their own `sqlx::migrate!` against a bundled, supposedly
+# byte-identical copy of the schema — any drift between those copies made
+# sqlx's shared `_sqlx_migrations` checksum table reject whichever service
+# started second. Only rendered/used when at least one entry in `servers`
+# sets `database: true`.
+#
+# Same template as the evalhub demo namespace's own `evalhub-db` Deployment
+# (`oc get deployment evalhub-db -n evalhub -o yaml`): the OpenShift-internal
+# `postgresql:15-el9` ImageStreamTag from the `openshift` namespace, plain
+# POSTGRESQL_DATABASE/USER/PASSWORD env vars, no PVC. That means data is
+# ephemeral — wiped on every pod restart — same known tradeoff evalhub-db
+# already accepts for its own demo-only use. The schema-init Job's DDL is
+# idempotent (CREATE TABLE IF NOT EXISTS, INSERT ... ON CONFLICT DO NOTHING),
+# but unlike the old per-service sqlx::migrate! design, it only reruns on a
+# Helm hook (install/upgrade) — NOT every time an app pod restarts. If
+# mcp-postgres restarts on its own between Helm runs (OOM, node drain, `oc
+# delete pod`), it comes back empty and the schema-init Job does not
+# automatically rerun: mcp-portfolio/mcp-crm-calendar will correctly refuse
+# to start (fail-fast) until someone runs `helm upgrade --install` again (or
+# manually re-triggers the Job) to reseed. Known, accepted gap for this demo
+# — surfaced loudly via CrashLoopBackOff rather than silently.
+postgres:
+  image:
+    repository: "image-registry.openshift-image-registry.svc:5000/openshift/postgresql"
+    tag: "15-el9"
+    pullPolicy: IfNotPresent
+  database: "mcpdemo"
+  user: "mcpdemo"
+  # Demo-only hardcoded credential (see AGENTS.md §3) — generate a unique
+  # secret per environment before using this outside a throwaway demo.
+  password: "mcpdemo-demo-password"
+  resources: {}
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
@@ -69,4 +109,56 @@ servers:
                              # confirmed for this image
     requiredRole: "mcp-server-b-user"
     statefulMode: false
+    resources: {}
+  # The three servers below are this repo's own Rust MCP servers (./mcp/),
+  # built and pushed by .github/workflows/release-mcp-*.yml to
+  # quay.io/atarazana/<name>:<version> and :latest. `latest` is used here
+  # deliberately per that same CI convention. `database: true` makes
+  # deployment.yaml inject DATABASE_URL pointing at the shared postgres
+  # (see postgres: above); mcp-market-news omits it (see next comment).
+  - name: mcp-portfolio
+    image:
+      repository: "quay.io/atarazana/mcp-portfolio"
+      # Pinned (not "latest") deliberately: with imagePullPolicy IfNotPresent,
+      # a floating "latest" tag silently stops updating once a node has any
+      # image cached under that name — pinning to the version that actually
+      # dropped the per-service sqlx::migrate! call guarantees this pulls
+      # the image that expects the Helm chart to own the schema.
+      tag: "0.1.3"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8001      # Containerfile: ARG PORT=8001 (confirmed)
+    requiredRole: "mcp-portfolio-user"
+    statefulMode: false
+    database: true
+    resources: {}
+  - name: mcp-crm-calendar
+    image:
+      repository: "quay.io/atarazana/mcp-crm-calendar"
+      # Pinned for the same reason as mcp-portfolio above — see that comment.
+      tag: "0.1.3"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8004      # Containerfile: ENV BIND_ADDRESS=0.0.0.0:8004 (confirmed)
+    requiredRole: "mcp-crm-calendar-user"
+    statefulMode: false
+    database: true
+    resources: {}
+  # mcp-market-news's mcp_server binary does NOT read DATABASE_URL at
+  # request time — it serves from data/news.jsonl + data/news.tv, which are
+  # only produced by the separate `news_generator` batch binary (needs
+  # DATABASE_URL + ANTHROPIC_API_KEY, not built into this image, not run by
+  # this chart). Deployed anyway per explicit instruction, but this pod will
+  # fail to serve real queries until those files are seeded some other way
+  # — known gap, not silently swept under the rug.
+  - name: mcp-market-news
+    image:
+      repository: "quay.io/atarazana/mcp-market-news"
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
+    requiredRole: "mcp-market-news-user"
+    statefulMode: false
+    database: false
     resources: {}

@@ -27,15 +27,18 @@ La base de datos es un servicio PostgreSQL compartido con los otros tres MCP
 de la demo (`postgres.demo-banca.svc.cluster.local:5432`, por ejemplo) — no
 un fichero local: los cuatro corren como pods distintos en Kubernetes.
 
-Al arrancar, el binario ejecuta `sqlx::migrate!("./migrations")`, que aplica:
-
-- `migrations/0001_init.sql` — el esquema completo compartido por los cuatro
-  MCP (7 tablas + semillas de `bankers`/`clients`/`positions`/`performance_snapshots`).
-  Es **byte-idéntico** al de `mcp-portfolio`, para que su checksum coincida
-  en la tabla `_sqlx_migrations` que comparten los cuatro servicios.
-- `migrations/0002_seed_meetings.sql` — las semillas de `meetings` propias de
-  este servicio. Van en un fichero aparte (versión 2, no dentro de
-  `0001_init.sql`) precisamente para no romper ese checksum compartido.
+El esquema ya **no** lo aplica este binario. Vive en
+`demos/keycloak-oidc/mcp-servers/templates/schema-init-configmap.yaml` y lo
+aplica una única vez por `helm install`/`upgrade` el Job de
+`schema-init-job.yaml` (hook `post-install,post-upgrade`), incluidas las
+semillas de `meetings` propias de este servicio (`0002_meetings_seed.sql`).
+Al arrancar, este binario solo comprueba que la tabla `meetings` existe — si
+no, falla rápido con un mensaje claro en vez de fallar de forma confusa en
+la primera llamada a una herramienta. Antes, este servicio ejecutaba su
+propia copia de `sqlx::migrate!("./migrations")`, con el riesgo de que
+divergiera del resto y rompiera el checksum compartido en
+`_sqlx_migrations`; centralizar el esquema en el chart elimina ese
+problema de raíz en vez de solo evitarlo con disciplina manual.
 
 ## Herramientas
 

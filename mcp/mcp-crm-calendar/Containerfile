@@ -16,14 +16,14 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-COPY migrations ./migrations
 
 RUN cargo build --release --bin mcp_server
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
 
+# Schema is applied once for the whole demo by the mcp-servers Helm chart's
+# schema-init hook Job, not by this binary — nothing else is needed at runtime.
 COPY --from=builder /build/target/release/mcp_server /usr/local/bin/mcp_server
-COPY --from=builder /build/migrations /opt/app-root/migrations
 
 WORKDIR /opt/app-root
 
