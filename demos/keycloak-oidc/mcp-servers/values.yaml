@@ -184,7 +184,7 @@ servers:
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "0.1.4"     # [VERIFY] not yet built/pushed — see newsGenerator comment below
+      tag: "0.1.5"     # 0.1.4 crashed in news_generator's seed prompts against DeepSeek — see git history
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
