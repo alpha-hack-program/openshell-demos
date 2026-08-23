@@ -33,6 +33,8 @@ fmt:
 fmt-check:
 	cargo fmt --check
 
+check: fmt-check lint test ## CI gate: formatting, clippy, tests
+
 # Requires cargo-audit: `cargo install cargo-audit`. See .cargo/audit.toml
 # for the one documented, justified ignore (RUSTSEC-2023-0071, a
 # not-actually-linked transitive dep — see that file for the reasoning).
@@ -64,6 +66,28 @@ image-run:
 		-e RUST_LOG=info \
 		mcp-market-news:latest
 
+## --- Release management with cargo-release ---
+## Bumps Cargo.toml version, runs `make check` as a gate (see release.toml),
+## commits, tags mcp-market-news-v<version>, and pushes. Never publishes to
+## crates.io. GitHub Actions then builds and pushes the image (see
+## .github/workflows/release-mcp-market-news.yml).
+
+release-patch: ## Bump patch version (x.y.Z+1), tag, and push
+	@echo "Creating patch release (x.y.Z+1)..."
+	cargo release patch --execute
+
+release-minor: ## Bump minor version (x.Y+1.0), tag, and push
+	@echo "Creating minor release (x.Y+1.0)..."
+	cargo release minor --execute
+
+release-major: ## Bump major version (X+1.0.0), tag, and push
+	@echo "Creating major release (X+1.0.0)..."
+	cargo release major --execute
+
+release-dry-run: ## Show what release-patch would do, without executing it
+	@echo "Dry run - showing what would happen..."
+	cargo release patch --dry-run
+
 help:
 	@echo "Usage:"
 	@echo ""
@@ -75,9 +99,14 @@ help:
 	@echo "  make lint             - cargo clippy -D warnings"
 	@echo "  make fmt              - cargo fmt"
 	@echo "  make fmt-check        - cargo fmt --check"
+	@echo "  make check            - CI gate: fmt-check + lint + test"
 	@echo "  make audit            - cargo audit (requires cargo-audit)"
 	@echo "  make generate-news    - Run the news_generator batch job"
 	@echo "  make run              - Run mcp_server locally"
 	@echo "  make image-build      - Build the mcp_server container image"
 	@echo "  make image-run        - Run the container image locally"
 	@echo "  make clean            - cargo clean"
+	@echo "  make release-patch    - Bump patch version, tag, and push"
+	@echo "  make release-minor    - Bump minor version, tag, and push"
+	@echo "  make release-major    - Bump major version, tag, and push"
+	@echo "  make release-dry-run  - Show what release-patch would do"

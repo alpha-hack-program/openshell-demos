@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "mcp-market-news-v{{version}}"
+pre-release-commit-message = "release(mcp-market-news): {{version}}"
+tag-message = "mcp-market-news v{{version}}"
+pre-release-hook = ["make", "check"]

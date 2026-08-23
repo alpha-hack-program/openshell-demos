@@ -1,0 +1,23 @@
+name: CI mcp-market-news
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mcp/mcp-market-news/**']
+  pull_request:
+    paths: ['mcp/mcp-market-news/**']
+
+defaults:
+  run:
+    working-directory: mcp/mcp-market-news
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
