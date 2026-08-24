@@ -88,14 +88,16 @@ spec:
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # Shared vLLM/KServe embeddings InferenceService — see
             # values.yaml's embeddings: block and templates/embeddings.yaml.
-            # Confirmed against a live cluster: the predictor Service
-            # (`<isvc-name>-predictor`) is headless (clusterIP: None), so
-            # there's no virtual-IP port translation — connecting on the
-            # bare/default port 80 hits the pod directly on port 80, where
-            # nothing listens. The container's actual port (8080) must be
-            # given explicitly.
+            # Points at OUR OWN `<name>-clusterip` Service (defined in
+            # embeddings.yaml), not KServe's own auto-created `<name>-predictor`
+            # one — this cluster's RHOAI/KServe install has
+            # `serviceClusterIPNone: true` set cluster-wide
+            # (inferenceservice-config ConfigMap), making every
+            # InferenceService's own predictor Service headless (no
+            # virtual-IP load-balancing). See embeddings.yaml's comment for
+            # the full story.
             - name: EMBEDDINGS_BASE_URL
-              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
             - name: EMBEDDINGS_MODEL
               value: {{ $embeddings.name | quote }}
             {{- end }}
@@ -135,7 +137,7 @@ spec:
             # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
             # needs the same shared embeddings service as the app container.
             - name: EMBEDDINGS_BASE_URL
-              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
             - name: EMBEDDINGS_MODEL
               value: {{ $embeddings.name | quote }}
             {{- end }}
@@ -170,7 +172,7 @@ spec:
             # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
             # needs the same shared embeddings service as the app container.
             - name: EMBEDDINGS_BASE_URL
-              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
             - name: EMBEDDINGS_MODEL
               value: {{ $embeddings.name | quote }}
             {{- end }}

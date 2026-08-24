@@ -138,4 +138,36 @@ spec:
       storageUri: "oci://{{ $e.image }}"
       resources:
         {{- toYaml $e.resources | nindent 8 }}
+---
+# KServe's own "-predictor" Service for this InferenceService is headless
+# (clusterIP: None) on this cluster — confirmed via
+# `oc get configmap inferenceservice-config -n redhat-ods-applications -o
+# jsonpath='{.data.service}'`: `{"serviceClusterIPNone": true}`, a
+# cluster-wide RHOAI/KServe setting (the upstream default is `false`, a
+# normal load-balanced ClusterIP — this cluster overrides it, and that's
+# not something an individual InferenceService/ServingRuntime can flip back
+# per-instance). A headless Service's DNS returns pod IPs directly with no
+# virtual-IP load-balancing, which is fine for `minReplicas: 1` today but
+# would silently stop load-balancing if `embeddings.resources`/replica
+# count ever grows. This Service selects the exact same predictor pods
+# (`serving.kserve.io/inferenceservice` + `component: predictor` — the same
+# labels KServe's own auto-created "-metrics" Service uses) with a normal
+# ClusterIP, so EMBEDDINGS_BASE_URL (see templates/deployment.yaml) targets
+# this one instead of KServe's headless one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $e.name }}-clusterip
+  labels:
+    app.kubernetes.io/name: {{ $e.name }}
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  type: ClusterIP
+  selector:
+    serving.kserve.io/inferenceservice: {{ $e.name }}
+    component: predictor
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
 {{- end }}
