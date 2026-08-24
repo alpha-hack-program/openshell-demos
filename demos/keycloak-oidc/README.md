@@ -1333,12 +1333,23 @@ openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_
 # compliance-officer approval plus a documented source-of-funds review,
 # with the source document named — Charlie can cite the rule, not just
 # assert an answer.
-```
 
-> `check_suitability(client_id, product_id)` is the third tool on this
-> server, but `product_id` refers to the `products` table, which this
-> chart's schema-init job creates but never seeds — there's no product row
-> to reference yet. **[Open item]**, not exercised in this walkthrough.
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"check_suitability\",\"arguments\":{\"client_id\":\"cli-005\",\"product_id\":\"prod-002\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — potentially_suitable: false. prod-002 ("Meridian Balanced
+# Growth Fund") is rated moderate; Fundación Iris is conservative, so
+# risk_ok is false regardless of sector concentration. Try prod-001
+# ("Meridian Capital Preservation Note", conservative, no sector) instead
+# for a potentially_suitable: true result — see
+# mcp-servers/templates/schema-init-configmap.yaml for the full 6-product
+# catalog and which client/product pairs exercise which branch (risk vs.
+# sector-concentration rejection).
+```
 
 Alternatively, run the isolation verification script to test every
 banker/server combination — including Bob's boundary probe — automatically:
@@ -1874,11 +1885,18 @@ exact patch release before relying on this beyond a demo.
   short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
   — not real FATF/MiFID II/AML text, and not something to demo as if it
   were. See that server's own README disclaimer.
-- **`check_suitability`'s `product_id` has nothing to reference.** The
-  `products` table exists in the shared schema but the schema-init job
-  never seeds it — the tool works, but every call fails with "product not
-  found" until someone adds seed rows. Not exercised in this guide's
-  walkthrough for that reason.
+- **`products` seed data was validated against a throwaway Postgres, not
+  the real cluster.** The 6-row `products` INSERT added for
+  `check_suitability` (schema-init-configmap.yaml) was applied verbatim
+  (via `flatpak-spawn --host podman run postgres:15-alpine`, since bare
+  `podman` doesn't work inside this session's toolbox) alongside the
+  existing `0001_init.sql`/`0002_meetings_seed.sql`, and the resulting
+  risk/sector-concentration outcomes for every client×product pair were
+  queried directly and match what the README's Charlie example and this
+  file's comments claim. Still **[VERIFY]** against the actual chart's
+  `postgresql:15-el9` image and the real `helm upgrade --install` /
+  schema-init Job path before a live demo — the logic and data are
+  confirmed, the deployment mechanism isn't.
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no

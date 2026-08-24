@@ -107,6 +107,32 @@ data:
       ('perf-001','cli-001','MTD',0.021,0.015),
       ('perf-002','cli-002','MTD',-0.034,0.015)
       ON CONFLICT (id) DO NOTHING;
+    -- mcp-kyc-compliance's check_suitability catalog. Deliberately covers
+    -- every combination its logic branches on (risk_rating vs client's
+    -- risk_profile; sector vs the client's existing sector concentration
+    -- in positions) rather than being a realistic product lineup:
+    --   prod-001 (conservative, no sector) — suitable for everyone.
+    --   prod-002 (moderate, no sector) — suitable for moderate/aggressive
+    --     clients, blocked on risk for conservative ones (Marcus Wren,
+    --     Fundación Iris).
+    --   prod-003 (moderate, logistics) — risk is fine for Clara Fontán
+    --     (moderate), but she's already 100% concentrated in logistics
+    --     (pos-001/pos-002) — blocked on concentration, not risk.
+    --   prod-004 (aggressive, textile) — same shape for Grupo Delta Textil
+    --     (aggressive, 100% textile via pos-003) — blocked on
+    --     concentration despite matching risk rating exactly.
+    --   prod-005 (aggressive, technology) — blocked on risk for Elena
+    --     Duarte (moderate), regardless of her technology sector focus.
+    --   prod-006 (moderate, import) — blocked on risk for Marcus Wren
+    --     (conservative).
+    INSERT INTO products (id, name, risk_rating, asset_class, sector, min_investment) VALUES
+      ('prod-001','Meridian Capital Preservation Note','conservative','fixed_income',NULL,2000),
+      ('prod-002','Meridian Balanced Growth Fund','moderate','balanced',NULL,10000),
+      ('prod-003','Meridian Global Logistics Equity Fund','moderate','equity','logistics',15000),
+      ('prod-004','Meridian Textile Sector Note','aggressive','structured_note','textile',25000),
+      ('prod-005','Meridian Technology Innovation Fund','aggressive','equity','technology',20000),
+      ('prod-006','Meridian Import Trade Finance Fund','moderate','fixed_income','import',12000)
+      ON CONFLICT (id) DO NOTHING;
   0002_meetings_seed.sql: |
     -- meetings seed data specific to the mcp-crm-calendar demo track.
     -- Kept separate from 0001_init.sql purely for readability now that
