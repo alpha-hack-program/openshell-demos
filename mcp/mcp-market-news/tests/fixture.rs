@@ -1,21 +1,25 @@
 //! Builds a small local test fixture (`data/news.jsonl` + `data/news.tv`)
-//! using the *real* Embedder (downloads `sentence-transformers/all-MiniLM-L6-v2`
-//! from the Hugging Face Hub on first run) and the *real* TurboVec index —
-//! the same code paths `news_generator` uses — without requiring a live
-//! Postgres database or `ANTHROPIC_API_KEY`.
+//! using the *real* Embedder (calls the shared vLLM/jina-embeddings-v3
+//! service via `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL`) and the *real*
+//! TurboVec index — the same code paths `news_generator` uses — without
+//! requiring a live Postgres database or an LLM API key.
 //!
-//! This exists because `news_generator`'s own corpus (Postgres +
-//! Anthropic API) could not be exercised in the environment this project
-//! was built in. The headline/body text below is hand-authored to mirror
-//! the shape `news_generator`'s prompts ask the LLM for (see README.md):
-//! a handful of background-noise items, a seeded exact-ticker hit for
-//! `NDFR`, and a seeded ticker-agnostic "logistics sector" item that only
-//! stage-2 semantic search should find.
+//! This exists because `news_generator`'s own corpus (Postgres + an
+//! OpenAI-compatible chat-completions endpoint) could not be exercised in
+//! the environment this project was built in. The headline/body text below
+//! is hand-authored to mirror the shape `news_generator`'s prompts ask the
+//! LLM for (see README.md): a handful of background-noise items, a seeded
+//! exact-ticker hit for `NDFR`, and a seeded ticker-agnostic "logistics
+//! sector" item that only stage-2 semantic search should find.
 //!
-//! Network-gated and slow (downloads ~90MB on first run), so it's
-//! `#[ignore]`d by default:
+//! Network-gated (needs a reachable embeddings service) so it's `#[ignore]`d
+//! by default:
 //!
-//!   cargo test --release --test fixture -- --ignored --nocapture
+//!   EMBEDDINGS_BASE_URL=... EMBEDDINGS_MODEL=... \
+//!     cargo test --release --test fixture -- --ignored --nocapture
+//!
+//! Not run in this sandbox — no reachable embeddings service was available
+//! when this fixture was last updated (see README "What was verified").
 
 use chrono::Utc;
 use mcp_market_news::common::embedder::{Embedder, EMBEDDING_DIM};
@@ -34,9 +38,9 @@ fn item(id: &str, headline: &str, body: &str, ticker: Option<&str>, sector: &str
     }
 }
 
-#[test]
+#[tokio::test]
 #[ignore]
-fn build_local_fixture_corpus() {
+async fn build_local_fixture_corpus() {
     let items = vec![
         // --- background noise (a handful, not the full 35) ---
         item(
@@ -87,7 +91,7 @@ fn build_local_fixture_corpus() {
         ),
     ];
 
-    let embedder = Embedder::load().expect("embedder should load from HF hub cache");
+    let embedder = Embedder::new().expect("EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL should be set");
 
     let mut index = TurboQuantIndex::new(EMBEDDING_DIM, INDEX_BIT_WIDTH)
         .expect("index construction should succeed for a valid dim/bit_width");
@@ -95,6 +99,7 @@ fn build_local_fixture_corpus() {
     for it in &items {
         let vector = embedder
             .embed(&it.embedding_text())
+            .await
             .expect("embedding should succeed");
         index.add(&vector);
     }

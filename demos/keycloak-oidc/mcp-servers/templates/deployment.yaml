@@ -2,6 +2,7 @@
 {{- $envoy := .Values.envoy -}}
 {{- $postgres := .Values.postgres -}}
 {{- $newsGen := .Values.newsGenerator -}}
+{{- $embeddings := .Values.embeddings -}}
 {{- range .Values.servers }}
 apiVersion: apps/v1
 kind: Deployment
@@ -83,6 +84,19 @@ spec:
             # README ("Live reload in mcp_server") for what this does.
             - name: NEWS_RELOAD_INTERVAL_MINUTES
               value: {{ $newsGen.intervalMinutes | default 5 | quote }}
+            {{- end }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # Shared vLLM/KServe embeddings InferenceService — see
+            # values.yaml's embeddings: block and templates/embeddings.yaml.
+            # [VERIFY] DNS name/port: KServe RawDeployment predictor
+            # Services conventionally proxy port 80 -> the container's 8080,
+            # named "<isvc-name>-predictor" in-namespace, but this wasn't
+            # confirmed against a live cluster — check `oc get svc` after
+            # deploying and adjust if it doesn't match.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
             {{- end }}
           resources:
             {{- toYaml (.resources | default dict) | nindent 12 }}

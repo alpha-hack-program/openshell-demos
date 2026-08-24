@@ -57,19 +57,11 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 # minimal container, sandboxes without libssl-dev, etc).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
-# --- Embeddings, pure Rust (no ONNX, no external service) ---
-candle-core = "0.11"
-candle-nn = "0.11"
-candle-transformers = "0.11"
-# hf-hub 1.0 is an async-first rewrite (HFClient); "blocking" pulls in the
-# synchronous HFClientSync/HFRepositorySync surface we actually use, and
-# "rustls-tls" (-> reqwest/rustls) avoids requiring a system OpenSSL install,
-# same rationale as the reqwest dependency above.
-hf-hub = { version = "1.0", default-features = false, features = [
-    "blocking",
-    "rustls-tls",
-] }
-tokenizers = "0.23"
+# --- Embeddings: HTTP client for the shared, in-namespace vLLM/KServe
+# embeddings service (jinaai/jina-embeddings-v3 on CPU) — see
+# src/common/embedder.rs. Retired candle-transformers/hf-hub/tokenizers
+# dependencies (in-process model + local download) removed in favor of this
+# — see README "What was verified" for that migration's history.
 
 # --- Vector index ---
 turbovec = "1.0.0"

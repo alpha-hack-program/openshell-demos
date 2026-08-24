@@ -278,6 +278,7 @@ user membership in a workspace that already has one.
 | Agent Sandbox controller + CRDs | See [`demos/base/README.md`](../base/README.md#installing-agent-sandbox) |
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
+| Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
 ### What this demo deploys
 
@@ -289,8 +290,12 @@ user membership in a workspace that already has one.
   production setup you would generate a unique secret per environment.
 - Providers v2 enabled (`providers_v2_enabled=true`).
 - A per-user provider profile and onboarding flow.
-- Two example MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars
+- Example MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars
   that gate access by Keycloak realm role.
+- A KServe `InferenceService` running `jinaai/jina-embeddings-v3` via vLLM
+  CPU inference (`mcp-servers/templates/embeddings.yaml`), shared by the
+  `mcp-market-news` and `mcp-kyc-compliance` servers for semantic search —
+  requires the RHOAI prerequisite above.
 
 ### Getting started
 

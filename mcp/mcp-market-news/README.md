@@ -32,7 +32,7 @@ mcp-market-news/
 ├── src/
 │   ├── common/
 │   │   ├── auth.rs           # JWT payload decode (no signature check — Envoy does that)
-│   │   ├── embedder.rs       # candle-rs BERT (all-MiniLM-L6-v2), pure Rust, no ONNX
+│   │   ├── embedder.rs       # HTTP client for the shared vLLM/jina-embeddings-v3 service
 │   │   ├── news_service.rs   # get_relevant_news: two-stage filter logic
 │   │   └── mod.rs
 │   ├── bin/
@@ -91,16 +91,45 @@ Every response:
 struct ToolResponse<T> { output: T, called_by: String, roles: Vec<String> }
 ```
 
-## Embeddings: pure Rust, no ONNX, no external service
+## Embeddings: shared vLLM/KServe service, not in-process
 
-`src/common/embedder.rs` uses `candle-transformers`' native Rust BERT
-implementation with `sentence-transformers/all-MiniLM-L6-v2` (384 dims).
-Weights are fetched once via `hf-hub` (cached under `~/.cache/huggingface`,
-or `$HF_HOME` — see the Containerfile, which points it at the same PVC as
-the corpus) and mean-pooled + L2-normalized so a dot product between two
-embeddings is a cosine similarity.
+`src/common/embedder.rs` is a thin `reqwest` client that calls a shared,
+in-namespace vLLM/KServe `InferenceService` running `jinaai/jina-embeddings-v3`
+on CPU (1024 dims) over its OpenAI-compatible `POST /v1/embeddings` endpoint
+(`{"model": "<EMBEDDINGS_MODEL>", "input": "<text>"}` → `data[0].embedding`),
+normalized L2 client-side before use (a dot product between two normalized
+vectors *is* the cosine similarity). `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL`
+point at that service (see the `demos/keycloak-oidc/mcp-servers` Helm chart,
+which deploys it via KServe and injects these two env vars).
+
+This **replaced** an earlier in-process implementation using
+`candle-transformers`' native Rust BERT with
+`sentence-transformers/all-MiniLM-L6-v2` (384 dims), weights fetched via
+`hf-hub` — see "What was verified" below for that implementation's history
+(kept for the record, not because it's still in use). The motivation for
+moving off it: `mcp-kyc-compliance`, a sibling MCP server in this demo
+family, needs the same embedding capability, and running two independent
+copies of a ~90MB model download/load pipeline (one per Rust service) was
+worse than standing up one shared embeddings service both call over HTTP —
+same rationale this repo already applies to the shared Postgres instance.
+`turbovec` (the vector index/search itself) stays local to each service —
+only the embedding *computation* moved out, since the index is
+corpus-specific and lightweight. This `embedder.rs` is duplicated
+(near-)verbatim in `mcp-kyc-compliance`'s own `src/common/embedder.rs`,
+deliberately, same convention this demo family already uses for `auth.rs`
+— the surviving code is thin enough (an HTTP POST + JSON parse) that
+duplication beats a shared crate's build/versioning overhead.
 
 ### Embedding query template
+
+**Historical note:** the numbers below were measured against the retired
+MiniLM-L6 implementation (384 dims) — see "Embeddings" above. They are kept
+because the *shape* of the finding (raw sector words collide, a short
+natural-language wrapper separates them) is still the reason
+`news_service.rs` embeds a full sentence rather than bare keywords, but the
+specific scores have NOT been re-measured against `jina-embeddings-v3`
+(1024 dims), a different model with a different embedding space — see
+"Open risks" below.
 
 The spec this server was built from suggested embedding the raw sector
 words directly (`sectors.join(" ")`). Empirically, on the tiny fixture
@@ -113,16 +142,15 @@ quantization artifact (confirmed identical on unquantized embeddings).
 Wrapping the query in a short natural-language sentence —
 `"News affecting the {sectors} sector"` — widened that gap to roughly 0.08
 in the same test (0.634 vs. 0.549), which is what `news_service.rs`
-actually does. See "Open risks" below — this was tuned against 6 items,
-not the full ~40-item corpus the real generator would produce, and should
-be re-validated once real data exists.
+actually does.
 
 ### TurboVec index
 
-`turbovec::TurboQuantIndex::new(384, 4)` (4-bit quantization — the corpus
+`turbovec::TurboQuantIndex::new(1024, 4)` (4-bit quantization — the corpus
 here is tiny, so index size is a non-issue and 4 bits gives the best
-recall of the supported widths). Built by `news_generator`, loaded
-read-only by `mcp_server` via `TurboQuantIndex::load("data/news.tv")`.
+recall of the supported widths; dimension bumped from 384 to 1024 along
+with the embedding-model migration above). Built by `news_generator`,
+loaded read-only by `mcp_server` via `TurboQuantIndex::load("data/news.tv")`.
 
 ## `news_generator`: batch corpus generation
 
@@ -281,7 +309,8 @@ generation time — not fabricated) and a fresh `uuid::Uuid::new_v4()` id.
 | `MCP_DISABLE_HOST_CHECK` | `mcp_server` | Set `true`/`1` for local/curl testing (disables the streamable-http allowed-hosts check) |
 | `MCP_STATEFUL_MODE` | `mcp_server` | Set `true`/`1` to require session initialization before tool calls |
 | `MCP_ALLOWED_HOSTS` | `mcp_server` | Comma-separated extra allowed `Host` headers |
-| `HF_HOME` | both (via `hf-hub`) | Hugging Face cache root; point at the corpus PVC in Kubernetes so the model download survives restarts |
+| `EMBEDDINGS_BASE_URL` | both | Base URL of the shared vLLM/KServe embeddings service, no trailing `/v1` (e.g. `http://jina-embeddings-v3-cpu-predictor.<namespace>.svc.cluster.local`) |
+| `EMBEDDINGS_MODEL` | both | Served-model name to send in each `/v1/embeddings` request body (e.g. `jina-embeddings-v3-cpu`) |
 | `RUST_LOG` | both | `tracing` filter, e.g. `info`, `debug` |
 
 ## Testing
@@ -308,12 +337,14 @@ exercises the *same* embedding + indexing code (`Embedder`,
 server can actually be started and queried end-to-end:
 
 ```bash
-cargo test --release --test fixture -- --ignored --nocapture
+EMBEDDINGS_BASE_URL=http://localhost:8080 EMBEDDINGS_MODEL=jina-embeddings-v3-cpu \
+  cargo test --release --test fixture -- --ignored --nocapture
 ```
 
-This downloads `sentence-transformers/all-MiniLM-L6-v2` from the Hugging
-Face Hub on first run (~90MB, cached afterwards) and writes
-`data/news.jsonl` + `data/news.tv`.
+This calls the shared embeddings service (`EMBEDDINGS_BASE_URL`) for every
+item and writes `data/news.jsonl` + `data/news.tv`. Not run in this
+sandbox — no reachable embeddings service was available (see "What was
+verified" below).
 
 ### Running the server and calling the tool
 
@@ -352,11 +383,12 @@ With no `Authorization` header, `called_by` is `"unknown"` and `roles` is
 See `Cargo.toml` for pinned dependency versions. Notably:
 
 - `rmcp = "1.7"` — same major version as the reference repo.
-- `hf-hub = "1.0"` — migrated off the `0.4.3` stopgap pin; see "What was
-  verified" below for what the migration actually involved.
-- `reqwest`/`hf-hub` are configured for **rustls**, not the default
-  native-tls/openssl backend, so building doesn't require a system OpenSSL
-  install (only a C++ compiler, for `tokenizers`' `esaxx-rs`).
+- `reqwest` is configured for **rustls**, not the default native-tls/openssl
+  backend, so building doesn't require a system OpenSSL install.
+- No C/C++ toolchain dependency at all — `candle-transformers`, `hf-hub`,
+  and `tokenizers` (which needed `gcc-c++` for `tokenizers`' `esaxx-rs`)
+  were removed when embedding computation moved to the shared vLLM/KServe
+  service; see "What was verified" below for that migration's history.
 
 ## Makefile targets
 
@@ -378,10 +410,37 @@ requires `cargo install cargo-audit`), `generate-news` (runs
 
 ## What was verified
 
-This project's toolchain and dependency versions were checked against
-live sources, not assumed from training-data priors, because several of
-them (candle-transformers, hf-hub, turbovec, rmcp) have had breaking API
-changes across versions:
+### Embeddings migration to a shared vLLM/KServe service (2026-08-24)
+
+Replaced the in-process `candle-transformers`/`hf-hub`/`tokenizers` stack
+(see the rest of this section, kept as history below) with the HTTP-based
+`embedder.rs` described in "Embeddings" above. Verified:
+
+- `cargo build --release --bins`, `cargo test`, `cargo clippy --bins --tests
+  -- -D warnings`, and `cargo fmt --all -- --check` all pass clean with the
+  new dependency set (`candle-core`, `candle-nn`, `candle-transformers`,
+  `hf-hub`, `tokenizers` removed from `Cargo.toml`).
+- Unit tests for the new `embedder.rs` (vector normalization, fail-fast on
+  missing `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL`) pass.
+- **NOT verified**: an actual round-trip call to a real embeddings service.
+  No `jinaai/jina-embeddings-v3` vLLM/KServe endpoint was reachable in the
+  sandbox this migration was built in — `tests/fixture.rs` (network-gated,
+  `#[ignore]`d) and the embedder's live-call path are unexercised beyond
+  compiling. Run `tests/fixture.rs` against a real deployed embeddings
+  service before relying on this in a live demo.
+- The Containerfile's `gcc-c++` build dependency (needed only by
+  `tokenizers`' `esaxx-rs`) was removed; a fresh `podman build` after the
+  removal was **not** re-run in this sandbox (no working `podman` — see the
+  container-verification notes below for the same caveat under the
+  pre-migration stack).
+
+### Retired: candle-transformers/hf-hub implementation (history)
+
+The following documents the now-retired in-process embedding
+implementation. This project's toolchain and dependency versions were
+checked against live sources, not assumed from training-data priors,
+because several of them (candle-transformers, hf-hub, turbovec, rmcp) have
+had breaking API changes across versions:
 
 - **Reference repo**: cloned via `git clone` (network was reachable) and
   read directly — `Cargo.toml`, `src/mcp_server.rs`, `src/common/*.rs`,
@@ -557,18 +616,24 @@ changes across versions:
 
 ## Open risks
 
-- **Similarity threshold (`0.6`) is unvalidated against the real ~40-item
-  corpus.** It was tuned against a 6-item hand-authored fixture (see
-  "Embedding query template" above), where an unrelated "utility
-  maintenance" item scored uncomfortably close to (and, with the naive
-  raw-sector-words query, above) the true logistics match. The natural-
-  language query template (`"News affecting the {sectors} sector"`)
-  fixed the observed case, but this is a small sample — re-run
-  `tests/fixture.rs`-style scoring diagnostics against the real generated
-  corpus once `news_generator` has actually been run against live data,
-  and tune `SIMILARITY_THRESHOLD` / `MIN_STAGE1_HITS` in
-  `src/common/news_service.rs` if false positives/negatives show up at
-  that scale.
+- **Similarity threshold (`0.6`) is unvalidated against `jina-embeddings-v3`
+  at any corpus size.** It was tuned (see "Embedding query template" above)
+  against the now-retired MiniLM-L6 model (384 dims) on a 6-item
+  hand-authored fixture. The embedding-model migration to
+  `jina-embeddings-v3` (1024 dims, a different model with a different
+  cosine-similarity distribution) makes that tuning stale by construction,
+  not just by sample size — re-run `tests/fixture.rs`-style scoring
+  diagnostics against a real reachable embeddings service and the real
+  generated corpus before trusting `SIMILARITY_THRESHOLD` /
+  `MIN_STAGE1_HITS` in `src/common/news_service.rs` at all.
+- **The live embeddings HTTP call is entirely unverified.** No
+  `jinaai/jina-embeddings-v3` vLLM/KServe endpoint was reachable in the
+  sandbox this migration was built in — `embedder.rs` compiles, its
+  request/response parsing and normalization are unit-tested against
+  synthetic data, but no real request has ever been sent or a real
+  response ever parsed. Verify this end-to-end against the actual
+  deployed `demos/keycloak-oidc/mcp-servers` embeddings service before
+  relying on `get_relevant_news`'s semantic-search fallback in a live demo.
 - **`news_generator`'s Postgres query and Anthropic call are untested
   end-to-end.** The `positions` table schema is assumed from the spec
   (`ticker`, `sector` columns) — it wasn't cross-checked against
@@ -576,17 +641,13 @@ changes across versions:
   separate, concurrent session this project intentionally did not touch).
   If that schema differs, `load_tickers_and_sectors` in
   `src/bin/news_generator.rs` will need adjusting.
-- **Container not re-verified against `hf-hub 1.0`.** The `podman build`
-  + `run` + `curl` cycle documented above was run against the `0.4.3`-era
-  code; the `1.0` migration was only verified on the host. `hf-hub 1.0`
-  pulls in a noticeably heavier dependency tree (`hf-xet`, `bon`,
-  `globset`, `tokio-retry`, `sha2`, `hyper`) — worth specifically
-  checking that `hf-xet`'s transfer machinery (which spins up its own
-  multi-threaded runtime for Xet uploads/downloads) behaves the same
-  under the container's non-root user and restricted `$HOME` as it did
-  on the host, and that the final image size hasn't grown enough to
-  matter. Re-run the full container cycle before considering this demo
-  ready.
+- **Container not rebuilt since the embeddings migration.** No working
+  `podman` was available in the sandbox this migration was built in (see
+  the historical container-verification notes above, from before the
+  migration, which hit the same limitation) — the `gcc-c++` removal and
+  the new, much lighter dependency tree have not been re-verified with an
+  actual `podman build` + `run` + `curl` cycle. Do this before considering
+  the migration done.
 - **`podman build --format docker` not yet tried.** The image builds and
   runs correctly, but `podman` warned that `HEALTHCHECK` is ignored for
   the default OCI image format. If the `HEALTHCHECK` needs to actually

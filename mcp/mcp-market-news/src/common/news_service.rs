@@ -14,8 +14,6 @@
 //! client-specific data. `called_by`/`roles` are still attached to every
 //! tool response for consistency with the rest of the demo family.
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use turbovec::TurboQuantIndex;
@@ -88,34 +86,20 @@ impl NewsItem {
 pub struct NewsService {
     items: Vec<NewsItem>,
     index: TurboQuantIndex,
-    // `Arc` so a periodic reload (see `mcp_server.rs`) can rebuild `items`/
-    // `index` from disk without re-loading the ~90MB embedding model each
-    // cycle — see `load_with_embedder`/`embedder()` below.
-    embedder: Arc<Embedder>,
+    embedder: Embedder,
 }
 
 impl NewsService {
-    /// Loads `news.jsonl` (one JSON `NewsItem` per line) fully into RAM and
-    /// the persisted TurboVec index from `news.tv`, plus the embedder
-    /// (needed to embed stage-2 queries). All disk/model I/O happens here,
-    /// not on the request path. Loads a fresh `Embedder` — for a *reload*
-    /// of an already-running service, use `load_with_embedder` instead so
-    /// the model isn't reloaded on every cycle.
+    /// Loads `news.jsonl` (one JSON `NewsItem` per line) fully into RAM, the
+    /// persisted TurboVec index from `news.tv`, and constructs the
+    /// (HTTP-based, so effectively free to (re)construct) `Embedder` needed
+    /// to embed stage-2 queries. All disk I/O happens here, not on the
+    /// request path. Called both at process start and by `mcp_server`'s
+    /// periodic reload — unlike the retired candle-based `Embedder`, there's
+    /// no expensive model load to avoid repeating across reloads.
     pub fn load(
         jsonl_path: impl AsRef<std::path::Path>,
         tv_path: impl AsRef<std::path::Path>,
-    ) -> anyhow::Result<Self> {
-        Self::load_with_embedder(jsonl_path, tv_path, Arc::new(Embedder::load()?))
-    }
-
-    /// Same as `load`, but reuses an already-loaded `Embedder` instead of
-    /// loading a new one — what `mcp_server`'s periodic reload calls, so
-    /// picking up a fresh `news.jsonl`/`news.tv` written by the
-    /// `news_generator` sidecar doesn't also reload the embedding model.
-    pub fn load_with_embedder(
-        jsonl_path: impl AsRef<std::path::Path>,
-        tv_path: impl AsRef<std::path::Path>,
-        embedder: Arc<Embedder>,
     ) -> anyhow::Result<Self> {
         let items = load_jsonl(jsonl_path)?;
         let index = TurboQuantIndex::load(tv_path)
@@ -132,18 +116,13 @@ impl NewsService {
         Ok(Self {
             items,
             index,
-            embedder,
+            embedder: Embedder::new()?,
         })
     }
 
     /// Construct directly from parts, for tests / the generator's own
-    /// verification step (no HF download needed if an `Embedder` is
-    /// already on hand).
-    pub fn from_parts(
-        items: Vec<NewsItem>,
-        index: TurboQuantIndex,
-        embedder: Arc<Embedder>,
-    ) -> Self {
+    /// verification step.
+    pub fn from_parts(items: Vec<NewsItem>, index: TurboQuantIndex, embedder: Embedder) -> Self {
         Self {
             items,
             index,
@@ -156,15 +135,9 @@ impl NewsService {
         self.items.len()
     }
 
-    /// Hands the current `Embedder` to the next reload, so it's reused
-    /// instead of reloaded from disk/HF cache.
-    pub fn embedder(&self) -> Arc<Embedder> {
-        self.embedder.clone()
-    }
-
     /// Two-stage relevant-news lookup. Never returns the full feed — only
     /// the narrowed stage-1 and/or stage-2 hits, deduplicated by id.
-    pub fn get_relevant_news(
+    pub async fn get_relevant_news(
         &self,
         tickers: &[String],
         sectors: &[String],
@@ -188,7 +161,7 @@ impl NewsService {
             // embedding the bare sector words) — see README "Open risks" for
             // the numbers this was tuned against.
             let query_text = format!("News affecting the {} sector", sectors.join(" and "));
-            let query_vec = self.embedder.embed(&query_text)?;
+            let query_vec = self.embedder.embed(&query_text).await?;
             debug_assert_eq!(query_vec.len(), EMBEDDING_DIM);
 
             let search_results = self.index.search(&query_vec, SEMANTIC_TOP_K);

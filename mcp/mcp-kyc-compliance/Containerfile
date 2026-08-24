@@ -1,31 +1,23 @@
 # syntax=docker/dockerfile:1
-#
-# Builds both `mcp_server` (the interactive service) and `news_generator`
-# (the batch/loop corpus generator) into the same image. They're deployed
-# as separate containers sharing a PVC (see demos/keycloak-oidc/mcp-servers'
-# Helm chart: an initContainer runs news_generator once, a sidecar runs it
-# with GENERATION_MODE=loop) — one image, two entrypoints, so there's only
-# one thing to build/tag/push.
 
+# Build arguments
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
 ARG BASE_TAG=9.6
 ARG VERSION=0.1.0
 ARG MAINTAINER="Alpha Hack Group <alpha@github.com>"
-ARG DESCRIPTION="Market News MCP Server - public market-news retrieval by ticker/sector, filtered exactly and semantically"
-ARG APP_NAME=mcp-market-news
-ARG PORT=8002
-ARG SOURCE=https://github.com/alpha-hack-program/openshell-demos
+ARG DESCRIPTION="mcp-kyc-compliance - Model Context Protocol server for fictional KYC/compliance checks and regulatory-guidance search"
+ARG APP_NAME=mcp-kyc-compliance
+ARG PORT=8003
+ARG SOURCE=https://github.com/alpha-hack-program/openshell-demos.git
 
-# ---------------------------------------------------------------------------
-# Stage 1: build
-# ---------------------------------------------------------------------------
+# Multi-stage build
+# Stage 1: Build stage with Rust toolchain
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
 
-# openssl-devel is NOT needed — every TLS-using dependency here (reqwest,
-# sqlx) is configured to use rustls, not native-tls/openssl, specifically to
-# keep this build simple on a minimal image. gcc-c++ was previously required
-# by tokenizers' esaxx-rs (retired candle/hf-hub-based embedding stack) —
-# dropped along with that dependency; everything left is pure Rust.
+# No C/C++ toolchain needed — sqlx (tls-rustls), reqwest (rustls-tls), and
+# turbovec are all pure Rust. Unlike the sibling mcp-market-news server
+# before its embeddings migration, this project never depended on
+# tokenizers/candle/hf-hub, so there's no gcc-c++ requirement here at all.
 RUN dnf update -y && \
     dnf install -y \
         gcc \
@@ -34,6 +26,7 @@ RUN dnf update -y && \
     dnf clean all && \
     rm -rf /var/cache/dnf
 
+# Install Rust
 ENV RUSTUP_HOME=/opt/rust
 ENV CARGO_HOME=/opt/rust
 ENV PATH=/opt/rust/bin:$PATH
@@ -44,13 +37,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src
 
-# Both binaries share one dependency graph (single-package project), so
-# building them together costs nothing extra over building one.
 RUN cargo build --release --bins
 
-# ---------------------------------------------------------------------------
-# Stage 2: runtime
-# ---------------------------------------------------------------------------
+# Stage 2: Runtime stage with minimal UBI
 FROM ${BASE_IMAGE}:${BASE_TAG}
 
 ARG VERSION
@@ -75,42 +64,44 @@ LABEL org.opencontainers.image.title="${APP_NAME}" \
       org.opencontainers.image.documentation="${SOURCE}" \
       io.k8s.description="${DESCRIPTION}" \
       io.k8s.display-name="${APP_NAME}" \
-      io.openshift.tags="mcp,market-news,rust,server" \
+      io.openshift.tags="mcp,kyc,compliance,rust,server" \
       maintainer="${MAINTAINER}"
 
+# openssl runtime is NOT needed — every TLS-using dependency (sqlx,
+# reqwest) is configured for rustls, same rationale as the builder stage.
 RUN microdnf update -y && \
     microdnf install -y ca-certificates && \
     microdnf clean all && \
     rm -rf /var/cache/yum
 
-# Non-root user, matching the rest of this demo family's MCP servers.
 RUN useradd -r -u 1001 -g 0 -s /sbin/nologin \
-    -c "Market News MCP Server user" mcpserver
+    -c "mcp-kyc-compliance server user" mcpserver
 
 WORKDIR /app
 
 COPY --from=builder /build/target/release/mcp_server /app/mcp_server
-COPY --from=builder /build/target/release/news_generator /app/news_generator
+COPY --from=builder /build/target/release/corpus_indexer /app/corpus_indexer
+# The regulatory corpus's markdown source is static and baked into the
+# image (unlike mcp-market-news's LLM-generated corpus). `data/` still
+# needs to be writable at runtime: mcp_server builds data/corpus.tv (+ its
+# doc sidecar) there on first startup if it doesn't exist yet — see
+# README's "Self-healing index" section. Should still be a PVC in
+# Kubernetes so that build isn't repeated on every pod restart.
+COPY data/corpus/ /app/data/corpus/
 
-# `data/` is meant to be a PersistentVolumeClaim mounted here in
-# Kubernetes, shared between the `mcp_server` container, a `news_generator`
-# initContainer (one-shot, blocks pod startup until the corpus exists), and
-# a `news_generator` sidecar (GENERATION_MODE=loop) in the same pod — so a
-# pod restart doesn't lose the corpus. It no longer doubles as a model cache
-# (see EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL below) — embedding computation
-# now happens in the shared, in-namespace vLLM/KServe embeddings service,
-# not in this container.
-RUN mkdir -p /app/data && chown -R 1001:0 /app && chmod -R g=u /app && \
-    chmod +x /app/mcp_server /app/news_generator
+RUN chown -R 1001:0 /app && \
+    chmod -R g=u /app && \
+    chmod +x /app/mcp_server /app/corpus_indexer
 
 USER 1001
 
+EXPOSE ${PORT}
+
 ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
-ENV PORT=${PORT}
 ENV BIND_ADDRESS=0.0.0.0:${PORT}
-ENV NEWS_JSONL_PATH=/app/data/news.jsonl
-ENV NEWS_TV_PATH=/app/data/news.tv
+ENV CORPUS_DIR=/app/data/corpus
+ENV CORPUS_INDEX_PATH=/app/data/corpus.tv
 # EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL have no working default — they must
 # point at the shared embeddings service's in-cluster DNS name (see the
 # demos/keycloak-oidc/mcp-servers Helm chart) and are injected by that
@@ -122,7 +113,5 @@ ENV NEWS_TV_PATH=/app/data/news.tv
 # intentionally not treating the 405 as failure), not protocol correctness.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -s -o /dev/null http://localhost:${PORT}/mcp || exit 1
-
-EXPOSE ${PORT}
 
 CMD ["/app/mcp_server"]

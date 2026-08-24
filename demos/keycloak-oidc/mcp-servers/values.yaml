@@ -94,6 +94,48 @@ newsGenerator:
   batchSize: 5
   pvcSize: "1Gi"
 
+# Shared semantic-search embeddings backend for mcp-market-news and
+# mcp-kyc-compliance: jinaai/jina-embeddings-v3 served via vLLM CPU
+# inference behind a KServe InferenceService (see templates/embeddings.yaml
+# for the full rationale, including what was deliberately simplified vs.
+# the alpha-hack-program/llama-stack-demo deployment this was modeled on).
+# Explicit choice: KServe/RawDeployment, not a plain Deployment — matches
+# this demo family's other RHOAI-based demo instead of hand-rolling a
+# second way to serve a model. Requires the RHOAI operator with
+# KServe/ModelServing enabled — see this demo's README "Prerequisites".
+# Cluster-local only: no Route, consumed purely in-namespace by the
+# mcp-server Deployments below via `needsEmbeddings: true` (injects
+# EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL — see templates/deployment.yaml).
+# vectorDimension is informational here (documents what callers should
+# expect back); nothing in this chart enforces it.
+embeddings:
+  enabled: true
+  name: "jina-embeddings-v3-cpu"
+  model: "jinaai/jina-embeddings-v3"
+  # ModelCar: model weights ship as an OCI image, pulled directly by
+  # KServe's storage-initializer. Same public image
+  # alpha-hack-program/llama-stack-demo already publishes/uses — not
+  # rebuilt here.
+  image: "quay.io/atarazana/modelcar-catalog:jina-embeddings-v3"
+  vectorDimension: 1024
+  maxModelLen: "8192"
+  # The hardware profile name/namespace actually available depends on how
+  # RHOAI was installed on the target cluster — this is NOT a portable
+  # constant. "default-cpu" (the reference deployment's own name) does not
+  # exist on every cluster; "default-profile" is what was actually present
+  # (`oc get hardwareprofiles -n redhat-ods-applications`) on the cluster
+  # this was first deployed against (2 CPU/4Gi default, up to 4 CPU/8Gi —
+  # fits the resources block below). Re-check and override per cluster.
+  hardwareProfile: "default-profile"
+  runtimeImage: "registry.redhat.io/rhaiis/vllm-cpu-rhel9@sha256:f05e773647dddd37ec6c2215cb14bec87e4ab5a7d37f2e110d16cd92355427d3"
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 4Gi
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
@@ -180,7 +222,11 @@ servers:
   # periodic reload (NEWS_RELOAD_INTERVAL_MINUTES, added in the same
   # release as this fix) picking up the sidecar's writes without a
   # restart. See templates/deployment.yaml and the top-level
-  # `newsGenerator:` block below for the actual wiring.
+  # `newsGenerator:` block below for the actual wiring. The PVC is no
+  # longer also an HF model cache — since the candle/hf-hub -> vLLM
+  # embeddings-service migration, this server has no local model to
+  # download/cache; `needsEmbeddings: true` points it at the shared
+  # embeddings InferenceService instead (see `embeddings:` above).
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
@@ -192,4 +238,24 @@ servers:
     statefulMode: false
     database: false
     newsGenerator: true
+    needsEmbeddings: true
+    resources: {}
+  # New 4th MCP server in this demo family (mcp-portfolio / mcp-crm-calendar
+  # / mcp-market-news / mcp-kyc-compliance) — regulatory-guidance search over
+  # a small fictional AML/KYC corpus, plus client risk-profile/suitability
+  # lookups against the same shared postgres as mcp-portfolio. tag "0.1.0"
+  # must actually exist in quay.io/atarazana before `helm upgrade --install`
+  # against this entry will succeed — i.e. that crate's first
+  # release-mcp-kyc-compliance.yml run.
+  - name: mcp-kyc-compliance
+    image:
+      repository: "quay.io/atarazana/mcp-kyc-compliance"
+      tag: "0.1.0"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8003
+    requiredRole: "mcp-kyc-compliance-user"
+    statefulMode: false
+    database: true
+    needsEmbeddings: true
     resources: {}

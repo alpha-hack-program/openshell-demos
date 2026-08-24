@@ -225,7 +225,7 @@ fn write_jsonl(items: &[NewsItem], path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_and_write_index(
+async fn build_and_write_index(
     embedder: &Embedder,
     items: &[NewsItem],
     path: &str,
@@ -234,7 +234,7 @@ fn build_and_write_index(
         .map_err(|e| anyhow::anyhow!("failed to construct TurboVec index: {e:?}"))?;
 
     for item in items {
-        let vector = embedder.embed(&item.embedding_text())?;
+        let vector = embedder.embed(&item.embedding_text()).await?;
         index.add(&vector);
     }
 
@@ -273,7 +273,7 @@ async fn run_loop(
     interval: Duration,
     batch_size: usize,
 ) -> anyhow::Result<()> {
-    let embedder = Embedder::load()?;
+    let embedder = Embedder::new()?;
     let mut corpus = if std::path::Path::new(jsonl_path).exists() {
         load_jsonl(jsonl_path)?
     } else {
@@ -306,7 +306,7 @@ async fn run_loop(
 
                 if let Err(e) = write_jsonl(&corpus, jsonl_path) {
                     tracing::error!(error = %e, "Failed to write news.jsonl this cycle");
-                } else if let Err(e) = build_and_write_index(&embedder, &corpus, tv_path) {
+                } else if let Err(e) = build_and_write_index(&embedder, &corpus, tv_path).await {
                     tracing::error!(error = %e, "Failed to rebuild TurboVec index this cycle");
                 } else {
                     tracing::info!(total = corpus.len(), path = jsonl_path, "Corpus updated");
@@ -410,11 +410,11 @@ async fn main() -> anyhow::Result<()> {
     write_jsonl(&all_items, &jsonl_path)?;
     tracing::info!(path = jsonl_path, "Wrote news.jsonl");
 
-    tracing::info!("Loading embedder (downloads model weights on first run)");
-    let embedder = Embedder::load()?;
+    tracing::info!("Connecting to the shared embeddings service");
+    let embedder = Embedder::new()?;
 
     tracing::info!("Embedding items and building TurboVec index");
-    build_and_write_index(&embedder, &all_items, &tv_path)?;
+    build_and_write_index(&embedder, &all_items, &tv_path).await?;
     tracing::info!(path = tv_path, "Wrote news.tv");
 
     Ok(())

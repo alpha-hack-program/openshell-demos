@@ -1,0 +1,5 @@
+*
+!Cargo.*
+!src/
+!data/corpus/
+!Makefile

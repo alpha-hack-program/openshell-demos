@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "mcp-kyc-compliance-v{{version}}"
+pre-release-commit-message = "release(mcp-kyc-compliance): {{version}}"
+tag-message = "mcp-kyc-compliance v{{version}}"
+pre-release-hook = ["make", "check"]
