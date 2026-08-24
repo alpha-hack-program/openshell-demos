@@ -106,10 +106,11 @@ Codex requires `--dangerously-bypass-approvals-and-sandbox` because Codex's buil
 |---|---|---|
 | `openshell-admin` | `openshell-admin` user | Full gateway admin operations — create sandboxes, manage providers, set policies |
 | `openshell-user` | `alice`, `bob`, `charlie` | Connect to sandboxes, run workloads — the standard user role |
-| `banker` | `alice`, `bob`, `charlie` | Composite role — grants the three roles below in one shot; baseline for any Meridian private banker |
+| `banker` | `alice`, `bob`, `charlie` | Composite role — grants the four roles below in one shot; baseline for any Meridian private banker |
 | `mcp-portfolio-user` | Composited into `banker` | Access to `mcp-portfolio` (client holdings/performance) |
 | `mcp-crm-calendar-user` | Composited into `banker` | Access to `mcp-crm-calendar` (banker's own meetings) |
 | `mcp-market-news-user` | Composited into `banker` | Access to `mcp-market-news` (public market news) |
+| `mcp-kyc-compliance-user` | Composited into `banker` | Access to `mcp-kyc-compliance` (risk profile, suitability, regulatory-guidance search) |
 | `compatibility-user` | `alice` only, via the `compatibility-users` group | Access to `mcp-compatibility` (Compatibility Engine — `calc_tax` tool) — Alice's one extra permission, not shared with Bob or Charlie |
 
 The `openshell-admin` and `openshell-user` roles are mapped via `server.oidc.adminRole` and `server.oidc.userRole` in Helm values. The MCP-server roles are enforced by the **Envoy `rbac` filter** on each MCP server pod. `banker` is a Keycloak *composite* role — Keycloak resolves its component roles into `realm_access.roles` automatically, so a caller just needs `banker` in their token; `compatibility-user` instead comes from **group role mapping** (membership in `compatibility-users`), not a direct role assignment on the user.

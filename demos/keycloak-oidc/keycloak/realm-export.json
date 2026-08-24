@@ -10,13 +10,14 @@
         "description": "Baseline role for every Meridian private banker — composite over the four banking data-service roles",
         "composite": true,
         "composites": {
-          "realm": ["mcp-portfolio-user", "mcp-crm-calendar-user", "mcp-market-news-user"]
+          "realm": ["mcp-portfolio-user", "mcp-crm-calendar-user", "mcp-market-news-user", "mcp-kyc-compliance-user"]
         }
       },
       { "name": "compatibility-user", "description": "Extra permission granted via the compatibility-users group — access to the mcp-compatibility server" },
       { "name": "mcp-portfolio-user", "description": "Access to mcp-portfolio (client holdings/performance)" },
       { "name": "mcp-crm-calendar-user", "description": "Access to mcp-crm-calendar (banker meetings)" },
-      { "name": "mcp-market-news-user", "description": "Access to mcp-market-news (public market news)" }
+      { "name": "mcp-market-news-user", "description": "Access to mcp-market-news (public market news)" },
+      { "name": "mcp-kyc-compliance-user", "description": "Access to mcp-kyc-compliance (risk profile, suitability, regulatory-guidance search)" }
     ]
   },
   "groups": [

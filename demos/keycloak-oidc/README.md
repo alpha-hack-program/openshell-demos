@@ -63,13 +63,14 @@ The result is a multi-user setup where:
   or Charlie's credentials, reach services they aren't authorized for, or
   read their clients' data even through a service all three share.
 
-Four MCP servers back the agent: `mcp-portfolio`, `mcp-crm-calendar`, and
-`mcp-market-news` are shared by every banker (gated by the `banker` realm
-role); `mcp-compatibility` is an extra, narrower permission held only by
-Alice (gated by `compatibility-user`, granted through the
-`compatibility-users` Keycloak group). See
-[Demo personas](#demo-personas--alice-bob-and-charlie) below for who's who
-and [What this demo deploys](#what-this-demo-deploys) for the server list.
+Five MCP servers back the agent: `mcp-portfolio`, `mcp-crm-calendar`,
+`mcp-market-news`, and `mcp-kyc-compliance` are shared by every banker
+(gated by the composite `banker` realm role); `mcp-compatibility` is an
+extra, narrower permission held only by Alice (gated by
+`compatibility-user`, granted through the `compatibility-users` Keycloak
+group). See [Demo personas](#demo-personas--alice-bob-and-charlie) below
+for who's who and [What this demo deploys](#what-this-demo-deploys) for
+the server list.
 
 ### Demo personas — Alice, Bob, and Charlie
 
@@ -83,7 +84,7 @@ distinct lenses on the same platform: same job, same tool, different books.
 | **Charlie** | Fundación Iris (conservative, KYC pending, PEP) | `banker` | One delicate relationship — leans on regulatory reasoning more than his colleagues |
 
 Each banker authenticates against Keycloak; the `preferred_username` claim
-(`alice`/`bob`/`charlie`) becomes `banker_id` everywhere in the four
+(`alice`/`bob`/`charlie`) becomes `banker_id` everywhere in the five
 banking MCP servers. An Envoy sidecar validates the JWT signature before a
 request ever reaches an MCP pod — the MCP itself never re-verifies the
 signature, it only base64-decodes the payload to read `preferred_username`
@@ -226,17 +227,18 @@ flowchart TB
 
 ### RBAC setup
 
-This demo uses seven Keycloak realm roles to separate admin and banker
+This demo uses eight Keycloak realm roles to separate admin and banker
 capabilities:
 
 | Role | Who holds it | What it grants |
 |---|---|---|
 | `openshell-admin` | The demo admin | Full OpenShell gateway admin operations (deploy providers, manage sandboxes, set policies) |
 | `openshell-user` | Every onboarded banker | Connect to sandboxes, run workloads |
-| `banker` | Alice, Bob, Charlie | Baseline banking role — composite over the three roles below, so holding `banker` alone is enough to reach all three shared data services |
+| `banker` | Alice, Bob, Charlie | Baseline banking role — composite over the four roles below, so holding `banker` alone is enough to reach all four shared data services |
 | `mcp-portfolio-user` | Composited into `banker` | Access to `mcp-portfolio` (client holdings/performance) |
 | `mcp-crm-calendar-user` | Composited into `banker` | Access to `mcp-crm-calendar` (banker's own meetings) |
 | `mcp-market-news-user` | Composited into `banker` | Access to `mcp-market-news` (public market news) |
+| `mcp-kyc-compliance-user` | Composited into `banker` | Access to `mcp-kyc-compliance` (risk profile, suitability, regulatory-guidance search) |
 | `compatibility-user` | Alice only, via the `compatibility-users` group | Access to `mcp-compatibility` — Alice's one extra permission, deliberately not shared with Bob or Charlie |
 
 ![RBAC setup: admin bootstrap, per-user onboarding, per-user usage](docs/diagrams/rbac-setup-flow.svg)
@@ -1046,7 +1048,7 @@ sandbox with a live credential — they never see a token.
 
 ### 4. Deploy MCP servers
 
-Four downstream services (MCP servers) back Meridian's agent, each
+Five downstream services (MCP servers) back Meridian's agent, each
 validating the caller's Bearer token as a Keycloak-issued OAuth access
 token — the same token Providers v2 already mints/refreshes per banker in
 step 3 — and each only reachable by bankers holding a specific Keycloak
@@ -1057,6 +1059,7 @@ realm role:
 | `mcp-portfolio` | `mcp-portfolio-user` (via `banker`) | Client holdings, performance, biggest client by AUM |
 | `mcp-crm-calendar` | `mcp-crm-calendar-user` (via `banker`) | The authenticated banker's own upcoming meetings and notes |
 | `mcp-market-news` | `mcp-market-news-user` (via `banker`) | Public market news filtered by ticker/sector — no per-client isolation, it's public data |
+| `mcp-kyc-compliance` | `mcp-kyc-compliance-user` (via `banker`) | Client risk profile/KYC/PEP status, product suitability, and semantic search over a fictional regulatory corpus (cites the source clause) |
 | `mcp-compatibility` | `compatibility-user` (Alice only, via the `compatibility-users` group) | Alice's one extra permission, unrelated to the shared `banker` role |
 
 Token enforcement is handled by an **Envoy sidecar** in front of each MCP
@@ -1064,29 +1067,32 @@ server. Envoy's `jwt_authn` filter verifies the token's signature against
 Keycloak's JWKS and `iss`; its `rbac` filter requires the decoded
 `realm_access.roles` claim to contain the server-specific role. The app
 itself listens on loopback only and is unreachable except from Envoy in the
-same pod. `mcp-portfolio` and `mcp-crm-calendar` additionally enforce
-*tenant* isolation inside the app itself (`assert_owns_client`/
-`assert_owns_meeting`) — a banker who holds the right role can still only
-see their own clients' data, never a colleague's, even though all three
-bankers call the same service. `mcp-portfolio`, `mcp-crm-calendar`, and
-`mcp-market-news` share one ephemeral Postgres instance, seeded once per
-`helm install`/`upgrade` with Meridian's demo data (Alice/Bob/Charlie and
-their clients).
+same pod. `mcp-portfolio`, `mcp-crm-calendar`, and `mcp-kyc-compliance`
+additionally enforce *tenant* isolation inside the app itself
+(`assert_owns_client`/`assert_owns_meeting`) — a banker who holds the right
+role can still only see their own clients' data, never a colleague's, even
+though all three bankers call the same service. `mcp-portfolio`,
+`mcp-crm-calendar`, and `mcp-kyc-compliance` share one ephemeral Postgres
+instance, seeded once per `helm install`/`upgrade` with Meridian's demo
+data (Alice/Bob/Charlie and their clients). `mcp-market-news` and
+`mcp-kyc-compliance` additionally call a shared, in-namespace KServe
+`InferenceService` (vLLM CPU, `jinaai/jina-embeddings-v3`) for semantic
+search — see [Prerequisites](#prerequisites) for the RHOAI requirement.
 
 ```bash
 source .env
 ./scripts/06-deploy-mcp-servers.sh
 ```
 
-This deploys all four servers into `$OPENSHELL_NAMESPACE` as two-container
+This deploys all five servers into `$OPENSHELL_NAMESPACE` as two-container
 pods (Envoy + the app), each with its own ServiceAccount, plus the shared
-Postgres.
+Postgres and the shared embeddings `InferenceService`.
 
 The MCP server roles are already assigned to the demo bankers in the realm
 JSON imported in step 1c: `banker` (and therefore `mcp-portfolio-user`,
-`mcp-crm-calendar-user`, `mcp-market-news-user`) → alice, bob, charlie;
-`compatibility-user` → alice only. To onboard additional bankers beyond
-the three pre-configured ones, see
+`mcp-crm-calendar-user`, `mcp-market-news-user`, `mcp-kyc-compliance-user`)
+→ alice, bob, charlie; `compatibility-user` → alice only. To onboard
+additional bankers beyond the three pre-configured ones, see
 [Onboarding additional users](docs/onboard-additional-users.md).
 
 ### 5. Run the demo
@@ -1125,7 +1131,7 @@ per-sandbox:
 
 ```bash
 for USER_ID in alice bob charlie; do
-  for SERVER_NAME in mcp-portfolio mcp-crm-calendar mcp-market-news; do
+  for SERVER_NAME in mcp-portfolio mcp-crm-calendar mcp-market-news mcp-kyc-compliance; do
     openshell policy update "demo-${USER_ID}" \
       --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
       --binary /usr/bin/curl --wait \
@@ -1288,11 +1294,16 @@ openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${PORTFOLIO_UR
 #### Charlie: KYC-aware reasoning
 
 Charlie's one client, Fundación Iris, carries a pending KYC review and a
-PEP flag — `list_my_clients` (`mcp-portfolio`) surfaces both, so the agent
-has real data to reason over instead of a flat yes/no:
+PEP flag. Two servers back this up with real data: `mcp-portfolio`'s
+`list_my_clients` surfaces the flags themselves (also requires
+mcp-portfolio-v0.1.4+ — 0.1.3 returns id/name only); `mcp-kyc-compliance`
+is the dedicated tool — it can look up the flags directly
+(`get_risk_profile`) and, more importantly, search the actual regulatory
+text and cite the clause instead of giving a flat yes/no
+(`search_regulatory_guidance`):
 
 ```bash
-MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+MCP_URL="http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
 openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
   -- bash -c 'curl -sS -X POST \
@@ -1307,15 +1318,27 @@ openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_my_clients\",\"arguments\":{}}}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-005\"}}}" \
     "$MCP_URL"'
-# Expected: 200 — one client, Fundación Iris, kyc_status "pending",
-# pep_flag true. Requires mcp-portfolio-v0.1.4+ (see step 4's server
-# table) — 0.1.3 returns id/name only, without these fields. The demo
-# doesn't model a compliance rules engine — the fields are real, citing
-# the actual applicable rule from them is left to the agent's own
-# reasoning/instructions, not a KYC/AML tool the platform provides today.
+# Expected: 200 — Fundación Iris, kyc_status "pending", pep_flag true.
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"search_regulatory_guidance\",\"arguments\":{\"query\":\"What approval is required before a PEP client transaction can proceed?\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — a fragment from the (fictional) corpus's PEP doc: prior
+# compliance-officer approval plus a documented source-of-funds review,
+# with the source document named — Charlie can cite the rule, not just
+# assert an answer.
 ```
+
+> `check_suitability(client_id, product_id)` is the third tool on this
+> server, but `product_id` refers to the `products` table, which this
+> chart's schema-init job creates but never seeds — there's no product row
+> to reference yet. **[Open item]**, not exercised in this walkthrough.
 
 Alternatively, run the isolation verification script to test every
 banker/server combination — including Bob's boundary probe — automatically:
@@ -1331,18 +1354,23 @@ PASS  alice → mcp-compatibility (calc_tax)  HTTP 200 (expected 200)
 PASS  alice → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
 PASS  alice → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
 PASS  alice → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  alice → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
 PASS  bob → mcp-compatibility  HTTP 403 (expected 403)
 PASS  bob → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
 PASS  bob → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
 PASS  bob → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  bob → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
 PASS  charlie → mcp-compatibility  HTTP 403 (expected 403)
 PASS  charlie → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
 PASS  charlie → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
 PASS  charlie → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  bob probing cli-004 (Alice's Elena Duarte) via get_positions — denied, no cross-tenant data leaked
-PASS  bob probing cli-005 (Charlie's Fundación Iris) via get_positions — denied, no cross-tenant data leaked
+PASS  charlie → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
+PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
+PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
+PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
+PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
 
-Results: 14 passed, 0 failed
+Results: 19 passed, 0 failed
 ```
 
 > For alternate ways to exercise this same RBAC boundary through a real
@@ -1378,27 +1406,32 @@ Results: 14 passed, 0 failed
 **Pending re-verification against a live cluster** — the checklist above
 was verified live against this demo's previous two-user/two-server shape.
 The Meridian Private Bank re-theme (Alice/Bob/Charlie, the `banker`/
-`compatibility-user` roles, and the four-MCP-server topology in
-[step 4](#4-deploy-mcp-servers)) is a documentation/configuration change
-that hasn't been re-run against a live cluster yet:
+`compatibility-user` roles, and the five-MCP-server topology in
+[step 4](#4-deploy-mcp-servers), including the separately-added
+`mcp-kyc-compliance` server) is a documentation/configuration change that
+hasn't been re-run against a live cluster yet:
 
 - [ ] Isolation test passes: no banker's sandbox can access another's data
       even when all three sandboxes run concurrently —
-      `08-verify-isolation.sh` (workspace- and tenant-aware): expect 14
+      `08-verify-isolation.sh` (workspace- and tenant-aware): expect 19
       passed, 0 failed
-- [ ] (Stretch) `mcp-servers` chart deployed with all four servers; a
+- [ ] (Stretch) `mcp-servers` chart deployed with all five servers; a
       banker holding the required Keycloak role can reach their server,
       one lacking it cannot — via the Envoy sidecar
-- [ ] (Stretch) A banker holding `banker` (and therefore all three data-
+- [ ] (Stretch) A banker holding `banker` (and therefore all four data-
       service roles) does not thereby gain `compatibility-user` — verified
       both directions (Alice reaches `mcp-compatibility`, Bob and Charlie
       get 403)
-- [ ] (Stretch) Tenant isolation inside `mcp-portfolio` holds under a real
-      probe: Bob's `get_positions` call against Alice's and Charlie's
-      `client_id`s is denied with the same ambiguous error a nonexistent
-      `client_id` gets
-- [ ] (Stretch) Codex variant — all three bankers, all four MCP servers
-- [ ] (Stretch) Claude Code variant — all three bankers, all four MCP servers
+- [ ] (Stretch) Tenant isolation inside `mcp-portfolio` and
+      `mcp-kyc-compliance` holds under a real probe: Bob's `get_positions`/
+      `get_risk_profile` calls against Alice's and Charlie's `client_id`s
+      are denied with the same ambiguous error a nonexistent `client_id`
+      gets
+- [ ] (Stretch) `mcp-kyc-compliance`'s `search_regulatory_guidance` returns
+      a real, cited fragment from the fictional corpus (depends on the
+      shared vLLM/KServe embeddings `InferenceService` being up)
+- [ ] (Stretch) Codex variant — all three bankers, all five MCP servers
+- [ ] (Stretch) Claude Code variant — all three bankers, all five MCP servers
 
 ## Part II — Red-team evaluation (EvalHub + Garak)
 
@@ -1646,7 +1679,7 @@ banker/server combination automatically:
 ```
 
 Expected output — see [step 5](#5-run-the-demo) for the full annotated
-listing (14 passed, 0 failed).
+listing (19 passed, 0 failed).
 
 #### Claude Code + BYO LLM + MCP tool
 
@@ -1836,12 +1869,16 @@ exact patch release before relying on this beyond a demo.
 - **Per-server token audience** — Keycloak isn't configured with an audience
   mapper per MCP server, so the realm role claim is the *only* thing
   distinguishing access to one banking data service from another.
-- **`mcp-kyc-compliance` doesn't exist yet.** The Meridian Private Bank
-  theme calls for a fourth, dedicated compliance data service; only a
-  prompt file survives under `mcp/old/`. Charlie's KYC/PEP scenario in
-  this guide uses the `kyc_status`/`pep_flag` fields `mcp-portfolio`'s
-  `list_my_clients` exposes instead — real data, but no dedicated
-  regulatory-reasoning tool or rules engine behind it.
+- **`mcp-kyc-compliance`'s regulatory corpus is small and fictional.**
+  `search_regulatory_guidance` does real semantic search, but over four
+  short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
+  — not real FATF/MiFID II/AML text, and not something to demo as if it
+  were. See that server's own README disclaimer.
+- **`check_suitability`'s `product_id` has nothing to reference.** The
+  `products` table exists in the shared schema but the schema-init job
+  never seeds it — the tool works, but every call fails with "product not
+  found" until someone adds seed rows. Not exercised in this guide's
+  walkthrough for that reason.
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no

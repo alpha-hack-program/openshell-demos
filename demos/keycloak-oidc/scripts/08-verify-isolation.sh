@@ -1,41 +1,46 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Verifies per-banker credential isolation for Meridian Private Bank's three
-# bankers (alice, bob, charlie) across the four MCP servers. Two isolation
+# bankers (alice, bob, charlie) across the five MCP servers. Two isolation
 # mechanisms are checked:
 #
 #   1. Role-based (Envoy jwt_authn + rbac sidecar, HTTP-level 403): all three
 #      bankers hold `banker` (composite over mcp-portfolio-user/
-#      mcp-crm-calendar-user/mcp-market-news-user), so all three reach those
-#      three servers. Only Alice holds `compatibility-user` (via the
-#      compatibility-users group), so only she reaches mcp-compatibility.
-#   2. Tenant-based (mcp-portfolio's own assert_owns_client, JSON-RPC-level
-#      error inside an HTTP 200 — [VERIFY], not confirmed against a live
-#      cluster): Bob, probing the isolation boundary while a promotion
-#      decision looms, tries get_positions against Alice's and Charlie's
+#      mcp-crm-calendar-user/mcp-market-news-user/mcp-kyc-compliance-user),
+#      so all three reach those four servers. Only Alice holds
+#      `compatibility-user` (via the compatibility-users group), so only
+#      she reaches mcp-compatibility.
+#   2. Tenant-based (mcp-portfolio's/mcp-kyc-compliance's own
+#      assert_owns_client, JSON-RPC-level error inside an HTTP 200 —
+#      [VERIFY], not confirmed against a live cluster): Bob, probing the
+#      isolation boundary while a promotion decision looms, tries
+#      get_positions/get_risk_profile against Alice's and Charlie's
 #      client_ids and should get the same ambiguous "not found for caller"
 #      error he'd get for a nonexistent client_id, never their data.
 #
 # Expected results:
-#   alice  -> mcp-compatibility  = 200  calc_tax
-#   alice  -> mcp-portfolio      = 200  list_my_clients
-#   alice  -> mcp-crm-calendar   = 200  get_upcoming_meetings
-#   alice  -> mcp-market-news    = 200  get_relevant_news
-#   bob    -> mcp-compatibility  = 403  (bob lacks compatibility-user role)
-#   bob    -> mcp-portfolio      = 200  list_my_clients
-#   bob    -> mcp-crm-calendar   = 200  get_upcoming_meetings
-#   bob    -> mcp-market-news    = 200  get_relevant_news
-#   charlie -> mcp-compatibility = 403  (charlie lacks compatibility-user role)
-#   charlie -> mcp-portfolio     = 200  list_my_clients
-#   charlie -> mcp-crm-calendar  = 200  get_upcoming_meetings
-#   charlie -> mcp-market-news   = 200  get_relevant_news
-#   bob probing cli-004 (Alice's Elena Duarte) via get_positions = denied
-#   bob probing cli-005 (Charlie's Fundación Iris) via get_positions = denied
+#   alice  -> mcp-compatibility   = 200  calc_tax
+#   alice  -> mcp-portfolio       = 200  list_my_clients
+#   alice  -> mcp-crm-calendar    = 200  get_upcoming_meetings
+#   alice  -> mcp-market-news     = 200  get_relevant_news
+#   alice  -> mcp-kyc-compliance  = 200  get_risk_profile
+#   bob    -> mcp-compatibility   = 403  (bob lacks compatibility-user role)
+#   bob    -> mcp-portfolio       = 200  list_my_clients
+#   bob    -> mcp-crm-calendar    = 200  get_upcoming_meetings
+#   bob    -> mcp-market-news     = 200  get_relevant_news
+#   bob    -> mcp-kyc-compliance  = 200  get_risk_profile
+#   charlie -> mcp-compatibility  = 403  (charlie lacks compatibility-user role)
+#   charlie -> mcp-portfolio      = 200  list_my_clients
+#   charlie -> mcp-crm-calendar   = 200  get_upcoming_meetings
+#   charlie -> mcp-market-news    = 200  get_relevant_news
+#   charlie -> mcp-kyc-compliance = 200  get_risk_profile
+#   bob probing cli-004 (Alice's Elena Duarte) via get_positions/get_risk_profile = denied
+#   bob probing cli-005 (Charlie's Fundación Iris) via get_positions/get_risk_profile = denied
 #
 # Prerequisites:
 #   - alice, bob, charlie onboarded (step 3) with providers attached to
 #     their sandboxes
-#   - All four MCP servers deployed (step 4)
+#   - All five MCP servers deployed (step 4)
 #   - Network policies added for each banker to each server they're
 #     authorized for (07-authorize-mcp-user.sh) — this script also adds
 #     them itself, best-effort, before each call
@@ -64,10 +69,13 @@ PAIRS=(
   "charlie|mcp-portfolio|list_my_clients|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_my_clients\",\"arguments\":{}}}"
   "charlie|mcp-crm-calendar|get_upcoming_meetings|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_upcoming_meetings\",\"arguments\":{}}}"
   "charlie|mcp-market-news|get_relevant_news|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_relevant_news\",\"arguments\":{\"tickers\":[],\"sectors\":[\"health\"]}}}"
+  "alice|mcp-kyc-compliance|get_risk_profile|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-004\"}}}"
+  "bob|mcp-kyc-compliance|get_risk_profile|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-001\"}}}"
+  "charlie|mcp-kyc-compliance|get_risk_profile|{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-005\"}}}"
 )
 
 BANKERS=("alice" "bob" "charlie")
-SERVERS=("mcp-compatibility" "mcp-portfolio" "mcp-crm-calendar" "mcp-market-news")
+SERVERS=("mcp-compatibility" "mcp-portfolio" "mcp-crm-calendar" "mcp-market-news" "mcp-kyc-compliance")
 
 MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}'
 
@@ -158,37 +166,41 @@ done
 
 # ---------------------------------------------------------------------------
 # Bob's isolation-boundary probe: with a promotion decision looming and his
-# book looking thin next to Alice's and Charlie's, Bob tries get_positions
-# against a client that isn't his. Role-based auth (Envoy) doesn't stop this
-# — Bob legitimately holds mcp-portfolio-user via `banker`. The isolation
-# has to come from mcp-portfolio's own assert_owns_client check instead,
-# which returns the same ambiguous "not found for caller" error whether the
+# book looking thin next to Alice's and Charlie's, Bob tries the client-scoped
+# tool on each tenant-isolated server against a client that isn't his.
+# Role-based auth (Envoy) doesn't stop this — Bob legitimately holds both
+# mcp-portfolio-user and mcp-kyc-compliance-user via `banker`. The isolation
+# has to come from each server's own assert_owns_client check instead, which
+# returns the same ambiguous "not found for caller" error whether the
 # client_id belongs to someone else or doesn't exist at all — so Bob's
 # response should be indistinguishable from a typo, never Alice's or
 # Charlie's actual data. [VERIFY]: HTTP code assumed 200 (JSON-RPC-level
 # error, not an HTTP-level rejection) — not confirmed against a live cluster.
 # ---------------------------------------------------------------------------
 if openshell sandbox get "demo-bob" --workspace "bob" &>/dev/null; then
-  MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-  openshell policy update "demo-bob" --workspace "bob" \
-    --add-endpoint "mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-    --binary /usr/bin/curl --wait &>/dev/null || true
-  mcp_request "demo-bob" "$MCP_URL" "$MCP_INIT" "bob" >/dev/null
+  for PROBE_SERVER_TOOL in "mcp-portfolio|get_positions" "mcp-kyc-compliance|get_risk_profile"; do
+    IFS='|' read -r PROBE_SERVER PROBE_TOOL <<< "$PROBE_SERVER_TOOL"
+    MCP_URL="http://${PROBE_SERVER}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+    openshell policy update "demo-bob" --workspace "bob" \
+      --add-endpoint "${PROBE_SERVER}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
+      --binary /usr/bin/curl --wait &>/dev/null || true
+    mcp_request "demo-bob" "$MCP_URL" "$MCP_INIT" "bob" >/dev/null
 
-  for probe in "cli-004|Alice's Elena Duarte" "cli-005|Charlie's Fundación Iris"; do
-    IFS='|' read -r CLIENT_ID CLIENT_DESC <<< "$probe"
-    PROBE_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"get_positions\",\"arguments\":{\"client_id\":\"${CLIENT_ID}\"}}}"
-    mcp_request "demo-bob" "$MCP_URL" "$PROBE_CALL" "bob" >/dev/null
-    BODY=$(mcp_request_body "demo-bob" "bob")
-    LABEL="bob probing ${CLIENT_ID} (${CLIENT_DESC}) via get_positions"
-    if echo "$BODY" | grep -qi "no encontrado\|not found"; then
-      echo "PASS  ${LABEL} — denied, no cross-tenant data leaked"
-      ((++PASS))
-    else
-      echo "FAIL  ${LABEL} — expected an ownership-denial error, got: ${BODY}"
-      ((++FAIL))
-      ERRORS="${ERRORS}\n  ${LABEL}: expected denial, got: ${BODY}"
-    fi
+    for probe in "cli-004|Alice's Elena Duarte" "cli-005|Charlie's Fundación Iris"; do
+      IFS='|' read -r CLIENT_ID CLIENT_DESC <<< "$probe"
+      PROBE_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${PROBE_TOOL}\",\"arguments\":{\"client_id\":\"${CLIENT_ID}\"}}}"
+      mcp_request "demo-bob" "$MCP_URL" "$PROBE_CALL" "bob" >/dev/null
+      BODY=$(mcp_request_body "demo-bob" "bob")
+      LABEL="bob probing ${CLIENT_ID} (${CLIENT_DESC}) via ${PROBE_SERVER}.${PROBE_TOOL}"
+      if echo "$BODY" | grep -qi "no encontrado\|not found"; then
+        echo "PASS  ${LABEL} — denied, no cross-tenant data leaked"
+        ((++PASS))
+      else
+        echo "FAIL  ${LABEL} — expected an ownership-denial error, got: ${BODY}"
+        ((++FAIL))
+        ERRORS="${ERRORS}\n  ${LABEL}: expected denial, got: ${BODY}"
+      fi
+    done
   done
 fi
 

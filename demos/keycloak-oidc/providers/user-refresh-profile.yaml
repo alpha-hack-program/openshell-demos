@@ -38,3 +38,8 @@ endpoints:
     protocol: rest
     access: read-write
     enforcement: enforce
+  - host: "mcp-kyc-compliance.<openshell-namespace>.svc.cluster.local"
+    port: 8000
+    protocol: rest
+    access: read-write
+    enforcement: enforce
