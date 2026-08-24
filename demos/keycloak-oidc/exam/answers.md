@@ -34,7 +34,7 @@ oc get packagemanifests -n openshift-marketplace | grep rhbk-operator
 
 - A **provider profile** is a template that defines *how* a credential type works: which environment variables it uses, the auth style (bearer, header), refresh strategy, endpoint bindings, and binary allowlists. Example: `user-scoped-api` — defines the `USER_ACCESS_TOKEN` env var with `oauth2_refresh_token` refresh strategy and MCP-server endpoint bindings.
 
-- A **provider instance** is a concrete credential tied to a profile for a specific user or purpose. Example: `user-user1` — an instance of the `user-scoped-api` profile holding user1's actual refresh token.
+- A **provider instance** is a concrete credential tied to a profile for a specific user or purpose. Example: `user-alice` — an instance of the `user-scoped-api` profile holding Alice's actual refresh token.
 
 ---
 
@@ -60,7 +60,7 @@ The two dimensions that must be specified together are:
 Defense-in-depth layers:
 1. **Sandbox network policy** — only allowlisted endpoints are reachable at all.
 2. **Envoy `jwt_authn` filter** — verifies the JWT signature against Keycloak's JWKS endpoint, validates the `iss` claim, and checks expiry.
-3. **Envoy `rbac` filter** — inspects the `realm_access.roles` claim in the JWT and rejects requests that lack the server-specific role (e.g. `mcp-server-a-user`).
+3. **Envoy `rbac` filter** — inspects the `realm_access.roles` claim in the JWT and rejects requests that lack the server-specific role (e.g. `mcp-portfolio-user`).
 4. **App loopback binding** — the MCP app listens on `127.0.0.1:8001`, making it unreachable from outside the pod; only Envoy (in the same pod) can reach it.
 
 Removing Envoy is a critical failure because **the MCP server images themselves perform no authentication or authorization**. Testing confirmed that requests with **no token**, **garbage tokens**, and **valid tokens missing the required role** all successfully reached the tool endpoint when sent directly to the app container. Envoy is the **only** enforcement point.
@@ -105,11 +105,14 @@ Codex requires `--dangerously-bypass-approvals-and-sandbox` because Codex's buil
 | Role | Assigned to | Purpose |
 |---|---|---|
 | `openshell-admin` | `openshell-admin` user | Full gateway admin operations — create sandboxes, manage providers, set policies |
-| `openshell-user` | `user1`, `user2` | Connect to sandboxes, run workloads — the standard user role |
-| `mcp-server-a-user` | `user1` | Access to MCP Server A (Eligibility Engine — `evaluate_unpaid_leave_eligibility` tool) |
-| `mcp-server-b-user` | `user2` | Access to MCP Server B (Compatibility Engine — `calc_tax` tool) |
+| `openshell-user` | `alice`, `bob`, `charlie` | Connect to sandboxes, run workloads — the standard user role |
+| `banker` | `alice`, `bob`, `charlie` | Composite role — grants the three roles below in one shot; baseline for any Meridian private banker |
+| `mcp-portfolio-user` | Composited into `banker` | Access to `mcp-portfolio` (client holdings/performance) |
+| `mcp-crm-calendar-user` | Composited into `banker` | Access to `mcp-crm-calendar` (banker's own meetings) |
+| `mcp-market-news-user` | Composited into `banker` | Access to `mcp-market-news` (public market news) |
+| `compatibility-user` | `alice` only, via the `compatibility-users` group | Access to `mcp-compatibility` (Compatibility Engine — `calc_tax` tool) — Alice's one extra permission, not shared with Bob or Charlie |
 
-The `openshell-admin` and `openshell-user` roles are mapped via `server.oidc.adminRole` and `server.oidc.userRole` in Helm values. The MCP-server roles are enforced by the **Envoy `rbac` filter** on each MCP server pod.
+The `openshell-admin` and `openshell-user` roles are mapped via `server.oidc.adminRole` and `server.oidc.userRole` in Helm values. The MCP-server roles are enforced by the **Envoy `rbac` filter** on each MCP server pod. `banker` is a Keycloak *composite* role — Keycloak resolves its component roles into `realm_access.roles` automatically, so a caller just needs `banker` in their token; `compatibility-user` instead comes from **group role mapping** (membership in `compatibility-users`), not a direct role assignment on the user.
 
 ---
 
@@ -210,7 +213,7 @@ Before forwarding, Envoy checks:
 
 Providers v2 **rejects** attaching two providers to the same sandbox if they expose the **same credential environment variable key** (e.g. both try to set `$USER_ACCESS_TOKEN`). This catches naming collisions.
 
-However, it does **not** catch **misassignment** — OpenShell has no built-in concept of "this sandbox belongs to this user." If an admin attaches user1's provider instance to user2's sandbox, Providers v2 will not flag this. Getting the right provider attached to the right sandbox is entirely the **operator's responsibility**.
+However, it does **not** catch **misassignment** — OpenShell has no built-in concept of "this sandbox belongs to this user." If an admin attaches Alice's provider instance to Bob's sandbox, Providers v2 will not flag this. Getting the right provider attached to the right sandbox is entirely the **operator's responsibility**.
 
 ---
 

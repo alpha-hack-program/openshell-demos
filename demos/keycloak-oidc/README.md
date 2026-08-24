@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Overview](#overview)
+  - [Demo personas — Alice, Bob, and Charlie](#demo-personas--alice-bob-and-charlie)
   - [How to follow this guide](#how-to-follow-this-guide)
   - [Architecture](#architecture)
   - [RBAC setup](#rbac-setup)
@@ -16,7 +17,7 @@
     - [Set up your `.env` files](#set-up-your-env-files)
   - [1. Deploy Keycloak](#1-deploy-keycloak)
   - [2. Create the namespace, grant SCCs, and install OpenShell with OIDC](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc)
-  - [3. Onboard a user](#3-onboard-a-user)
+  - [3. Onboard a banker](#3-onboard-a-banker)
   - [4. Deploy MCP servers](#4-deploy-mcp-servers)
   - [5. Run the demo](#5-run-the-demo)
   - [Definition of done](#definition-of-done)
@@ -33,36 +34,70 @@
 
 ## Overview
 
-This demo deploys OpenShell on OpenShift with **Keycloak as the OIDC identity
-provider** and **per-user credential isolation** via Providers v2. Each user
-gets their own scoped credential — an offline refresh token issued by
-Keycloak — which the OpenShell gateway silently refreshes into short-lived
-access tokens on that user's behalf. No shared service account, no
-credential sharing between users.
+**Meridian Private Bank** is a boutique wealth management firm where a
+small team of private bankers each run their own book of clients — no two
+bankers share a client, and no banker sees a colleague's book by default.
+Meridian rolled out a shared AI agent platform to every relationship
+manager: the same underlying agent, the same banking data services behind
+it, but each banker's session is bound to their own identity the moment
+they log in. This demo shows that shared platform behaving, in every
+respect, as if each banker had their own private system — even though
+underneath it's one set of services doing the enforcing, not three separate
+deployments.
+
+Technically, this demo deploys OpenShell on OpenShift with **Keycloak as
+the OIDC identity provider** and **per-user credential isolation** via
+Providers v2. Each banker gets their own scoped credential — an offline
+refresh token issued by Keycloak — which the OpenShell gateway silently
+refreshes into short-lived access tokens on that banker's behalf. No shared
+service account, no credential sharing between bankers.
 
 The result is a multi-user setup where:
 
 - An **admin** deploys the infrastructure (Keycloak, OpenShell, MCP servers)
-  and onboards users.
-- Each **user** connects to a sandbox that automatically carries their own
-  identity. Outbound API calls from the sandbox use that user's own
+  and onboards bankers.
+- Each **banker** connects to a sandbox that automatically carries their
+  own identity. Outbound API calls from the sandbox use that banker's own
   Keycloak-issued token — scoped, short-lived, and automatically rotated.
-- Users are isolated from each other: user A's sandbox cannot access user
-  B's credentials or reach services that user B is authorized for.
+- Bankers are isolated from each other: Bob's sandbox cannot access Alice's
+  or Charlie's credentials, reach services they aren't authorized for, or
+  read their clients' data even through a service all three share.
 
-As a stretch goal, two example MCP servers are deployed behind Envoy
-sidecars that enforce Keycloak role-based access — only users holding the
-correct realm role can reach a given server.
+Four MCP servers back the agent: `mcp-portfolio`, `mcp-crm-calendar`, and
+`mcp-market-news` are shared by every banker (gated by the `banker` realm
+role); `mcp-compatibility` is an extra, narrower permission held only by
+Alice (gated by `compatibility-user`, granted through the
+`compatibility-users` Keycloak group). See
+[Demo personas](#demo-personas--alice-bob-and-charlie) below for who's who
+and [What this demo deploys](#what-this-demo-deploys) for the server list.
+
+### Demo personas — Alice, Bob, and Charlie
+
+Three of Meridian's private bankers, used throughout this guide as three
+distinct lenses on the same platform: same job, same tool, different books.
+
+| Banker | Book | Realm roles | What they exercise |
+|---|---|---|---|
+| **Alice** | Elena Duarte (moderate risk, technology) | `banker`, `compatibility-user` | Smallest book, one extra permission — proves the platform behaves correctly even for a low-traffic user with an unusual second permission |
+| **Bob** | Clara Fontán (moderate, logistics), Grupo Delta Textil (aggressive, textiles), Marcus Wren (conservative, importer) | `banker` | Largest, most varied book — multi-hop scenarios (biggest client by AUM, meeting prep, performance diagnosis) and, with a promotion decision looming, the one who probes the isolation boundary |
+| **Charlie** | Fundación Iris (conservative, KYC pending, PEP) | `banker` | One delicate relationship — leans on regulatory reasoning more than his colleagues |
+
+Each banker authenticates against Keycloak; the `preferred_username` claim
+(`alice`/`bob`/`charlie`) becomes `banker_id` everywhere in the four
+banking MCP servers. An Envoy sidecar validates the JWT signature before a
+request ever reaches an MCP pod — the MCP itself never re-verifies the
+signature, it only base64-decodes the payload to read `preferred_username`
+and `realm_access.roles`.
 
 ### How to follow this guide
 
-One person conceptually plays three roles — **admin**, **user1**, **user2**
-— but that does **not** mean you run three equally-privileged CLI sessions
-against a shared pool of resources. Read this before copy-pasting anything
-below; it explains who actually runs each command and why, and it's the
-result of testing the alternative (a shared workspace) and finding it
-breaks isolation. See [Workspace isolation](#workspace-isolation) above for
-the full mechanics.
+One person conceptually plays four roles — **admin**, **alice**, **bob**,
+**charlie** — but that does **not** mean you run four equally-privileged
+CLI sessions against a shared pool of resources. Read this before
+copy-pasting anything below; it explains who actually runs each command and
+why, and it's the result of testing the alternative (a shared workspace)
+and finding it breaks isolation. See
+[Workspace isolation](#workspace-isolation) above for the full mechanics.
 
 **Admin's terminal does steps 1, 2, and 4, plus the provider/policy-setting
 parts of steps 3 and 5** — deploying infrastructure, and anything that
@@ -72,45 +107,46 @@ not incidental: in this demo's RBAC model, provider and policy management
 are Workspace-Admin-or-above operations (see the roles table in
 [Workspace isolation](#workspace-isolation)), and admin is the only
 Platform Admin identity. Every one of these commands passes
-`--workspace "${USER_ID}"` to target the right user's workspace — admin can
-reach into any workspace, so this is how one admin session provisions both
-users without them sharing anything.
+`--workspace "${USER_ID}"` to target the right banker's workspace — admin
+can reach into any workspace, so this is how one admin session provisions
+all three bankers without them sharing anything.
 
-**user1/user2 can legitimately self-service `sandbox create`/`sandbox
+**alice/bob/charlie can legitimately self-service `sandbox create`/`sandbox
 exec`/`sandbox list` inside their own workspace once onboarded** —
 confirmed live, this is the one part of the RBAC table's original claim
 ("`openshell-user`: connect to sandboxes, run workloads") that holds up
-once each user has their own workspace. If you want to actually run step 5
-as user1/user2 themselves rather than from admin's terminal, you can — see
-the optional per-terminal setup below. The guide's own command blocks stay
-written from admin's terminal throughout, both options work identically
-because workspace scoping doesn't care who's asking, only whose membership
-they hold.
+once each banker has their own workspace. If you want to actually run
+step 5 as alice/bob/charlie themselves rather than from admin's terminal,
+you can — see the optional per-terminal setup below. The guide's own
+command blocks stay written from admin's terminal throughout, both options
+work identically because workspace scoping doesn't care who's asking, only
+whose membership they hold.
 
 **The one place a real second identity is unavoidable is the Keycloak login
 screen:**
 - Step 2c: **admin** logs in via browser — the admin's own authentication.
 - Step 3, Option B (the `onboard` tool): the browser login inside the tool
-  is **user1/user2 authenticating as themselves** — that's the whole point
-  of Option B, the operator's admin session never sees their password.
-  Workspace creation (before the tool runs) and the token exchange itself
-  still happen from admin's terminal / the tool's own process.
+  is **alice/bob/charlie authenticating as themselves** — that's the whole
+  point of Option B, the operator's admin session never sees their
+  password. Workspace creation (before the tool runs) and the token
+  exchange itself still happen from admin's terminal / the tool's own
+  process.
 - Step 3, Option A (password grant): no separate login at all — admin's
-  script authenticates *as* the user directly via the token endpoint,
+  script authenticates *as* the banker directly via the token endpoint,
   using a password the operator was handed. This is why Option A is
   marked demo-only.
 
 Practical tips:
 
-- **Keycloak sessions are per-browser.** When onboarding multiple users
-  with Option B, log out of Keycloak between users — otherwise the browser
-  reuses the previous session and you get the same user's token again. The
-  tool's success page includes a logout link, or use a private/incognito
-  window for each user.
+- **Keycloak sessions are per-browser.** When onboarding multiple bankers
+  with Option B, log out of Keycloak between them — otherwise the browser
+  reuses the previous session and you get the same banker's token again.
+  The tool's success page includes a logout link, or use a
+  private/incognito window for each banker.
 - With Option A there is no browser session to worry about — just change
   `USER_ID` and `USER_PASS` in the same terminal.
-- Keep user1's sandbox running while you set up and test user2's — the
-  isolation check in step 5 needs both alive at once.
+- Keep alice's and bob's sandboxes running while you set up and test the
+  others' — the isolation check in step 5 needs all three alive at once.
 
 **Optional: run each identity in its own real terminal, scoped with
 `XDG_CONFIG_HOME`/`XDG_STATE_HOME`, and use it to verify the workspace
@@ -121,12 +157,12 @@ isolation claim above yourself instead of taking it on faith:**
 export XDG_CONFIG_HOME=/tmp/oc-admin/config XDG_STATE_HOME=/tmp/oc-admin/state
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
-# Terminal B — user1 (separate window/tab)
-export XDG_CONFIG_HOME=/tmp/oc-user1/config XDG_STATE_HOME=/tmp/oc-user1/state
+# Terminal B — alice (separate window/tab)
+export XDG_CONFIG_HOME=/tmp/oc-alice/config XDG_STATE_HOME=/tmp/oc-alice/state
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
-# Terminal C — user2 (separate window/tab)
-export XDG_CONFIG_HOME=/tmp/oc-user2/config XDG_STATE_HOME=/tmp/oc-user2/state
+# Terminal C — bob (separate window/tab)
+export XDG_CONFIG_HOME=/tmp/oc-bob/config XDG_STATE_HOME=/tmp/oc-bob/state
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 ```
 
@@ -134,14 +170,14 @@ This is entirely optional — skip it and just run every command from one
 terminal as admin, which is exactly equivalent since workspace scoping is
 about membership, not which terminal you typed in. If you do set it up: run
 step 2b/2c's `gateway add` in Terminal A logging in as admin, Terminal B as
-user1, Terminal C as user2 (each triggers its own Keycloak login). After
-step 3 has created `user1`'s and `user2`'s workspaces and granted their
+alice, Terminal C as bob (each triggers its own Keycloak login). After
+step 3 has created alice's and bob's workspaces and granted their
 membership, try from Terminal B:
 
 ```bash
-openshell sandbox exec -n demo-user1 --workspace user1 -- echo works   # succeeds — own workspace
-openshell sandbox exec -n demo-user2 --workspace user2 -- echo blocked # denied — not a member of workspace 'user2'
-openshell provider create --name probe --type user-scoped-api --credential USER_ACCESS_TOKEN=pending --workspace user1  # denied — workspace role 'admin' required
+openshell sandbox exec -n demo-alice --workspace alice -- echo works  # succeeds — own workspace
+openshell sandbox exec -n demo-bob --workspace bob -- echo blocked    # denied — not a member of workspace 'bob'
+openshell provider create --name probe --type user-scoped-api --credential USER_ACCESS_TOKEN=pending --workspace alice  # denied — workspace role 'admin' required
 ```
 
 The first succeeds (self-service within their own workspace), the second
@@ -149,11 +185,14 @@ is denied (cross-workspace access blocked — this is the fix for the bug
 this guide used to have, where all users shared one workspace), and the
 third is denied (provider management stays admin-only even in your own
 workspace). That's the full RBAC boundary this guide relies on, made
-concrete instead of asserted.
+concrete instead of asserted. Charlie follows the exact same pattern (a
+third terminal, a third `XDG_*` pair) — omitted above only because two
+identities are enough to demonstrate the cross-workspace block.
 
-Verified on Linux with openshell CLI 0.0.106 — three concurrent identities,
-no state bleed between them, nothing written outside the chosen directories,
-and the cross-workspace block confirmed in both directions.
+Verified on Linux with openshell CLI 0.0.106 — three concurrent identities
+(admin, alice, bob), no state bleed between them, nothing written outside
+the chosen directories, and the cross-workspace block confirmed in both
+directions.
 **[VERIFY on macOS]** — the `XDG_CONFIG_HOME`/`XDG_STATE_HOME` mechanism is
 standard, but this session only tested Linux. See
 [`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#running-multiple-cli-identities-concurrently-on-one-machine)
@@ -187,15 +226,18 @@ flowchart TB
 
 ### RBAC setup
 
-This demo uses four Keycloak realm roles to separate admin and user
+This demo uses seven Keycloak realm roles to separate admin and banker
 capabilities:
 
 | Role | Who holds it | What it grants |
 |---|---|---|
 | `openshell-admin` | The demo admin | Full OpenShell gateway admin operations (deploy providers, manage sandboxes, set policies) |
-| `openshell-user` | Every onboarded user | Connect to sandboxes, run workloads |
-| `mcp-server-a-user` | Users authorized for MCP server A | Access to the Eligibility Engine MCP server |
-| `mcp-server-b-user` | Users authorized for MCP server B | Access to the Compatibility Engine MCP server |
+| `openshell-user` | Every onboarded banker | Connect to sandboxes, run workloads |
+| `banker` | Alice, Bob, Charlie | Baseline banking role — composite over the three roles below, so holding `banker` alone is enough to reach all three shared data services |
+| `mcp-portfolio-user` | Composited into `banker` | Access to `mcp-portfolio` (client holdings/performance) |
+| `mcp-crm-calendar-user` | Composited into `banker` | Access to `mcp-crm-calendar` (banker's own meetings) |
+| `mcp-market-news-user` | Composited into `banker` | Access to `mcp-market-news` (public market news) |
+| `compatibility-user` | Alice only, via the `compatibility-users` group | Access to `mcp-compatibility` — Alice's one extra permission, deliberately not shared with Bob or Charlie |
 
 ![RBAC setup: admin bootstrap, per-user onboarding, per-user usage](docs/diagrams/rbac-setup-flow.svg)
 
@@ -257,12 +299,12 @@ could each `sandbox exec` into the *other's* sandbox and successfully call
 an MCP server using the other user's real, working injected credential —
 completely bypassing the Envoy/Keycloak-role isolation described above.
 
-**This is why each user in this guide gets their own dedicated workspace**
-(named after their `USER_ID` — `user1`, `user2`), not membership in a
-shared one. Step 3 creates it. Every subsequent command that touches a
-user's provider or sandbox passes `--workspace "${USER_ID}"` explicitly —
+**This is why each banker in this guide gets their own dedicated workspace**
+(named after their `USER_ID` — `alice`, `bob`, `charlie`), not membership
+in a shared one. Step 3 creates it. Every subsequent command that touches a
+banker's provider or sandbox passes `--workspace "${USER_ID}"` explicitly —
 don't drop that flag when adapting these commands, and don't grant a second
-user membership in a workspace that already has one.
+banker membership in a workspace that already has one.
 
 ## Part I — OIDC RBAC demo
 
@@ -283,14 +325,22 @@ user membership in a workspace that already has one.
 
 - `helm/values.yaml` — OpenShift-compatibility overrides plus OIDC
   configuration (`server.oidc.*`, `allowUnauthenticatedUsers: false`).
-- A Keycloak realm (`keycloak/realm-export.json`) with CLI and
-  gateway clients, admin/user roles, and a few demo users. The gateway
-  client secret is hardcoded (`openshell-gateway-demo-secret`) — in a
-  production setup you would generate a unique secret per environment.
+- A Keycloak realm (`keycloak/realm-export.json`) with CLI and gateway
+  clients, admin/banker roles (including the composite `banker` role and
+  the `compatibility-users` group), and Meridian's three demo bankers
+  (alice, bob, charlie). The gateway client secret is hardcoded
+  (`openshell-gateway-demo-secret`) — in a production setup you would
+  generate a unique secret per environment.
 - Providers v2 enabled (`providers_v2_enabled=true`).
-- A per-user provider profile and onboarding flow.
-- Two example MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars
-  that gate access by Keycloak realm role.
+- A per-banker provider profile and onboarding flow.
+- Four MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars that
+  gate access by Keycloak realm role: `mcp-portfolio`, `mcp-crm-calendar`,
+  and `mcp-market-news` (shared by all three bankers via `banker`), plus
+  `mcp-compatibility` (Alice only, via `compatibility-user`). A shared
+  ephemeral Postgres backs the first three. A fourth service the theme
+  calls for, `mcp-kyc-compliance`, has not been built yet — Charlie's
+  KYC/PEP scenario in this guide instead uses the `kyc_status`/`pep_flag`
+  fields `mcp-portfolio`'s `list_my_clients` exposes.
 
 ### Getting started
 
@@ -376,9 +426,10 @@ after it runs, so you'll come back and complete your `.env` then.
 
 The realm JSON at `keycloak/realm-export.json` is ready to import as-is —
 no substitution needed. The gateway client secret is hardcoded as
-`openshell-gateway-demo-secret` (along with demo user passwords
-`user1`/`user1`, `user2`/`user2`). This keeps the demo simple; in
-production you would generate a unique secret per environment.
+`openshell-gateway-demo-secret` (along with the three demo bankers'
+passwords — `alice`/`alice`, `bob`/`bob`, `charlie`/`charlie`). This keeps
+the demo simple; in production you would generate a unique secret per
+environment.
 
 Optionally, run the helper script to verify your `.env` values match:
 
@@ -523,10 +574,13 @@ curl -sk -X POST \
   -d @keycloak/realm-export.json
 ```
 
-The realm template includes two demo users (`user1` / `user2`) with the
-`openshell-user` role and `offline_access` scope — they're created
-automatically when you import the realm. Their passwords match their
-usernames (e.g. `user1` / `user1`) — demo only, never do this in production.
+The realm template includes Meridian's three demo bankers (`alice`,
+`bob`, `charlie`) with the `openshell-user` + `banker` roles and
+`offline_access` scope — they're created automatically when you import the
+realm. Alice additionally belongs to the `compatibility-users` group,
+which projects the `compatibility-user` role into her token only. Their
+passwords match their usernames (e.g. `alice` / `alice`) — demo only,
+never do this in production.
 
 ### 2. Create the namespace, grant SCCs, and install OpenShell with OIDC
 
@@ -747,9 +801,9 @@ openshell gateway list
 
 `openshell status` should show the gateway as connected and authenticated.
 
-### 3. Onboard a user
+### 3. Onboard a banker
 
-User onboarding is a **two-step process by design**. OpenShell's Providers v2
+Onboarding is a **two-step process by design**. OpenShell's Providers v2
 manages the *lifecycle* of a credential (refresh, rotate, inject into
 sandboxes) but leaves the *initial acquisition* of that credential to your
 identity plumbing. The upstream docs jump straight to
@@ -770,21 +824,21 @@ Two options for obtaining the token:
 
 #### Step 3.0 — Create the user's own workspace (do this first, either option)
 
-**Every user needs their own OpenShell workspace before onboarding.** See
+**Every banker needs their own OpenShell workspace before onboarding.** See
 [Workspace isolation](#workspace-isolation) above for why: workspace
 membership grants access to *every* sandbox in that workspace, not just
-your own, so putting multiple users in one shared workspace (including
-`default`) breaks the per-user isolation this whole demo is about —
+your own, so putting multiple bankers in one shared workspace (including
+`default`) breaks the per-banker isolation this whole demo is about —
 confirmed live. This step is admin-only (creating a workspace and granting
 membership are Platform Admin operations) and only needs to run once per
-user, before either Option A or B below:
+banker, before either Option A or B below:
 
 ```bash
 source .env
 
-USER_ID="user1"
+USER_ID="alice"
 
-# Look up the user's Keycloak subject (OIDC 'sub' claim = Keycloak user ID)
+# Look up the banker's Keycloak subject (OIDC 'sub' claim = Keycloak user ID)
 KEYCLOAK_ADMIN_TOKEN=$(curl -sk -X POST \
   "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password" \
@@ -802,22 +856,24 @@ openshell workspace create --name "${USER_ID}"
 openshell workspace member add --workspace "${USER_ID}" --subject "${USER_SUBJECT}" --role user
 ```
 
-Repeat with `USER_ID="user2"`. From here on, every `provider`/`sandbox`/
-`policy` command for this user carries `--workspace "${USER_ID}"` — don't
-drop it, and don't reuse one user's workspace for another.
+Repeat with `USER_ID="bob"` and `USER_ID="charlie"`. From here on, every
+`provider`/`sandbox`/`policy` command for a banker carries
+`--workspace "${USER_ID}"` — don't drop it, and don't reuse one banker's
+workspace for another.
 
 #### Step 3a — Obtain the user's refresh token
 
 **Option A — Password grant (demo only)**
 
-Only works because you control both sides and know the demo user's password.
-Not viable in production — the operator must never know user credentials.
+Only works because you control both sides and know the demo banker's
+password. Not viable in production — the operator must never know user
+credentials.
 
 ```bash
 source .env
 
-USER_ID="user1"
-USER_PASS="<the-users-password>"
+USER_ID="alice"
+USER_PASS="<the-bankers-password>"
 
 REFRESH_TOKEN=$(curl -sk -X POST \
   "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
@@ -835,7 +891,7 @@ store the token.
 **Option B — `onboard` utility (browser-based OAuth flow)**
 
 The `onboard` CLI tool in [`util/onboard/`](../../util/onboard/) automates
-the full flow: opens the browser for the user to log in, listens for the
+the full flow: opens the browser for the banker to log in, listens for the
 OAuth callback, exchanges the authorization code for a refresh token, and
 runs the OpenShell provider commands from
 [step 3b](#step-3b--store-the-refresh-token-in-openshell) automatically.
@@ -846,9 +902,9 @@ source .env
 # Build once (requires Rust)
 cd ../../util/onboard && cargo build --release && cd -
 
-# Onboard user1 — opens a browser, waits for login, creates the provider
+# Onboard alice — opens a browser, waits for login, creates the provider
 ../../util/onboard/target/release/onboard \
-  -u user1 \
+  -u alice \
   --profile providers/user-refresh-profile.yaml
 ```
 
@@ -856,7 +912,7 @@ Or use the shell wrapper (sources `.env` automatically):
 
 ```bash
 ../../util/onboard/onboard.sh \
-  -u user1 \
+  -u alice \
   --profile providers/user-refresh-profile.yaml
 ```
 
@@ -877,7 +933,7 @@ profile contains and why it matters.
 > not literal placeholder text.
 
 > **Workspace targeting.** `onboard` defaults `--workspace` to the user ID
-> (`-u user1` → workspace `user1`), matching
+> (`-u alice` → workspace `alice`), matching
 > [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option)
 > above. It does not create the workspace or grant membership itself — that
 > must already exist, or `provider create` will fail with `"not a member of
@@ -895,9 +951,9 @@ Useful flags:
 - `--dry-run` — show the OpenShell CLI commands without executing them
 - `--timeout <secs>` — how long to wait for the user to log in (default 120s)
 
-To onboard a second user, log out of Keycloak first (use the link on the
+To onboard the next banker, log out of Keycloak first (use the link on the
 success page or open an incognito window), then run the same command with
-`-u user2`.
+`-u bob`, then again with `-u charlie`.
 
 If you used Option B, step 3b is already done — the tool runs the same
 commands shown below. Skip to [step 4](#4-deploy-mcp-servers).
@@ -926,7 +982,7 @@ server endpoint hostnames. Replace both with your actual values:
 ```bash
 source .env
 
-USER_ID="user1"
+USER_ID="alice"
 
 TMPFILE=$(mktemp --suffix=.yaml)
 sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
@@ -986,114 +1042,279 @@ sandbox with a live credential — they never see a token.
 
 ### 4. Deploy MCP servers
 
-Two example downstream services (MCP servers) that validate the caller's
-Bearer token as a Keycloak-issued OAuth access token — the same token
-Providers v2 already mints/refreshes per user in step 3 — and are only
-reachable by users holding a specific Keycloak realm role.
+Four downstream services (MCP servers) back Meridian's agent, each
+validating the caller's Bearer token as a Keycloak-issued OAuth access
+token — the same token Providers v2 already mints/refreshes per banker in
+step 3 — and each only reachable by bankers holding a specific Keycloak
+realm role:
+
+| Server | Required role | What it does |
+|---|---|---|
+| `mcp-portfolio` | `mcp-portfolio-user` (via `banker`) | Client holdings, performance, biggest client by AUM |
+| `mcp-crm-calendar` | `mcp-crm-calendar-user` (via `banker`) | The authenticated banker's own upcoming meetings and notes |
+| `mcp-market-news` | `mcp-market-news-user` (via `banker`) | Public market news filtered by ticker/sector — no per-client isolation, it's public data |
+| `mcp-compatibility` | `compatibility-user` (Alice only, via the `compatibility-users` group) | Alice's one extra permission, unrelated to the shared `banker` role |
 
 Token enforcement is handled by an **Envoy sidecar** in front of each MCP
 server. Envoy's `jwt_authn` filter verifies the token's signature against
 Keycloak's JWKS and `iss`; its `rbac` filter requires the decoded
 `realm_access.roles` claim to contain the server-specific role. The app
-itself listens on loopback only (`127.0.0.1:8001`) and is unreachable except
-from Envoy in the same pod.
-
-Each server has its own Keycloak realm role (`mcp-server-a-user`,
-`mcp-server-b-user`).
+itself listens on loopback only and is unreachable except from Envoy in the
+same pod. `mcp-portfolio` and `mcp-crm-calendar` additionally enforce
+*tenant* isolation inside the app itself (`assert_owns_client`/
+`assert_owns_meeting`) — a banker who holds the right role can still only
+see their own clients' data, never a colleague's, even though all three
+bankers call the same service. `mcp-portfolio`, `mcp-crm-calendar`, and
+`mcp-market-news` share one ephemeral Postgres instance, seeded once per
+`helm install`/`upgrade` with Meridian's demo data (Alice/Bob/Charlie and
+their clients).
 
 ```bash
 source .env
 ./scripts/06-deploy-mcp-servers.sh
 ```
 
-This deploys `mcp-server-a` and `mcp-server-b` into `$OPENSHELL_NAMESPACE`
-as two-container pods (Envoy + the app), each with its own ServiceAccount.
+This deploys all four servers into `$OPENSHELL_NAMESPACE` as two-container
+pods (Envoy + the app), each with its own ServiceAccount, plus the shared
+Postgres.
 
-The MCP server roles are already assigned to the demo users in the realm
-JSON imported in step 1c (`mcp-server-a-user` → `user1`,
-`mcp-server-b-user` → `user2`). To onboard additional users beyond the
-two pre-configured ones, see
+The MCP server roles are already assigned to the demo bankers in the realm
+JSON imported in step 1c: `banker` (and therefore `mcp-portfolio-user`,
+`mcp-crm-calendar-user`, `mcp-market-news-user`) → alice, bob, charlie;
+`compatibility-user` → alice only. To onboard additional bankers beyond
+the three pre-configured ones, see
 [Onboarding additional users](docs/onboard-additional-users.md).
 
 ### 5. Run the demo
 
-Create a sandbox with the user's provider, add binary permissions, then
-verify that MCP calls succeed with the user's own scoped token — and that
-cross-user isolation holds.
+Create a sandbox per banker with their provider attached, grant the policy
+permissions each one needs, then walk through what a day actually looks
+like for Alice, Bob, and Charlie — proving along the way that role-based
+isolation (Envoy, HTTP-level) and tenant isolation (each service's own
+ownership check, JSON-RPC-level) both hold even though all three call the
+same services.
 
 ```bash
 source .env
-USER_ID="user1"
-SERVER_NAME="mcp-server-a"
-MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 ```
 
-**Create the sandbox with the provider attached.** The `--provider` flag
-attaches the user's credential at creation time — this injects
-`$USER_ACCESS_TOKEN` as a resolve placeholder that the supervisor's proxy
-resolves to a real Keycloak access token on matching outbound requests.
-The `-- true` creates the sandbox without entering an interactive shell:
+**Create a sandbox for each banker, with their own provider attached.**
+The `--provider` flag injects `$USER_ACCESS_TOKEN` as a resolve placeholder
+that the supervisor's proxy resolves to a real Keycloak access token on
+matching outbound requests. `-- true` creates the sandbox without entering
+an interactive shell:
 
 ```bash
-openshell sandbox create --name "demo-${USER_ID}" \
-  --provider "user-${USER_ID}" \
-  --workspace "${USER_ID}" \
-  -- true
+for USER_ID in alice bob charlie; do
+  openshell sandbox create --name "demo-${USER_ID}" \
+    --provider "user-${USER_ID}" \
+    --workspace "${USER_ID}" \
+    -- true
+done
 ```
 
-**Add binary permissions** so curl can reach the MCP server. The provider
-profile already contributes the MCP server endpoint to the sandbox's
-network policy (endpoint binding), but does not grant binary-level
-permissions — those are deployment-specific and applied per-sandbox:
+**Add binary permissions** so curl can reach the servers each banker is
+authorized for. The provider profile already contributes the MCP server
+endpoints to the sandbox's network policy (endpoint binding), but does not
+grant binary-level permissions — those are deployment-specific and applied
+per-sandbox:
 
 ```bash
-openshell policy update "demo-${USER_ID}" \
-  --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
+for USER_ID in alice bob charlie; do
+  for SERVER_NAME in mcp-portfolio mcp-crm-calendar mcp-market-news; do
+    openshell policy update "demo-${USER_ID}" \
+      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
+      --binary /usr/bin/curl --wait \
+      --workspace "${USER_ID}"
+  done
+done
+
+# Alice's extra permission — nobody else gets this endpoint added
+openshell policy update "demo-alice" \
+  --add-endpoint "mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/bin/curl --wait \
-  --workspace "${USER_ID}"
+  --workspace "alice"
 ```
 
-**Verify** — the same request with the user's token should now succeed.
-`$USER_ACCESS_TOKEN` is injected into the sandbox by the provider:
+#### Alice: the one extra permission
+
+Alice's book is small (just Elena Duarte), but she's the only banker who
+can reach `mcp-compatibility` — the platform has to get this right for a
+low-traffic user with an unusual second permission just as reliably as for
+Bob's much busier book:
 
 ```bash
-openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS \
-    -X POST \
+MCP_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
     "$MCP_URL"'
-# Expected: 200 — MCP server returns its capabilities
+
+openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 both times — Alice holds compatibility-user via the
+# compatibility-users group; nobody else in this demo does.
 ```
 
-**Isolation check** — user1 should not be able to reach `mcp-server-b`
-(different realm role required). Note: use `--env` to pass host-side
-variables into the sandbox — they are not available inside single quotes:
+#### Bob: biggest client, meeting prep, performance diagnosis
+
+Bob's book is the largest and most varied — this is where the multi-hop
+work happens. First, who's his biggest client by AUM:
 
 ```bash
-OTHER_MCP_URL="http://mcp-server-b.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
-openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "OTHER_MCP_URL=${OTHER_MCP_URL}" \
-  -- bash -c 'curl -so /dev/null -w "%{http_code}" \
-    -X POST \
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
     -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$OTHER_MCP_URL"'
-# Expected: 403 — valid token, but user1 lacks the mcp-server-b-user role
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_top_client_by_aum\",\"arguments\":{}}}" \
+    "$MCP_URL"'
+# Expected: 200 — Clara Fontán (cli-001), highest combined market_value
+# across her positions in Bob's book.
 ```
 
-To test the other direction, open a second terminal (still admin's session
-— see [How to follow this guide](#how-to-follow-this-guide)) and repeat with
-`USER_ID="user2"` and `SERVER_NAME="mcp-server-b"` (onboard user2 first
-if you haven't already). Confirm user2 can reach `mcp-server-b` (`200`)
-but gets `403` from `mcp-server-a`.
+Then meeting prep — resolve the next meeting via `mcp-crm-calendar`, then
+pull that client's notes:
 
-Alternatively, run the isolation verification script to test all four
-user/server combinations automatically:
+```bash
+CRM_URL="http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_upcoming_meetings\",\"arguments\":{}}}" \
+    "$MCP_URL"'
+# Expected: 200 — mtg-001 (Clara Fontán, cli-001) and mtg-002 (Grupo Delta
+# Textil, cli-002), Bob's own meetings only.
+```
+
+Finally, performance diagnosis: Grupo Delta Textil's MTD return (`perf-002`)
+is -3.4% against a +1.5% benchmark — a real underperformance worth
+explaining before the meeting, not after. `get_performance` surfaces the
+number; `get_relevant_news` (filtered by that client's sector) is how the
+agent correlates it with an actual market event instead of guessing:
+
+```bash
+NEWS_URL="http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_relevant_news\",\"arguments\":{\"tickers\":[],\"sectors\":[\"textile\"]}}}" \
+    "$MCP_URL"'
+# Expected: 200 — public news, no per-client isolation on this server, but
+# still requires mcp-market-news-user (composited into banker).
+```
+
+#### Bob probes the boundary
+
+With a promotion decision looming and his numbers looking thin next to
+Alice's and Charlie's, Bob tries to look at their books. Two different
+mechanisms have to both hold for this to fail safely:
+
+```bash
+# Role-based (Envoy rbac filter) — Bob legitimately lacks compatibility-user
+COMPAT_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${COMPAT_URL}" \
+  -- bash -c 'curl -so /dev/null -w "%{http_code}" -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+# Expected: 403 — valid token, but Bob lacks compatibility-user entirely.
+
+# Tenant-based (mcp-portfolio's assert_owns_client) — Bob legitimately
+# holds mcp-portfolio-user, so this reaches the app; the app itself has to
+# refuse. cli-004 is Alice's Elena Duarte. [VERIFY]: expected HTTP code
+# assumed 200 with a JSON-RPC-level error — not confirmed against a live
+# cluster.
+PORTFOLIO_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${PORTFOLIO_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_positions\",\"arguments\":{\"client_id\":\"cli-004\"}}}" \
+    "$MCP_URL"'
+# Expected: the same deliberately-ambiguous "client_id no encontrado para
+# el llamante autenticado" error Bob would get for a client_id that
+# doesn't exist at all — never Elena Duarte's actual positions.
+```
+
+#### Charlie: KYC-aware reasoning
+
+Charlie's one client, Fundación Iris, carries a pending KYC review and a
+PEP flag — `list_my_clients` (`mcp-portfolio`) surfaces both, so the agent
+has real data to reason over instead of a flat yes/no:
+
+```bash
+MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_my_clients\",\"arguments\":{}}}" \
+    "$MCP_URL"'
+# Expected: 200 — one client, Fundación Iris, kyc_status "pending",
+# pep_flag true. Requires mcp-portfolio-v0.1.4+ (see step 4's server
+# table) — 0.1.3 returns id/name only, without these fields. The demo
+# doesn't model a compliance rules engine — the fields are real, citing
+# the actual applicable rule from them is left to the agent's own
+# reasoning/instructions, not a KYC/AML tool the platform provides today.
+```
+
+Alternatively, run the isolation verification script to test every
+banker/server combination — including Bob's boundary probe — automatically:
 
 ```bash
 ./scripts/08-verify-isolation.sh
@@ -1102,12 +1323,22 @@ user/server combinations automatically:
 Expected output:
 
 ```
-PASS  user1 → mcp-server-a (evaluate_unpaid_leave_eligibility)  HTTP 200 (expected 200)
-PASS  user1 → mcp-server-b  HTTP 403 (expected 403)
-PASS  user2 → mcp-server-a  HTTP 403 (expected 403)
-PASS  user2 → mcp-server-b (calc_tax)  HTTP 200 (expected 200)
+PASS  alice → mcp-compatibility (calc_tax)  HTTP 200 (expected 200)
+PASS  alice → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  alice → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  alice → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  bob → mcp-compatibility  HTTP 403 (expected 403)
+PASS  bob → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  bob → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  bob → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  charlie → mcp-compatibility  HTTP 403 (expected 403)
+PASS  charlie → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  charlie → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  charlie → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  bob probing cli-004 (Alice's Elena Duarte) via get_positions — denied, no cross-tenant data leaked
+PASS  bob probing cli-005 (Charlie's Fundación Iris) via get_positions — denied, no cross-tenant data leaked
 
-Results: 4 passed, 0 failed
+Results: 14 passed, 0 failed
 ```
 
 > For alternate ways to exercise this same RBAC boundary through a real
@@ -1116,41 +1347,54 @@ Results: 4 passed, 0 failed
 
 ### Definition of done
 
-- [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/user roles
+- [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/banker roles
 - [x] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
 - [x] RBAC mode confirmed: a user-role token cannot perform admin-only
-      operations — verified live: `user1`/`user2` CLI sessions (role
+      operations — verified live: two bankers' CLI sessions (role
       `openshell-user`, `user`-role members of their own workspace) are
       denied `provider create`/`policy update` in their own workspace with
       `"workspace role 'admin' required"`, while the `openshell-admin`
       (Platform Admin) session succeeds at both
-- [x] Each user isolated to their own OpenShell **workspace**, not just
+- [x] Each banker isolated to their own OpenShell **workspace**, not just
       their own provider — verified live, and only after fixing a real bug
-      found in this session: putting both users in a shared workspace (even
+      found in this session: putting both bankers in a shared workspace (even
       with correct Keycloak roles) let either one `sandbox exec` into the
       *other's* sandbox and use their real credentials (`200` on an MCP call
       that should've been `403`). Confirmed blocked both directions once
-      each user got their own workspace (`"not a member of workspace"`).
+      each banker got their own workspace (`"not a member of workspace"`).
       See [Workspace isolation](#workspace-isolation)
 - [x] Providers v2 enabled
-- [x] At least two demo users onboarded, each with their own provider in
+- [x] At least two demo bankers onboarded, each with their own provider in
       their own workspace — verified via **Option B** (the `onboard` tool):
       admin's CLI session created the workspace, ran the tool, and executed
       the provider commands, while the OAuth browser login was driven as the
-      actual target user (user1/user2), exercising the real admin/user
-      identity split instead of the password-grant shortcut
-- [x] Isolation test passes: user A's sandbox cannot access user B's data
-      even when both sandboxes run concurrently — `08-verify-isolation.sh`
-      (workspace-aware): 4 passed, 0 failed
-- [x] (Stretch) `mcp-servers` chart deployed; a user holding the required
-      Keycloak role can reach their MCP server, a user lacking it cannot
-      — verified via the Envoy sidecar (401/403/200 cases all tested live)
-- [x] (Stretch) A user authorized for one MCP server's role does not
-      thereby gain access to the other — verified both directions
-- [x] (Stretch) Codex variant — verified with Codex 0.146.0 + DeepSeek
-      (`deepseek-v4-flash`) via `inference.local`, both users, both MCP servers
-- [x] (Stretch) Claude Code variant — verified with Claude Code + DeepSeek's
-      Anthropic-compatible endpoint, both users, both MCP servers
+      actual target banker, exercising the real admin/user identity split
+      instead of the password-grant shortcut
+
+**Pending re-verification against a live cluster** — the checklist above
+was verified live against this demo's previous two-user/two-server shape.
+The Meridian Private Bank re-theme (Alice/Bob/Charlie, the `banker`/
+`compatibility-user` roles, and the four-MCP-server topology in
+[step 4](#4-deploy-mcp-servers)) is a documentation/configuration change
+that hasn't been re-run against a live cluster yet:
+
+- [ ] Isolation test passes: no banker's sandbox can access another's data
+      even when all three sandboxes run concurrently —
+      `08-verify-isolation.sh` (workspace- and tenant-aware): expect 14
+      passed, 0 failed
+- [ ] (Stretch) `mcp-servers` chart deployed with all four servers; a
+      banker holding the required Keycloak role can reach their server,
+      one lacking it cannot — via the Envoy sidecar
+- [ ] (Stretch) A banker holding `banker` (and therefore all three data-
+      service roles) does not thereby gain `compatibility-user` — verified
+      both directions (Alice reaches `mcp-compatibility`, Bob and Charlie
+      get 403)
+- [ ] (Stretch) Tenant isolation inside `mcp-portfolio` holds under a real
+      probe: Bob's `get_positions` call against Alice's and Charlie's
+      `client_id`s is denied with the same ambiguous error a nonexistent
+      `client_id` gets
+- [ ] (Stretch) Codex variant — all three bankers, all four MCP servers
+- [ ] (Stretch) Claude Code variant — all three bankers, all four MCP servers
 
 ## Part II — Red-team evaluation (EvalHub + Garak)
 
@@ -1206,9 +1450,9 @@ then in your **admin terminal**:
 
 ```bash
 source .env
-USER_ID="user1"
-SERVER_NAME="mcp-server-a"
-QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+USER_ID="bob"
+SERVER_NAME="mcp-portfolio"
+QUESTION="Who is my biggest client by assets under management?"
 ```
 
 1. Create the inference provider and configure `inference.local` routing
@@ -1228,10 +1472,10 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    ```
 
    `inference.local` routing is workspace-scoped like everything else (see
-   [Workspace isolation](#workspace-isolation)) — this runs once per user's
-   workspace. Repeating this recipe for user2 means repeating this step too,
-   inside `user2`'s own workspace; there's no shared/global inference route
-   across workspaces in this demo.
+   [Workspace isolation](#workspace-isolation)) — this runs once per
+   banker's workspace. Repeating this recipe for alice means repeating this
+   step too, inside `alice`'s own workspace; there's no shared/global
+   inference route across workspaces in this demo.
 
 2. Import the Codex policy profile and create a second provider for binary
    permissions.
@@ -1329,15 +1573,15 @@ QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid le
    > subdirectory inside the target). The sandbox home is `/sandbox`, so
    > Codex's config directory is `/sandbox/.codex/`.
 
-4. Run the test — from admin's terminal, or from `user1`'s own CLI session
-   scoped to workspace `user1` (either works identically now that user1 has
+4. Run the test — from admin's terminal, or from `bob`'s own CLI session
+   scoped to workspace `bob` (either works identically now that bob has
    their own workspace — see
    [How to follow this guide](#how-to-follow-this-guide)):
 
    ```bash
    source .env
-   USER_ID="user1"
-   QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+   USER_ID="bob"
+   QUESTION="Who is my biggest client by assets under management?"
 
    # The OpenShell sandbox provides the security boundary (network policy,
    # credential isolation, binary permissions). Codex's built-in sandbox
@@ -1373,37 +1617,32 @@ Codex (in sandbox)
       → Envoy checks JWT + realm role → app
 ```
 
-**Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
-Compatibility Engine — tax calculation). Set the variables and run
-steps 3-4 again:
+**Now repeat with alice.** Alice is the only banker authorized for
+`mcp-compatibility` (the Compatibility Engine — tax calculation). Set the
+variables and run steps 3-4 again:
 
 ```bash
-USER_ID="user2"
-SERVER_NAME="mcp-server-b"
+USER_ID="alice"
+SERVER_NAME="mcp-compatibility"
 QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 ```
 
-Confirm user2's sandbox can reach `mcp-server-b` (`200`) but **not**
-`mcp-server-a` (`403`), proving that the per-user credential isolation
-works end to end through the agentic coding tool.
+Confirm alice's sandbox can reach `mcp-compatibility` (`200`). For the
+reverse — Bob's sandbox getting `403` from `mcp-compatibility` — see
+[Bob probes the boundary](#bob-probes-the-boundary) in step 5; the same
+Envoy check applies whether the request comes from `curl` or from Codex,
+proving per-banker credential isolation works end to end through the
+agentic coding tool too.
 
-Alternatively, run the isolation verification script to test all four
-user/server combinations automatically:
+Alternatively, run the isolation verification script to test every
+banker/server combination automatically:
 
 ```bash
 ./scripts/08-verify-isolation.sh
 ```
 
-Expected output:
-
-```
-PASS  user1 → mcp-server-a (evaluate_unpaid_leave_eligibility)  HTTP 200 (expected 200)
-PASS  user1 → mcp-server-b  HTTP 403 (expected 403)
-PASS  user2 → mcp-server-a  HTTP 403 (expected 403)
-PASS  user2 → mcp-server-b (calc_tax)  HTTP 200 (expected 200)
-
-Results: 4 passed, 0 failed
-```
+Expected output — see [step 5](#5-run-the-demo) for the full annotated
+listing (14 passed, 0 failed).
 
 #### Claude Code + BYO LLM + MCP tool
 
@@ -1422,8 +1661,8 @@ Results: 4 passed, 0 failed
 > correct values.
 
 Claude Code (pre-installed in the base sandbox image) calling
-`mcp-server-a`'s tool (`evaluate_unpaid_leave_eligibility`) via an
-Anthropic-compatible LLM endpoint.
+`mcp-portfolio`'s tool (`get_top_client_by_aum`) via an Anthropic-compatible
+LLM endpoint.
 
 **Prerequisites** beyond Part I, steps 1-5 — set `ANTHROPIC_API_KEY`,
 `ANTHROPIC_BASE_URL`, and `ANTHROPIC_MODEL` in your `.env` (see
@@ -1433,9 +1672,9 @@ stays admin-only regardless of workspace — see
 
 ```bash
 source .env
-USER_ID="user1"
-SERVER_NAME="mcp-server-a"
-QUESTION="My mother is at the hospital, can I get an aid while I am on unpaid leave?"
+USER_ID="bob"
+SERVER_NAME="mcp-portfolio"
+QUESTION="Who is my biggest client by assets under management?"
 LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
 ```
 
@@ -1464,8 +1703,8 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    ```
 
    Like `inference.local` in the Codex recipe, this provider is
-   workspace-scoped — repeating this recipe for user2 means repeating this
-   import/create step inside `user2`'s own workspace too.
+   workspace-scoped — repeating this recipe for alice means repeating this
+   import/create step inside `alice`'s own workspace too.
 
 2. Attach the provider and grant network access:
 
@@ -1494,7 +1733,7 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
      --env "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_MODEL" \
      --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_MODEL" \
      -- bash -c '
-   MCP_JSON="{\"mcpServers\":{\"eligibility\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
+   MCP_JSON="{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://'"${SERVER_NAME}.${OPENSHELL_NAMESPACE}"'.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer $USER_ACCESS_TOKEN\"}}}}"
    claude -p "'"${QUESTION}"'" \
      --mcp-config "$MCP_JSON" \
      --strict-mcp-config \
@@ -1503,19 +1742,21 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    '
    ```
 
-**Now repeat with user2.** User2 is authorized for `mcp-server-b` (the
-Compatibility Engine — tax calculation). Set the variables and run
-steps 2-3 again:
+**Now repeat with alice.** Alice is the only banker authorized for
+`mcp-compatibility` (the Compatibility Engine — tax calculation). Set the
+variables and run steps 2-3 again:
 
 ```bash
-USER_ID="user2"
-SERVER_NAME="mcp-server-b"
+USER_ID="alice"
+SERVER_NAME="mcp-compatibility"
 QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 ```
 
-Confirm user2's sandbox can call `mcp-server-b`'s `calc_tax` tool
-successfully, proving that the per-user credential isolation works end to
-end through Claude Code.
+Confirm alice's sandbox can call `mcp-compatibility`'s `calc_tax` tool
+successfully, proving that Alice's one extra permission works end to end
+through Claude Code too — the same JWT-carrying mechanism as Bob's
+`mcp-portfolio` call above, just gated by `compatibility-user` instead of
+`banker`.
 
 ### B. Configuration reference
 
@@ -1590,7 +1831,13 @@ exact patch release before relying on this beyond a demo.
   Keycloak) is a materially bigger project than this demo covers.
 - **Per-server token audience** — Keycloak isn't configured with an audience
   mapper per MCP server, so the realm role claim is the *only* thing
-  distinguishing access to server A from server B.
+  distinguishing access to one banking data service from another.
+- **`mcp-kyc-compliance` doesn't exist yet.** The Meridian Private Bank
+  theme calls for a fourth, dedicated compliance data service; only a
+  prompt file survives under `mcp/old/`. Charlie's KYC/PEP scenario in
+  this guide uses the `kyc_status`/`pep_flag` fields `mcp-portfolio`'s
+  `list_my_clients` exposes instead — real data, but no dedicated
+  regulatory-reasoning tool or rules engine behind it.
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no

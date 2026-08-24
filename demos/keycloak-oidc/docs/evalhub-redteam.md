@@ -5,6 +5,24 @@ drafted as a design/planning doc — see
 [`evalhub-redteam-orig.md`](evalhub-redteam-orig.md) for that history if
 needed; this file is now the authoritative, current guide.
 
+> **Naming note (post Meridian Private Bank re-theme):** this doc predates
+> the rename of Part I's demo users from `user1`/`user2` to Alice/Bob/
+> Charlie, and predates the removal of the old `mcp-server-a`/`mcp-server-b`
+> Path B placeholder servers (see [`../README.md`](../README.md)). It still
+> says `user1` and `mcp-server-a` throughout — those are the literal names
+> used during the live validation recorded here (sandbox names, JWT
+> payloads, container logs, etc.), left as-is rather than rewritten to
+> values that weren't actually tested. Two things to substitute when
+> actually running this against the current Part I setup:
+> - Read `user1` as "whichever onboarded banker you're using" — e.g. `alice`.
+> - **`mcp-server-a` no longer exists** — `mcp-server-b` survives, renamed
+>   to `mcp-compatibility` (role `compatibility-user`, Alice-only). Wherever
+>   this doc references `mcp-server-a` (its role, its container logs, its
+>   endpoint), substitute one of the four current servers instead —
+>   `mcp-portfolio` (role `mcp-portfolio-user`, granted to every banker via
+>   `banker`) is the closest drop-in, since it's reachable without needing
+>   Alice's special permission.
+
 ## Table of contents
 
 - [Overview](#overview)

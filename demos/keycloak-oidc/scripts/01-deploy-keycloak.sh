@@ -34,9 +34,11 @@ echo "(openshell-gateway-demo-secret) — demo only."
 echo
 echo "Import it via the Keycloak admin console or the Admin REST API."
 echo
-echo "The realm includes demo users (user1, user2) with the"
-echo "openshell-user role and offline_access scope. Passwords"
-echo "match usernames (user1/user1, user2/user2)."
+echo "The realm includes demo users (alice, bob, charlie) — Meridian"
+echo "Private Bank's bankers — with the openshell-user + banker roles"
+echo "and offline_access scope. Passwords match usernames"
+echo "(alice/alice, bob/bob, charlie/charlie). Alice additionally"
+echo "belongs to the compatibility-users group (compatibility-user role)."
 echo
 echo "======================================================================"
 echo "Ensure these values are in your demos/keycloak-oidc/.env file:"

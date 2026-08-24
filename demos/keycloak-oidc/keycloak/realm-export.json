@@ -5,10 +5,27 @@
     "realm": [
       { "name": "openshell-admin", "description": "Full OpenShell gateway access" },
       { "name": "openshell-user", "description": "Standard OpenShell gateway access" },
-      { "name": "mcp-server-a-user", "description": "Authorized to be onboarded against mcp-server-a (Path B extension)" },
-      { "name": "mcp-server-b-user", "description": "Authorized to be onboarded against mcp-server-b (Path B extension)" }
+      {
+        "name": "banker",
+        "description": "Baseline role for every Meridian private banker — composite over the four banking data-service roles",
+        "composite": true,
+        "composites": {
+          "realm": ["mcp-portfolio-user", "mcp-crm-calendar-user", "mcp-market-news-user"]
+        }
+      },
+      { "name": "compatibility-user", "description": "Extra permission granted via the compatibility-users group — access to the mcp-compatibility server" },
+      { "name": "mcp-portfolio-user", "description": "Access to mcp-portfolio (client holdings/performance)" },
+      { "name": "mcp-crm-calendar-user", "description": "Access to mcp-crm-calendar (banker meetings)" },
+      { "name": "mcp-market-news-user", "description": "Access to mcp-market-news (public market news)" }
     ]
   },
+  "groups": [
+    {
+      "name": "compatibility-users",
+      "path": "/compatibility-users",
+      "realmRoles": ["compatibility-user"]
+    }
+  ],
   "clients": [
     {
       "clientId": "openshell-cli",
@@ -55,24 +72,35 @@
       "realmRoles": ["openshell-admin", "offline_access"]
     },
     {
-      "username": "user1",
+      "username": "alice",
       "enabled": true,
-      "firstName": "user1",
-      "lastName": "Demo",
-      "email": "user1@demo.local",
+      "firstName": "Alice",
+      "lastName": "Meridian",
+      "email": "alice@meridian.demo.local",
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "user1", "temporary": false }],
-      "realmRoles": ["openshell-user", "offline_access", "mcp-server-a-user"]
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "realmRoles": ["openshell-user", "offline_access", "banker"],
+      "groups": ["/compatibility-users"]
     },
     {
-      "username": "user2",
+      "username": "bob",
       "enabled": true,
-      "firstName": "user2",
-      "lastName": "Demo",
-      "email": "user2@demo.local",
+      "firstName": "Bob",
+      "lastName": "Meridian",
+      "email": "bob@meridian.demo.local",
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "user2", "temporary": false }],
-      "realmRoles": ["openshell-user", "offline_access", "mcp-server-b-user"]
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "realmRoles": ["openshell-user", "offline_access", "banker"]
+    },
+    {
+      "username": "charlie",
+      "enabled": true,
+      "firstName": "Charlie",
+      "lastName": "Meridian",
+      "email": "charlie@meridian.demo.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "charlie", "temporary": false }],
+      "realmRoles": ["openshell-user", "offline_access", "banker"]
     }
   ]
 }

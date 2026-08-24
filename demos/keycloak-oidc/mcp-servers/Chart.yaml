@@ -7,5 +7,5 @@ description: >-
   it assumes each server image implements, is this demo's own design — not
   provided by upstream OpenShell or NVIDIA. [VERIFY] before trusting it.
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.1.0"

@@ -18,12 +18,22 @@ credentials:
       refresh_before_seconds: 300
 
 endpoints:
-  - host: "mcp-server-a.<openshell-namespace>.svc.cluster.local"
+  - host: "mcp-compatibility.<openshell-namespace>.svc.cluster.local"
     port: 8000
     protocol: rest
     access: read-write
     enforcement: enforce
-  - host: "mcp-server-b.<openshell-namespace>.svc.cluster.local"
+  - host: "mcp-portfolio.<openshell-namespace>.svc.cluster.local"
+    port: 8000
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: "mcp-crm-calendar.<openshell-namespace>.svc.cluster.local"
+    port: 8000
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: "mcp-market-news.<openshell-namespace>.svc.cluster.local"
     port: 8000
     protocol: rest
     access: read-write

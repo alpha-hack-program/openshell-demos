@@ -93,10 +93,10 @@ data:
       ON CONFLICT (id) DO NOTHING;
     INSERT INTO clients (id, banker_id, name, risk_profile, kyc_status, pep_flag, sector_focus) VALUES
       ('cli-001','bob','Clara Fontán','moderate','complete',false,'logistics'),
-      ('cli-002','bob','Delta Textile Group','aggressive','complete',false,'textile'),
+      ('cli-002','bob','Grupo Delta Textil','aggressive','complete',false,'textile'),
       ('cli-003','bob','Marcus Wren','conservative','complete',false,'import'),
       ('cli-004','alice','Elena Duarte','moderate','complete',false,'technology'),
-      ('cli-005','charlie','Iris Foundation','conservative','pending',true,'health')
+      ('cli-005','charlie','Fundación Iris','conservative','pending',true,'health')
       ON CONFLICT (id) DO NOTHING;
     INSERT INTO positions (id, client_id, ticker, isin, sector, quantity, price, market_value, currency) VALUES
       ('pos-001','cli-001','NDFR','XX0000000001','logistics',500,42.10,21050,'EUR'),
@@ -115,6 +115,7 @@ data:
     INSERT INTO meetings (id, banker_id, client_id, datetime, notes) VALUES
       ('mtg-001','bob','cli-001','2026-08-24T10:00:00Z','Review logistics exposure after the port tariff increase discussed last time.'),
       ('mtg-002','bob','cli-002','2026-08-25T16:30:00Z',NULL),
-      ('mtg-003','alice','cli-004','2026-08-24T09:00:00Z',NULL)
+      ('mtg-003','alice','cli-004','2026-08-24T09:00:00Z',NULL),
+      ('mtg-004','charlie','cli-005','2026-08-26T11:00:00Z','Annual KYC review follow-up — confirm source-of-funds documentation before renewing PEP monitoring.')
       ON CONFLICT (id) DO NOTHING;
 {{- end }}

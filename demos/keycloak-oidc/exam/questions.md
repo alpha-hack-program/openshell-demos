@@ -67,7 +67,9 @@ When running Codex inside an OpenShell sandbox with a BYO LLM, traffic goes thro
 
 ### Q11 — Keycloak realm roles
 
-The keycloak-oidc demo pre-configures four realm roles. List all four, explain who holds each, and describe how they map to OpenShell and MCP server access.
+The keycloak-oidc demo pre-configures seven realm roles, including one
+composite role. List them, explain who holds each, and describe how they
+map to OpenShell and MCP server access.
 
 ---
 
