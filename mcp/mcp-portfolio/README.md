@@ -14,7 +14,7 @@ Sigue la misma estructura y convenciones que
 
 | Herramienta | Parámetros | Descripción |
 |---|---|---|
-| `list_my_clients` | — | Lista los clientes del banquero autenticado. El `banker_id` sale siempre del JWT, nunca de un argumento del modelo. |
+| `list_my_clients` | — | Lista los clientes del banquero autenticado, incluidos `risk_profile`, `kyc_status`, `pep_flag` y `sector_focus`. El `banker_id` sale siempre del JWT, nunca de un argumento del modelo. |
 | `get_positions` | `client_id: String` | Posiciones de un cliente. Falla si el cliente no pertenece al llamante. |
 | `get_performance` | `client_id: String`, `period: String` (`MTD`\|`QTD`\|`YTD`) | TWR y benchmark TWR de un cliente para un periodo. Falla si el cliente no pertenece al llamante. |
 | `get_top_client_by_aum` | — | Entre los clientes del banquero autenticado, el que tiene mayor patrimonio bajo gestión (suma de `market_value` en `positions`). |

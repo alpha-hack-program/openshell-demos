@@ -43,6 +43,10 @@ impl<T: Serialize> ToolResponse<T> {
 pub struct ClientSummary {
     pub id: String,
     pub name: String,
+    pub risk_profile: String,
+    pub kyc_status: String,
+    pub pep_flag: bool,
+    pub sector_focus: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -136,7 +140,7 @@ impl PortfolioService {
     }
 
     #[tool(
-        description = "Lista los clientes del banquero autenticado. No admite parámetros: el banker_id se toma siempre del JWT, nunca de un argumento del modelo."
+        description = "Lista los clientes del banquero autenticado, incluido su perfil de riesgo y estado KYC/PEP. No admite parámetros: el banker_id se toma siempre del JWT, nunca de un argumento del modelo."
     )]
     pub async fn list_my_clients(
         &self,
@@ -144,14 +148,14 @@ impl PortfolioService {
     ) -> Result<CallToolResult, McpError> {
         let caller = extract_caller(&parts);
 
-        let clients: Vec<ClientSummary> =
-            sqlx::query_as("SELECT id, name FROM clients WHERE banker_id = $1")
-                .bind(&caller.banker_id)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|e| {
-                    McpError::internal_error(format!("error de base de datos: {e}"), None)
-                })?;
+        let clients: Vec<ClientSummary> = sqlx::query_as(
+            "SELECT id, name, risk_profile, kyc_status, pep_flag, sector_focus \
+             FROM clients WHERE banker_id = $1",
+        )
+        .bind(&caller.banker_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| McpError::internal_error(format!("error de base de datos: {e}"), None))?;
 
         ToolResponse::new(clients, &caller).into_call_tool_result()
     }
