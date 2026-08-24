@@ -320,6 +320,7 @@ banker membership in a workspace that already has one.
 | Agent Sandbox controller + CRDs | See [`demos/base/README.md`](../base/README.md#installing-agent-sandbox) |
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
+| Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
 ### What this demo deploys
 
@@ -333,14 +334,17 @@ banker membership in a workspace that already has one.
   generate a unique secret per environment.
 - Providers v2 enabled (`providers_v2_enabled=true`).
 - A per-banker provider profile and onboarding flow.
-- Four MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars that
+- Five MCP servers (`mcp-servers/` chart) fronted by Envoy sidecars that
   gate access by Keycloak realm role: `mcp-portfolio`, `mcp-crm-calendar`,
-  and `mcp-market-news` (shared by all three bankers via `banker`), plus
+  `mcp-market-news`, and `mcp-kyc-compliance` — the theme's four shared
+  data services, all gated by the composite `banker` role — plus
   `mcp-compatibility` (Alice only, via `compatibility-user`). A shared
-  ephemeral Postgres backs the first three. A fourth service the theme
-  calls for, `mcp-kyc-compliance`, has not been built yet — Charlie's
-  KYC/PEP scenario in this guide instead uses the `kyc_status`/`pep_flag`
-  fields `mcp-portfolio`'s `list_my_clients` exposes.
+  ephemeral Postgres backs `mcp-portfolio`/`mcp-crm-calendar`/
+  `mcp-kyc-compliance`.
+- A KServe `InferenceService` running `jinaai/jina-embeddings-v3` via vLLM
+  CPU inference (`mcp-servers/templates/embeddings.yaml`), shared by
+  `mcp-market-news` and `mcp-kyc-compliance` for semantic search — requires
+  the RHOAI prerequisite above.
 
 ### Getting started
 

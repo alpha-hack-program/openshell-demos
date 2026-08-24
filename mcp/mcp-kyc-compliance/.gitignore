@@ -1,0 +1,15 @@
+/target
+
+# Cargo.lock is intentionally tracked (this is a binary project, not a
+# library) — do not add it here.
+
+# Generated corpus index artifacts (built by corpus_indexer or by
+# mcp_server's self-healing startup path) — not source, do not commit.
+# data/corpus/*.md IS source and must stay tracked.
+/data/corpus.tv
+/data/corpus.tv.docs.json
+/data/.cache/
+
+.env
+*.env
+!.env.example

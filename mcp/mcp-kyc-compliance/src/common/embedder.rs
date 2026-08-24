@@ -1,18 +1,11 @@
 //! HTTP client for the shared, in-namespace vLLM/KServe embeddings service
 //! (`jinaai/jina-embeddings-v3` on CPU, OpenAI-compatible `/v1/embeddings`
-//! API), replacing the previous in-process `candle-transformers`/`hf-hub`
-//! implementation. Every MCP server in this demo family that needs semantic
-//! search (this one and `mcp-kyc-compliance`) calls the same service instead
-//! of loading its own copy of an embedding model. See the retired sections
-//! of this project's README ("What was verified") for the candle/hf-hub
-//! implementation this replaced and the bugs found while building it.
-//!
-//! This file is duplicated verbatim-in-spirit in `mcp-kyc-compliance`'s
-//! `src/common/embedder.rs`, deliberately — same convention this demo family
-//! already uses for `auth.rs` (copied per service rather than factored into
-//! a shared crate), since the surviving code here is thin enough (an HTTP
-//! POST + JSON parse) that duplication beats a shared crate's build/
-//! versioning overhead.
+//! API). This file is duplicated (near-)verbatim from the sibling
+//! `mcp-market-news` server's `src/common/embedder.rs` — deliberately, not
+//! factored into a shared crate, same convention this demo family already
+//! uses for `auth.rs` (the surviving code here is thin enough that
+//! duplication beats a shared crate's build/versioning overhead). See that
+//! server's README for the full rationale and migration history.
 
 use serde::Deserialize;
 
@@ -30,12 +23,9 @@ struct EmbeddingData {
     embedding: Vec<f32>,
 }
 
-/// Thin HTTP client — cheap to construct (just reads two env vars and builds
-/// a `reqwest::Client`), unlike the retired candle-based `Embedder` which
-/// had to download and load a model. There is nothing to "avoid reloading"
-/// anymore, so callers can construct a fresh one whenever convenient (e.g.
-/// on every periodic corpus reload) instead of threading a long-lived
-/// instance through.
+/// Thin HTTP client — cheap to construct (reads two env vars and builds a
+/// `reqwest::Client`), so callers can construct a fresh one whenever
+/// convenient rather than threading a long-lived instance through.
 #[derive(Clone)]
 pub struct Embedder {
     client: reqwest::Client,
@@ -44,9 +34,8 @@ pub struct Embedder {
 }
 
 impl Embedder {
-    /// Reads `EMBEDDINGS_BASE_URL` (no trailing `/v1`, same convention as
-    /// this project's own `OPENAI_BASE_URL`) and `EMBEDDINGS_MODEL` (the
-    /// served-model name to send in each request body) from the
+    /// Reads `EMBEDDINGS_BASE_URL` (no trailing `/v1`) and `EMBEDDINGS_MODEL`
+    /// (the served-model name to send in each request body) from the
     /// environment.
     pub fn new() -> anyhow::Result<Self> {
         let base_url = std::env::var("EMBEDDINGS_BASE_URL")
@@ -65,7 +54,7 @@ impl Embedder {
     /// similarity (a dot product of two normalized vectors *is* the cosine
     /// similarity) or direct use with TurboVec. Normalizes defensively
     /// client-side rather than assuming the service already returns unit
-    /// vectors — same as the retired candle-based implementation did.
+    /// vectors.
     pub async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         let body = serde_json::json!({ "model": self.model, "input": text });
 

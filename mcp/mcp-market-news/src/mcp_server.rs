@@ -169,7 +169,9 @@ impl MarketNewsServer {
         // query — a reload can swap in a fresh `Arc<NewsService>` at any
         // time, but this handler always sees a consistent one.
         let service = self.service.read().unwrap().clone();
-        let news: Vec<NewsItem> = match service.get_relevant_news(&params.tickers, &params.sectors)
+        let news: Vec<NewsItem> = match service
+            .get_relevant_news(&params.tickers, &params.sectors)
+            .await
         {
             Ok(news) => news,
             Err(e) => {
@@ -247,11 +249,10 @@ async fn main() -> anyhow::Result<()> {
             let interval = std::time::Duration::from_secs(reload_interval_minutes * 60);
             loop {
                 tokio::time::sleep(interval).await;
-                // Reuse the currently-loaded Embedder — reloading only
-                // needs to re-read the corpus/index, not the ~90MB model.
-                let embedder = reload_service.read().unwrap().embedder();
-                match NewsService::load_with_embedder(&reload_jsonl_path, &reload_tv_path, embedder)
-                {
+                // Unlike the retired candle-based Embedder, constructing a
+                // fresh one is just reading two env vars — no ~90MB model to
+                // avoid reloading, so NewsService::load rebuilds everything.
+                match NewsService::load(&reload_jsonl_path, &reload_tv_path) {
                     Ok(fresh) => {
                         let items = fresh.item_count();
                         *reload_service.write().unwrap() = Arc::new(fresh);
