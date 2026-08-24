@@ -88,13 +88,14 @@ spec:
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # Shared vLLM/KServe embeddings InferenceService — see
             # values.yaml's embeddings: block and templates/embeddings.yaml.
-            # [VERIFY] DNS name/port: KServe RawDeployment predictor
-            # Services conventionally proxy port 80 -> the container's 8080,
-            # named "<isvc-name>-predictor" in-namespace, but this wasn't
-            # confirmed against a live cluster — check `oc get svc` after
-            # deploying and adjust if it doesn't match.
+            # Confirmed against a live cluster: the predictor Service
+            # (`<isvc-name>-predictor`) is headless (clusterIP: None), so
+            # there's no virtual-IP port translation — connecting on the
+            # bare/default port 80 hits the pod directly on port 80, where
+            # nothing listens. The container's actual port (8080) must be
+            # given explicitly.
             - name: EMBEDDINGS_BASE_URL
-              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local"
+              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
             - name: EMBEDDINGS_MODEL
               value: {{ $embeddings.name | quote }}
             {{- end }}
@@ -129,6 +130,15 @@ spec:
               value: {{ $newsGen.openaiBaseUrl | quote }}
             - name: OPENAI_MODEL
               value: {{ $newsGen.openaiModel | quote }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # news_generator also embeds each corpus item as it writes
+            # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
+            # needs the same shared embeddings service as the app container.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
+            {{- end }}
             - name: RUST_LOG
               value: "info"
           volumeMounts:
@@ -155,6 +165,15 @@ spec:
               value: {{ $newsGen.openaiBaseUrl | quote }}
             - name: OPENAI_MODEL
               value: {{ $newsGen.openaiModel | quote }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # news_generator also embeds each corpus item as it writes
+            # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
+            # needs the same shared embeddings service as the app container.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-predictor.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
+            {{- end }}
             - name: RUST_LOG
               value: "info"
           volumeMounts:

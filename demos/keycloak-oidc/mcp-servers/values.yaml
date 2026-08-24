@@ -230,7 +230,7 @@ servers:
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "0.1.5"     # 0.1.4 crashed in news_generator's seed prompts against DeepSeek — see git history
+      tag: "0.2.0"     # 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
