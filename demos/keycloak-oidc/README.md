@@ -1358,7 +1358,13 @@ quoting confuses where the heredoc terminator actually is. `printf` with a
 format string sidesteps the problem entirely.
 
 This step can run from each banker's own terminal (`sandbox exec` is
-self-service) or from admin's, right after `sandbox provider attach` above:
+self-service) or from admin's, right after `sandbox provider attach` above.
+**Bob and Charlie get the same four servers; Alice gets a fifth
+(`compatibility`, her extra permission) — don't hand-edit one command into
+the other.** Editing a `printf` format string by hand to add a server is
+exactly the kind of error-prone step this file exists to avoid — one
+missed `%s`/argument pair and the JSON silently comes out malformed. Use
+the matching command below for each banker instead:
 
 ```bash
 # Terminal C — bob (or Terminal A — admin, with --workspace bob)
@@ -1371,11 +1377,28 @@ printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-p
 '
 ```
 
-Repeat for `charlie` (same four servers). For `alice`, add a fifth
-`"compatibility"` entry pointing at `mcp-compatibility` (her extra
-permission) — see [Configuration reference](#b-configuration-reference) if
-you'd rather generate this from a small script than paste a longer
-`printf` by hand.
+```bash
+# Terminal D — charlie (same four servers as Bob)
+source .env
+openshell sandbox exec -n demo-charlie --workspace charlie --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
+mkdir -p /sandbox/.claude
+printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
+  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
+  > /sandbox/.claude/mcp-servers.json
+'
+```
+
+```bash
+# Terminal B — alice (five servers — the extra "compatibility" entry is
+# already included below, not something to add by hand)
+source .env
+openshell sandbox exec -n demo-alice --workspace alice --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
+mkdir -p /sandbox/.claude
+printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"compatibility\":{\"type\":\"http\",\"url\":\"http://mcp-compatibility.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
+  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
+  > /sandbox/.claude/mcp-servers.json
+'
+```
 
 From here on, every scene's command is just `--mcp-config
 /sandbox/.claude/mcp-servers.json` — no more per-scene JSON construction.
