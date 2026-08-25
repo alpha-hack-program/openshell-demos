@@ -2769,6 +2769,24 @@ exact patch release before relying on this beyond a demo.
   short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
   — not real FATF/MiFID II/AML text, and not something to demo as if it
   were. See that server's own README disclaimer.
+- **TODO: consolidate the per-server `policy update` loops in
+  [step 5](#5-run-the-demo)'s setup.** `openshell policy update` accepts
+  multiple `--add-endpoint`/`--binary` flags in a single call — tested
+  against a throwaway sandbox: two endpoints plus two binaries in one call
+  produced a single policy version, with both binaries correctly attached
+  to both endpoints. That means each banker's `for SERVER_NAME in
+  mcp-portfolio mcp-crm-calendar ...` loop (one `policy update` call per
+  server, both in the curl-permissions block and in
+  [Provision the Claude Code harness](#provision-the-claude-code-harness))
+  could likely become a single call per banker per stage instead. Not yet
+  done — needs re-verifying the resulting merged policy and
+  `08-verify-isolation.sh` before rolling it into the guide. (Note:
+  `openshell policy set --policy file.yaml`, which takes a complete policy
+  document, is **not** a safe alternative for this — also tested against a
+  throwaway sandbox, and it fully replaces the policy, wiping the built-in
+  bundled rule catalog — `claude_code`, `codex`, `copilot`, `github`,
+  `pypi`, `vscode`, etc. — that `policy update --add-endpoint` merges on
+  top of automatically.)
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no
