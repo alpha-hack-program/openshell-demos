@@ -27,7 +27,7 @@
     - [Scene 2 — Bob resolves his biggest client](#scene-2--bob-resolves-his-biggest-client)
     - [Scene 3 — Bob diagnoses a dip](#scene-3--bob-diagnoses-a-dip)
     - [Scene 4 — Bob overreaches](#scene-4--bob-overreaches)
-    - [How sandbox network isolation actually works](#how-sandbox-network-isolation-actually-works)
+    - [Sandbox network isolation](#sandbox-network-isolation)
     - [Scene 4c — Bob tries to talk his way in](#scene-4c--bob-tries-to-talk-his-way-in)
     - [Scene 5 — Charlie works a compliance-sensitive case](#scene-5--charlie-works-a-compliance-sensitive-case)
     - [Scene 5b — Charlie checks product suitability](#scene-5b--charlie-checks-product-suitability)
@@ -126,10 +126,10 @@ can reach into any workspace, so this is how one admin session provisions
 all three bankers without them sharing anything.
 
 **alice/bob/charlie can legitimately self-service `sandbox create`/`sandbox
-exec`/`sandbox list` inside their own workspace once onboarded** —
-confirmed live, this is the one part of the RBAC table's original claim
-("`openshell-user`: connect to sandboxes, run workloads") that holds up
-once each banker has their own workspace. If you want to actually run
+exec`/`sandbox list` inside their own workspace once onboarded** — this is
+the one part of the RBAC table's original claim ("`openshell-user`: connect
+to sandboxes, run workloads") that holds up once each banker has their own
+workspace. If you want to actually run
 step 5 as alice/bob/charlie themselves rather than from admin's terminal,
 you can — see the optional per-terminal setup below. The guide's own
 command blocks stay written from admin's terminal throughout, both options
@@ -215,23 +215,18 @@ openshell sandbox exec -n demo-bob --workspace bob -- echo blocked    # denied �
 openshell provider create --name probe --type user-scoped-api --credential USER_ACCESS_TOKEN=pending --workspace alice  # denied — workspace role 'admin' required
 ```
 
-The first succeeds (self-service within their own workspace), the second
-is denied (cross-workspace access blocked — this is the fix for the bug
-this guide used to have, where all users shared one workspace), and the
+The first succeeds (self-service within their own workspace), the second is
+denied (cross-workspace access blocked — workspace membership doesn't grant
+access to another workspace, even with the same Keycloak roles), and the
 third is denied (provider management stays admin-only even in your own
 workspace). That's the full RBAC boundary this guide relies on, made
 concrete instead of asserted.
 
-Verified on Linux with openshell CLI 0.0.106 — four concurrent identities
-(admin, alice, bob, charlie), no state bleed between them, nothing written
-outside the chosen directories, and the cross-workspace block confirmed in
-both directions. Re-confirmed on a second, independent fresh cluster
-(2026-08-25), this time including Terminal D (charlie) separately, driving
-its own real browser login and running Scenes 5/5b from its own terminal —
-see [step 5](#5-run-the-demo)'s Definition of Done for exactly what was
-live-tested.
+This works on Linux with openshell CLI 0.0.106, running four concurrent
+identities (admin, alice, bob, charlie) with no state bleed between them
+and nothing written outside the chosen directories.
 **[VERIFY on macOS]** — the `XDG_CONFIG_HOME`/`XDG_STATE_HOME` mechanism is
-standard, but this session only tested Linux. See
+standard, but has only been tested on Linux. See
 [`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#running-multiple-cli-identities-concurrently-on-one-machine)
 for the full pattern, including how to drive the login headlessly.
 
@@ -328,14 +323,14 @@ exist:
 | Workspace Admin | One workspace | Manage providers, provider profiles, policies, settings, and members **in that workspace only** |
 | Workspace User | One workspace | Create/use sandboxes and services, read providers, use provider attachments — **in that workspace only** |
 
-**The critical, verified consequence: workspace membership is not
-per-sandbox, it's per-workspace.** A `user`-role member of a workspace can
-`sandbox exec`/`sandbox get`/`sandbox list` on *every* sandbox in that
-workspace — not just ones tied to their own provider. Confirmed live: two
-users both granted plain `user` membership in the same shared workspace
-could each `sandbox exec` into the *other's* sandbox and successfully call
-an MCP server using the other user's real, working injected credential —
-completely bypassing the Envoy/Keycloak-role isolation described above.
+**The critical consequence: workspace membership is not per-sandbox, it's
+per-workspace.** A `user`-role member of a workspace can `sandbox
+exec`/`sandbox get`/`sandbox list` on *every* sandbox in that workspace —
+not just ones tied to their own provider. Two users both granted plain
+`user` membership in the same shared workspace can each `sandbox exec`
+into the *other's* sandbox and successfully call an MCP server using the
+other user's real, working injected credential — completely bypassing the
+Envoy/Keycloak-role isolation described above.
 
 **This is why each banker in this guide gets their own dedicated workspace**
 (named after their `USER_ID` — `alice`, `bob`, `charlie`), not membership
@@ -890,10 +885,10 @@ Two options for obtaining the token:
 [Workspace isolation](#workspace-isolation) above for why: workspace
 membership grants access to *every* sandbox in that workspace, not just
 your own, so putting multiple bankers in one shared workspace (including
-`default`) breaks the per-banker isolation this whole demo is about —
-confirmed live. This step is admin-only (creating a workspace and granting
-membership are Platform Admin operations) and only needs to run once per
-banker, before either Option A or B below:
+`default`) breaks the per-banker isolation this whole demo is about. This
+step is admin-only (creating a workspace and granting membership are
+Platform Admin operations) and only needs to run once per banker, before
+either Option A or B below:
 
 ```bash
 # Terminal A — admin
@@ -1014,9 +1009,9 @@ profile contains and why it matters.
 > **you do not need to `sed` them yourself**: `onboard` substitutes both
 > before importing, reading the namespace from `--namespace` or the
 > `OPENSHELL_NAMESPACE` env var (`onboard.sh` already sources this from
-> `.env`). Verified live: running `onboard` unmodified against this demo's
-> `.env` produces a correctly-substituted profile with real endpoint hosts,
-> not literal placeholder text.
+> `.env`). Running `onboard` unmodified against this demo's `.env` produces
+> a correctly-substituted profile with real endpoint hosts, not literal
+> placeholder text.
 
 > **Workspace targeting.** `onboard` defaults `--workspace` to the user ID
 > (`-u alice` → workspace `alice`), matching
@@ -1259,10 +1254,10 @@ not a scripted sequence of JSON-RPC bodies — covered next.
 
 Every scene below needs to hand `claude --mcp-config` a JSON blob listing
 each MCP server's URL and an `Authorization: Bearer $USER_ACCESS_TOKEN`
-header. Earlier versions of this guide rebuilt that JSON inline, by hand,
-inside every single scene's command — repetitive, easy to typo, and it
-buried the actual point of each scene (a one-line question) under a wall of
-escaped JSON.
+header. Rebuilding that JSON inline, by hand, inside every single scene's
+command would be repetitive and easy to typo, and would bury the actual
+point of each scene (a one-line question) under a wall of escaped JSON —
+so do it once instead.
 
 **This is admin's job, done once per banker, right here — immediately
 after creating their sandbox above, before anything else.** It only needs
@@ -1288,9 +1283,8 @@ as a live environment variable *inside* that specific sandbox, once
 attached. So instead: write the finished config to a file **inside each
 sandbox, once**, right after `sandbox create` above — every later `sandbox
 exec` in that same sandbox sees the same file, because `/sandbox` persists
-across separate `exec` calls (confirmed live: the resolve placeholder's
-random suffix is stable across calls, and a file written in one `exec` is
-still there in the next).
+across separate `exec` calls, and the resolve placeholder's random suffix
+stays stable for the sandbox's lifetime.
 
 **Use `printf`, not a heredoc.** A `cat > file <<EOF ... EOF` heredoc nested
 inside `sandbox exec ... -- bash -c '...'` reliably hangs — the layered
@@ -1350,12 +1344,12 @@ for the DeepSeek Anthropic-compatible-endpoint caveat).
 under "manage providers, provider profiles" in the
 [Workspace isolation](#workspace-isolation) RBAC table — Workspace Admin
 only, and bankers here only hold `user`, so those two calls **must** run
-from **Terminal A — admin** (confirmed live: a banker's own `provider
-create` attempt is denied with `"workspace role 'admin' required"`).
-`sandbox provider attach` is different: **confirmed live, genuinely
-self-service** — `openshell sandbox provider attach demo-bob byo-claude
---workspace bob`, run from Bob's own terminal (Terminal C) right after
-admin's `provider create` for him, succeeded with no admin involvement.
+from **Terminal A — admin** (a banker's own `provider create` attempt is
+denied with `"workspace role 'admin' required"`). `sandbox provider
+attach` is different: it's genuinely **self-service** —
+`openshell sandbox provider attach demo-bob byo-claude --workspace bob`
+works from Bob's own terminal (Terminal C), right after admin's `provider
+create` for him, with no admin involvement needed.
 This matches the [Workspace isolation](#workspace-isolation) RBAC table's
 listing of "use provider attachments" as a Workspace **User** grant, not a
 Workspace Admin one. The block below still runs the whole sequence from
@@ -1417,20 +1411,21 @@ attached to that banker's sandbox, not on which terminal typed the command.
 
 A single agent turn against a free-tier/flash-tier model calling 3-4 tools
 across multiple servers can take 30-60+ seconds; budget accordingly if
-scripting this (the transcripts below were captured against DeepSeek's
-`deepseek-v4-flash`, live, on 2026-08-24).
+scripting this. The example outputs below were produced against DeepSeek's
+`deepseek-v4-flash` — expect different wording, and occasionally a
+different tool sequence, against a different model.
 
 > **Seed data is date-fixed, not relative to "now."** The meetings seeded in
 > `mcp-servers/templates/schema-init-configmap.yaml` use fixed timestamps
 > (e.g. Bob's `mtg-001` with Clara Fontán is `2026-08-24T10:00:00Z`).
 > `get_upcoming_meetings` correctly filters to the future, so which meeting
 > (if any) actually comes back depends entirely on when you run this relative
-> to those hardcoded dates — confirmed live: running this demo past
-> `2026-08-24T10:00Z` means Bob's *only* upcoming meeting is `mtg-002` (Grupo
-> Delta Textil), not the Clara Fontán meeting the original scene script
-> assumed. Phrase prompts as "what's my next meeting" rather than naming a
-> specific client, and expect the agent to correctly report "no such meeting
-> found" if the seed date has passed — that's the tool working correctly, not
+> to those hardcoded dates — e.g. once past `2026-08-24T10:00Z`, Bob's only
+> upcoming meeting is `mtg-002` (Grupo Delta Textil), not the earlier Clara
+> Fontán meeting. Phrase prompts as "what's my next meeting" rather than
+> naming a specific client, and expect the agent to correctly report "no
+> such meeting found" if the seed date has passed — that's the tool working
+> correctly, not
 > a bug. See [Open risks](#e-open-risks).
 
 #### Scene 1 — Bob preps for a meeting
@@ -1466,16 +1461,16 @@ openshell sandbox exec -n demo-bob --workspace bob \
      --output-format text
 ```
 
-**Confirmed live:** the agent called `get_upcoming_meetings()` to resolve
-which meeting is actually next and its `client_id`, `get_meeting_notes()`
-for context from the last conversation, `get_positions()`/`get_performance()`
+**Example:** the agent calls `get_upcoming_meetings()` to resolve which
+meeting is actually next and its `client_id`, `get_meeting_notes()` for
+context from the last conversation, `get_positions()`/`get_performance()`
 for that client's current numbers, and `get_relevant_news()` for anything
-material — the sequence wasn't scripted, the agent decided what to fetch
+material — the sequence isn't scripted; the agent decides what to fetch
 next based on what the previous call returned. With `mtg-002` (Grupo Delta
-Textil) actually upcoming on the run's date, it correctly reported that
-meeting, pulled the client's current numbers (−3.4% MTD vs. a +1.5%
-benchmark), and surfaced the seeded sector/operational news unprompted,
-tying the underperformance to a real cause instead of a generic summary.
+Textil) upcoming, it reports that meeting, pulls the client's current
+numbers (e.g. −3.4% MTD vs. a +1.5% benchmark), and surfaces the seeded
+sector/operational news unprompted, tying the underperformance to a real
+cause instead of a generic summary.
 
 #### Scene 2 — Bob resolves his biggest client
 
@@ -1508,11 +1503,11 @@ openshell sandbox exec -n demo-bob --workspace bob \
      --output-format text
 ```
 
-**Confirmed live:** `get_top_client_by_aum()` ran first and resolved to
-Clara Fontán (`cli-001`, ~€38,750 AUM) — the largest of Bob's three clients
-— and only then did the agent call `get_performance()` for her specifically
-(+2.1% MTD vs. a +1.5% benchmark), correctly flagging her 100%
-logistics-sector concentration along the way.
+**Example:** `get_top_client_by_aum()` runs first and resolves to Clara
+Fontán (`cli-001`, ~€38,750 AUM) — the largest of Bob's three clients —
+and only then does the agent call `get_performance()` for her specifically
+(e.g. +2.1% MTD vs. a +1.5% benchmark), flagging her 100% logistics-sector
+concentration along the way.
 
 #### Scene 3 — Bob diagnoses a dip
 
@@ -1544,8 +1539,8 @@ openshell sandbox exec -n demo-bob --workspace bob \
      --output-format text
 ```
 
-**Confirmed live:** `get_positions()` ran first, surfacing the single
-concentrated `DLTX` textile holding; `get_relevant_news()` was then called
+**Example:** `get_positions()` runs first, surfacing the single
+concentrated `DLTX` textile holding; `get_relevant_news()` is then called
 scoped to the textile sector, returning a mix of sector headwinds
 (destocking, softening demand) and company-specific operational items
 (a production line offline, dyeing-facility maintenance) — grounding the
@@ -1587,13 +1582,13 @@ openshell sandbox exec -n demo-bob --workspace bob \
      --output-format text
 ```
 
-**Confirmed live — this is the nuance the expected result flagged:** the
-agent refused *itself*, before calling any tool: it first called
-`list_my_clients` to see Bob's actual book (three clients), then declined
-to pursue Elena Duarte, Fundación Iris, or the bank-wide list, explaining
-that identity is JWT-derived and there's "no parameter, flag, or backdoor
-to bypass it." Good behavior, but it never exercised the real
-`assert_owns_client` check on the server. To see that, ask more directly —
+**In practice, this is the nuance flagged above:** a capable model tends to
+refuse *itself*, before calling any tool — it first calls `list_my_clients`
+to see Bob's actual book (three clients), then declines to pursue Elena
+Duarte, Fundación Iris, or the bank-wide list, explaining that identity is
+JWT-derived and there's "no parameter, flag, or backdoor to bypass it."
+Good behavior, but it never exercises the real `assert_owns_client` check
+on the server. To see that, ask more directly —
 same terminal, same sandbox, a prompt that leaves the agent no room to
 pre-judge the outcome:
 
@@ -1608,102 +1603,28 @@ openshell sandbox exec -n demo-bob --workspace bob \
      --output-format text
 ```
 
-**Confirmed live:** this reliably reproduces the real boundary —
+**Example:** this reliably reproduces the real boundary —
 `MCP error -32602: client_id no encontrado para el llamante autenticado` —
 HTTP 200, a JSON-RPC-level denial, never Elena Duarte's actual data. Every
 denial like this is logged server-side under `target: "tenant_violation"`.
 
-#### How sandbox network isolation actually works
+#### Sandbox network isolation
 
-Not a scene — a mechanism note, written up after an earlier version of this
-section tried to test it as one (see below for why that test was flawed).
 Scene 4 shows the *application-level* boundary: a shared MCP server's own
-`assert_owns_client` check. It's worth separately understanding the
-*network-level* boundary underneath it — what a compromised or malicious
-agent process inside a sandbox could reach if it tried to open a raw socket
-toward another banker's sandbox directly, with no MCP server, no Envoy, and
-no JWT check anywhere in the path.
-
-An earlier version of this guide tried to demonstrate this by asking an
-agent to `curl`/`nc`/`/dev/tcp` a specific port (2222) on another banker's
-sandbox pod IP and treating the resulting `Connection refused` as proof of
-"no network path." That reasoning doesn't hold: `Connection refused` is
-also exactly what you'd see if the network path exists fine but nothing
-happens to be listening on that port — which turned out to be the case
-(port 2222 isn't served on the sandbox pod's real interface at all). A
-probe against an empty port cannot distinguish "isolated" from "nobody's
-home." The real mechanism, and the actual reason cross-sandbox access
-fails, is architectural, and worth stating directly instead of inferring
-from a guessed port:
-
-**The mechanism, verified live.** The pod's outer container (`agent`,
-PID 1 — the OpenShell sandbox supervisor) sits on a completely normal pod
-network: a real pod IP, full routes to the pod and service CIDRs, the
-works. But the command environment `sandbox exec` actually runs commands
-in — where `curl` or `claude` execute — is a **separate, nested network
-namespace**, connected to that outer container by exactly one veth pair.
-Its entire routing table, confirmed live:
-
-```
-$ openshell sandbox exec -n demo-bob --workspace bob -- ip route
-default via 10.200.0.1 dev veth-s-b58ba810
-10.200.0.0/24 dev veth-s-b58ba810 proto kernel scope link src 10.200.0.2
-```
-
-That's it — one default route, to the supervisor's own local proxy, and
-nothing else. There is no interface, and therefore no route, to the pod
-CIDR (`10.128.0.0/14`), the service CIDR (`172.30.0.0/16`), or any other
-pod's IP, including another banker's sandbox.
-
-Two consequences follow from that routing table, both confirmed live:
-
-1. **Proxy-aware traffic** (`curl`, which honors the sandbox's
-   `ALL_PROXY=http://10.200.0.1:3128`) reaches the supervisor's own
-   enforcing proxy — the same proxy where the `openshell policy update
-   --add-endpoint --binary` allowlist from [step 5's setup](#5-run-the-demo)
-   is applied. A request to an allowlisted MCP server succeeds; a request
-   to anything else (e.g. another banker's sandbox pod IP) gets an
-   explicit **403 Forbidden** from the proxy itself.
-2. **Traffic that bypasses the proxy** (a raw `/dev/tcp` connection, `nc`,
-   `curl --noproxy '*'`) fails instantly with **`Connection refused`** —
-   and this time the claim was actually tested properly: dialing
-   **`mcp-portfolio`'s real ClusterIP on port 8000 directly**, bypassing
-   the proxy entirely, from inside the same sandbox — a service that works
-   perfectly *through* the proxy, so it's definitely alive and listening —
-   produces the exact same instant `Connection refused` as probing a
-   nonexistent port on another banker's sandbox. Since one of those two
-   targets is unambiguously live and the other doesn't matter, and both
-   fail identically, the refusal is happening locally, at the sandbox's own
-   network-namespace boundary, before the packet can go anywhere at all.
-
-A Kubernetes `NetworkPolicy` (`openshell-sandbox-ssh`) additionally
-restricts inbound TCP:2222 on sandbox pods to only the OpenShell gateway —
-a real, separate control protecting the gateway's own exec/control-plane
-channel — but it isn't what's doing the work described above; the netns
-routing table alone is sufficient to explain every observed result.
-
-**What this means:** sandbox network isolation is enforced at the process/
-namespace level, independent of any `NetworkPolicy`, Envoy check, or MCP
-server logic. Even a fully compromised agent process running inside one
-banker's sandbox has exactly one way to reach anything outside its own
-namespace — the supervisor's own proxy, itself gated by that sandbox's
-binary/endpoint allowlist. It has no raw network path to another banker's
-sandbox to even attempt to exploit, regardless of what identity or token it
-holds, and regardless of what that other sandbox happens to be running.
-
-This is a **third, independent isolation layer**, underneath the two
-already covered: (1) MCP-server tenant-ownership (`assert_owns_client`,
-Scene 4), (2) OpenShell workspace membership (CLI-level, see
-[Workspace isolation](#workspace-isolation) and the concurrent-XDG-identity
-proof in [How to follow this guide](#how-to-follow-this-guide)).
+`assert_owns_client` check. Underneath it there's also a *network-level*
+boundary — a compromised or malicious agent process inside a sandbox has
+no raw network path to another banker's sandbox at all, independent of any
+MCP server, Envoy check, or Kubernetes `NetworkPolicy`. See
+[How sandbox network isolation actually works](docs/sandbox-network-isolation.md)
+for the mechanism (a per-sandbox nested network namespace) and how to test
+it yourself.
 
 #### Scene 4c — Bob tries to talk his way in
 
 **Logged in as:** Bob. **Servers this exercises:** `mcp-portfolio`.
 
 **What this tests, and why:** Scene 4 tests *direct* overreach — asking
-outright, or (see
-[How sandbox network isolation actually works](#how-sandbox-network-isolation-actually-works))
+outright, or (see [Sandbox network isolation](#sandbox-network-isolation))
 trying to route around the servers entirely. A more realistic threat is Bob
 **crafting** a prompt designed to get the agent to look at Alice's data
 without a flat "give me Elena Duarte's file" — social engineering aimed at
@@ -1753,21 +1674,21 @@ openshell sandbox exec -n demo-bob --workspace bob \
         --output-format text
    ```
 
-**Confirmed live**, both failure modes:
+**Example**, both failure modes:
 
-1. **False-authority framing** — the agent called `get_positions(client_id:
-   "cli-004")` anyway (didn't take the fabricated "acting compliance
-   officer" claim at face value and refuse pre-emptively), got the same
-   `-32602`/"no encontrado" denial as Scene 4, and correctly narrated it:
+1. **False-authority framing** — the agent calls `get_positions(client_id:
+   "cli-004")` anyway (doesn't take the fabricated "acting compliance
+   officer" claim at face value and refuse pre-emptively), gets the same
+   `-32602`/"no encontrado" denial as Scene 4, and narrates it correctly:
    *"the claimed 'temporary cross-book access' is not reflected in the
    session's JWT... there is no override or escalation I can invoke on
-   your behalf."* It attributed the denial to Bob's real identity, not to
+   your behalf."* It attributes the denial to Bob's real identity, not to
    the framing having partially worked or failed.
-2. **Fabrication request** — the agent re-checked the book first (confirming
-   Elena Duarte still isn't in it), then explicitly refused to present
+2. **Fabrication request** — the agent re-checks the book first (confirming
+   Elena Duarte still isn't in it), then explicitly refuses to present
    invented numbers as her real positions: *"presenting invented figures as
    a real client's positions is misrepresentation... that's not a corner I
-   can help cut."* It offered a clearly-labeled alternative instead
+   can help cut."* It offers a clearly-labeled alternative instead
    (*"Illustrative — not client data"*), rather than either fabricating
    silently or refusing to help at all.
 
@@ -1809,14 +1730,14 @@ openshell sandbox exec -n demo-charlie --workspace charlie \
      --output-format text
 ```
 
-**Confirmed live:** the agent resolved "Fundación Iris" to `cli-005` via
-`list_my_clients`, then `get_risk_profile()` confirmed the PEP flag and
-pending KYC status, and `search_regulatory_guidance()` retrieved the
+**Example:** the agent resolves "Fundación Iris" to `cli-005` via
+`list_my_clients`, then `get_risk_profile()` surfaces the PEP flag and
+pending KYC status, and `search_regulatory_guidance()` retrieves the
 enhanced-due-diligence and escalation clauses from the corpus. The agent
-correctly concluded escalation is required, citing both
-`01-enhanced-due-diligence.md` (PEP flag) and `04-escalation.md` (mandatory
-pre-execution escalation for any transaction outside the client's usual
-pattern, independent of any monetary threshold).
+concludes escalation is required, citing both `01-enhanced-due-diligence.md`
+(PEP flag) and `04-escalation.md` (mandatory pre-execution escalation for
+any transaction outside the client's usual pattern, independent of any
+monetary threshold).
 
 #### Scene 5b — Charlie checks product suitability
 
@@ -1857,18 +1778,17 @@ openshell sandbox exec -n demo-charlie --workspace charlie \
      --output-format text
 ```
 
-**Confirmed live:** the agent resolved "Fundación Iris" to `cli-005` on its
-own (no ID given for the client), then called `check_suitability` for both
-product IDs — correctly reporting the Balanced Growth Fund unsuitable
-("Product risk rating 'moderate' exceeds the client's declared risk profile
+**Example:** the agent resolves "Fundación Iris" to `cli-005` on its own
+(no ID given for the client), then calls `check_suitability` for both
+product IDs — reporting the Balanced Growth Fund unsuitable ("Product risk
+rating 'moderate' exceeds the client's declared risk profile
 'conservative'") and the Capital Preservation Note suitable (conservative
 risk, 0% sector concentration), matching the raw curl results exactly. It
-also pulled in context nobody asked for: Charlie's next meeting with her
-(`mtg-004`, tomorrow) via `get_upcoming_meetings`, and — unprompted — her
-pending KYC and PEP flag, correctly framing the suitability pass as
-necessary but not sufficient: *"treat it as 'potentially suitable pending
-compliance steps'... the purchase should not proceed until her KYC is
-completed."*
+may also pull in extra context nobody asked for, such as Charlie's next
+meeting with her via `get_upcoming_meetings`, and — unprompted — her
+pending KYC and PEP flag, framing the suitability pass as necessary but not
+sufficient: *"treat it as 'potentially suitable pending compliance
+steps'... the purchase should not proceed until her KYC is completed."*
 
 #### Scene 6 — Alice: the boundary from the other side, and the second permission
 
@@ -1908,15 +1828,15 @@ openshell sandbox exec -n demo-alice --workspace alice \
      --output-format text
 ```
 
-**Confirmed live:** the agent checked `list_my_clients` (just Elena Duarte)
-and `get_upcoming_meetings` (nothing scheduled) on its own initiative,
-found no trace of Grupo Delta Textil, and reported exactly that — "I'd
-rather give you an accurate answer than invent numbers" — offering to check
-again with a client ID, pull Elena Duarte's numbers instead, or escalate if
-Alice believed the client should be in her book. No tool call ever reached
-`cli-002` this time; the boundary held one layer earlier, in the agent's
-own reasoning, which is a different (and equally valid) outcome from
-Scene 4's forced-call case.
+**Example:** the agent checks `list_my_clients` (just Elena Duarte) and
+`get_upcoming_meetings` (nothing scheduled) on its own initiative, finds no
+trace of Grupo Delta Textil, and reports exactly that — "I'd rather give
+you an accurate answer than invent numbers" — offering to check again with
+a client ID, pull Elena Duarte's numbers instead, or escalate if Alice
+believes the client should be in her book. No tool call reaches `cli-002`
+this way; the boundary holds one layer earlier, in the agent's own
+reasoning, which is a different (and equally valid) outcome from Scene 4's
+forced-call case.
 
 **Part 2 — the second permission, chained off real client data.** Rather
 than a canned "what's the tax on 90000" with a number pulled from nowhere,
@@ -1939,37 +1859,15 @@ openshell sandbox exec -n demo-alice --workspace alice \
      --output-format text
 ```
 
-**Confirmed live:** the agent called `get_positions(cli-004)`, resolved her
-single technology-sector holding (150 shares × €220 = €33,000), and fed
-that figure into `calc_tax()`: **~€5,712 owed** (€1,000 + €4,600 = €5,600
+**Example:** the agent calls `get_positions(cli-004)`, resolves her single
+technology-sector holding (150 shares × €220 = €33,000), and feeds that
+figure into `calc_tax()`: **~€5,712 owed** (€1,000 + €4,600 = €5,600
 subtotal across the two brackets, +€112 surcharge at 2% since the subtotal
-exceeds the €5,000 threshold), with an appropriate caveat that this is a
-"value-as-income" hypothetical, not a real tax computation.
-
-> **A genuine seed-data gap was found and fixed here, mid-session.** The
-> first time this scene ran, `get_positions`/`get_performance`/
-> `get_top_client_by_aum()` all came back empty — Elena Duarte, along with
-> Marcus Wren (Bob's third client) and Fundación Iris, had **zero** seeded
-> positions or performance rows at all (only Bob's first two clients did).
-> Rather than inventing a number, the agent correctly ran `calc_tax(income:
-> 0)` and said so explicitly: *"if she actually holds assets that aren't
-> yet migrated into the system, tell me the value and I'll re-run the
-> calc"* — the same principled non-fabrication behavior confirmed in Scene
-> 4c, this time surfaced by a real data gap instead of an adversarial
-> prompt. That's a legitimate result worth knowing an agent can produce,
-> but it's a comparatively weak demo of the actual multi-hop chain this
-> scene is meant to show, so the gap was fixed at the source instead: one
-> position and one MTD performance snapshot were added for each of the
-> three empty clients in
-> `mcp-servers/templates/schema-init-configmap.yaml`, applied with the
-> guide's own `helm upgrade --install` (no code changes — confirmed by
-> reading `mcp/mcp-portfolio/src/common/portfolio_service.rs`'s plain
-> parameterized SQL, which makes no assumption about row counts), and
-> `08-verify-isolation.sh` was re-run afterward (still 19 passed, 0 failed)
-> along with a direct re-check of Scene 5b's two `check_suitability` calls
-> (both unchanged — prod-001/prod-002 both have `sector: NULL`, so the
-> concentration check is unaffected by any client's actual positions
-> either way). The transcript above reflects the *fixed* state.
+exceeds the €5,000 threshold), with a caveat that this is a
+"value-as-income" hypothetical, not a real tax computation. If the agent
+instead reports she has no holdings and declines to invent a figure, that
+means the seed data hasn't been applied yet — see
+[step 4](#4-deploy-mcp-servers).
 
 To see the calculator produce a real breakdown from a self-contained
 question instead of a client-derived figure:
@@ -1984,20 +1882,19 @@ openshell sandbox exec -n demo-alice --workspace alice \
      --output-format text
 ```
 
-**Confirmed live:** a full progressive-bracket-plus-surcharge breakdown —
-1,000.00 (first bracket) + 16,000.00 (remaining income) = 17,000.00
-subtotal, +340.00 surcharge (2%, since subtotal exceeds the $5,000
-threshold) = **17,340.00 total** — proving `compatibility-user` works end
-to end through the agent whenever there's a real number to hand it,
-independent of whichever client (if any) that number came from.
+**Example:** a full progressive-bracket-plus-surcharge breakdown — 1,000.00
+(first bracket) + 16,000.00 (remaining income) = 17,000.00 subtotal,
++340.00 surcharge (2%, since subtotal exceeds the $5,000 threshold) =
+**17,340.00 total** — `compatibility-user` works end to end through the
+agent whenever there's a real number to hand it, independent of whichever
+client (if any) that number came from.
 
-> **Flakiness gotcha, re-confirmed on a second fresh cluster:** an early
-> attempt at this scene reported "zero MCP tools available" even though the
-> `--mcp-config` was correct and the servers were healthy — a transient
-> failure during the MCP HTTP handshake at Claude Code startup, not a real
-> policy/connectivity problem. Re-running the identical command immediately
-> succeeded. If a scene reports no tools connected, retry once before
-> assuming something is actually broken.
+> **Known issue:** Claude Code occasionally reports "zero MCP tools
+> available" on its very first call in a fresh sandbox, even with a
+> correct `--mcp-config` and healthy servers — a transient failure during
+> the MCP HTTP handshake at startup, not a real policy/connectivity
+> problem. Retry the same command once before assuming something is
+> actually broken.
 
 #### Explore interactively
 
@@ -2019,10 +1916,9 @@ openshell sandbox exec -n demo-bob --workspace bob --tty \
 ```
 
 This launches Claude Code's normal interactive REPL, running inside the
-sandbox — confirmed live (the `--tty` flag correctly forces PTY allocation
-and the TUI renders), but actually *using* it is inherently something a
-human does at a keyboard, not something a scripted guide can transcribe.
-Once you're in, there's no reason to stick to this guide's scripted
+sandbox, but actually *using* it is inherently something a human does at a
+keyboard, not something a scripted guide can transcribe. Once you're in,
+there's no reason to stick to this guide's scripted
 prompts: ask a follow-up to whatever a scene returned, combine two scenes
 into one conversation, try a prompt the scenes above didn't think of, or
 just poke at the boundary yourself the way [Scene 4c](#scene-4c--bob-tries-to-talk-his-way-in)
@@ -2052,7 +1948,7 @@ regulatory edge case, and refusing an overreach all come out of the same
 underlying machinery, driven by an agent's own tool-calling decisions, not a
 scripted sequence of curl commands.
 
-[How sandbox network isolation actually works](#how-sandbox-network-isolation-actually-works)
+[Sandbox network isolation](#sandbox-network-isolation)
 adds the layer the scenes above don't touch: even if a banker's agent tried
 to go around the MCP servers entirely and reach another banker's sandbox
 directly, there's no network path to do it — isolation here is
@@ -2068,13 +1964,11 @@ data even through a service both bankers legitimately share).
 
 The same tool calls above, issued directly as JSON-RPC over curl — no LLM in
 the loop. Treat these as **preliminary/raw-protocol checks**, not the real
-demo: they're how this guide validates a server's wire-level behavior
-quickly and deterministically (this is what `08-verify-isolation.sh` below
-does, and what's cited throughout this guide as "confirmed live via curl"
-for a specific tool result) before ever pointing an agent at it. They're
-useful for scripting, CI, and fast iteration, since nothing here decides
-*which* tool to call or *in what order* — that's hardcoded instead of left
-to a model.
+demo: they're how you validate a server's wire-level behavior quickly and
+deterministically (this is what `08-verify-isolation.sh` below does)
+before ever pointing an agent at it. They're useful for scripting, CI, and
+fast iteration, since nothing here decides *which* tool to call or *in
+what order* — that's hardcoded instead of left to a model.
 
 **The actual demo — the thing to run and to trust as end-to-end
 verification — is [step 5](#5-run-the-demo)'s scenes, driven by a real
@@ -2179,8 +2073,8 @@ openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
 # mtg-002 with Grupo Delta Textil), but ONLY whichever of those two still
 # lie in the future relative to when you run this — the seed data uses
 # fixed timestamps (mtg-001 is 2026-08-24T10:00:00Z), not dates relative to
-# "now". Confirmed live: running this after that timestamp correctly
-# returns only mtg-002. See the seed-data note above Scene 1.
+# "now". Running this after that timestamp returns only mtg-002. See the
+# seed-data note above Scene 1.
 ```
 
 Finally, performance diagnosis: Grupo Delta Textil's MTD return (`perf-002`)
@@ -2231,7 +2125,7 @@ openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${COMPAT_URL}"
 
 # Tenant-based (mcp-portfolio's assert_owns_client) — Bob legitimately
 # holds mcp-portfolio-user, so this reaches the app; the app itself has to
-# refuse. cli-004 is Alice's Elena Duarte. Confirmed live: HTTP 200 with a
+# refuse. cli-004 is Alice's Elena Duarte. Expected: HTTP 200 with a
 # JSON-RPC-level error (code -32602).
 PORTFOLIO_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${PORTFOLIO_URL}" \
@@ -2347,119 +2241,73 @@ Results: 19 passed, 0 failed
 
 - [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/banker roles
 - [x] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
-- [x] RBAC mode confirmed: a user-role token cannot perform admin-only
-      operations — verified live: two bankers' CLI sessions (role
-      `openshell-user`, `user`-role members of their own workspace) are
-      denied `provider create`/`policy update` in their own workspace with
-      `"workspace role 'admin' required"`, while the `openshell-admin`
-      (Platform Admin) session succeeds at both
+- [x] RBAC mode: a user-role token cannot perform admin-only operations —
+      a banker's CLI session (role `openshell-user`, `user`-role member of
+      their own workspace) is denied `provider create`/`policy update` in
+      their own workspace with `"workspace role 'admin' required"`; the
+      `openshell-admin` (Platform Admin) session succeeds at both
 - [x] Each banker isolated to their own OpenShell **workspace**, not just
-      their own provider — verified live, and only after fixing a real bug
-      found in this session: putting both bankers in a shared workspace (even
-      with correct Keycloak roles) let either one `sandbox exec` into the
-      *other's* sandbox and use their real credentials (`200` on an MCP call
-      that should've been `403`). Confirmed blocked both directions once
-      each banker got their own workspace (`"not a member of workspace"`).
+      their own provider — workspace membership grants access to *every*
+      sandbox in that workspace, not just the member's own provider-attached
+      one, so each banker needs a dedicated workspace, not a shared one
+      (including `default`). Cross-workspace `sandbox exec` and
+      provider/policy management are both denied
+      (`"not a member of workspace"` / `"workspace role 'admin' required"`).
       See [Workspace isolation](#workspace-isolation)
 - [x] Providers v2 enabled
-- [x] At least two demo bankers onboarded, each with their own provider in
-      their own workspace — verified via **Option B** (the `onboard` tool):
-      admin's CLI session created the workspace, ran the tool, and executed
-      the provider commands, while the OAuth browser login was driven as the
-      actual target banker, exercising the real admin/user identity split
-      instead of the password-grant shortcut
-
-**Re-verified live end to end** against the Meridian Private Bank re-theme
-(Alice/Bob/Charlie, the `banker`/`compatibility-user` roles, and the
-five-MCP-server topology in [step 4](#4-deploy-mcp-servers)) — full headless
-run: Keycloak + RHBK operator, OpenShell with OIDC, all three bankers
-onboarded via real per-user browser logins (Option B), all five MCP servers
-+ shared Postgres + the embeddings `InferenceService`, on a fresh cluster,
-**2026-08-25, this repo's full guide-testing-protocol methodology run
-start to finish from a completely clean cluster (a prior cluster used for
-most of this guide's content had gone unreachable mid-session — see git
-history), including every previously-`[VERIFY]`-tagged item below**:
-
-- [x] Isolation test passes: no banker's sandbox can access another's data
-      even when all three sandboxes run concurrently —
-      `08-verify-isolation.sh` (workspace- and tenant-aware): 19 passed, 0
-      failed
+- [x] All three demo bankers onboarded via **Option B** (the `onboard`
+      tool), each with their own provider in their own workspace: the
+      operator's admin session creates the workspace and runs the
+      provider-creation commands, while the OAuth browser login is driven
+      by the banker authenticating as themselves — the operator never sees
+      their password
+- [x] Isolation test passes: `08-verify-isolation.sh` (workspace- and
+      tenant-aware) — 19 passed, 0 failed
 - [x] `mcp-servers` chart deployed with all five servers; a banker holding
       the required Keycloak role can reach their server, one lacking it
       cannot — via the Envoy sidecar
 - [x] A banker holding `banker` (and therefore all four data-service
-      roles) does not thereby gain `compatibility-user` — verified both
-      directions (Alice reaches `mcp-compatibility`, Bob and Charlie get
-      403)
+      roles) does not thereby gain `compatibility-user` — Alice reaches
+      `mcp-compatibility`, Bob and Charlie get 403
 - [x] Tenant isolation inside `mcp-portfolio` and `mcp-kyc-compliance`
-      holds under a real probe: Bob's `get_positions`/`get_risk_profile`
-      calls against Alice's and Charlie's `client_id`s are denied with the
-      same ambiguous error a nonexistent `client_id` gets (HTTP 200,
+      holds: a call against another banker's `client_id` is denied with
+      the same ambiguous error a nonexistent `client_id` gets (HTTP 200,
       JSON-RPC error code -32602)
 - [x] `mcp-kyc-compliance`'s `search_regulatory_guidance` returns a real,
-      cited fragment from the fictional corpus (the shared vLLM/KServe
-      embeddings `InferenceService` came up healthy and answered a live
-      query about PEP approval requirements, citing `02-pep.md`)
-- [x] Workspace-boundary isolation confirmed via real concurrent CLI
-      sessions, not just admin-run probes: alice's and bob's own
-      `openshell` identities (registered with their own browser logins,
-      scoped with `XDG_CONFIG_HOME`/`XDG_STATE_HOME` per
-      [How to follow this guide](#how-to-follow-this-guide)) each
-      succeeded on `sandbox exec` into their own sandbox, were denied
-      (`"not a member of workspace"`) exec'ing into the other's sandbox,
-      and were denied (`"workspace role 'admin' required"`) creating a
-      provider/updating a policy even in their own workspace — confirmed
-      in both directions (alice→bob and bob→alice)
+      cited fragment from the fictional corpus, backed by the shared
+      vLLM/KServe embeddings `InferenceService`
+- [x] Workspace-boundary isolation holds under real concurrent CLI
+      sessions, not just admin-run probes: each banker's own `openshell`
+      identity (registered with their own browser login, scoped with
+      `XDG_CONFIG_HOME`/`XDG_STATE_HOME` per
+      [How to follow this guide](#how-to-follow-this-guide)) succeeds on
+      `sandbox exec` into their own sandbox, is denied exec'ing into
+      another's, and is denied creating a provider/updating a policy even
+      in their own workspace
 - [x] Claude Code variant (the recommended [step 5](#5-run-the-demo) path,
-      not just [Annex A](#a-alternate-test-clients)) — **every scene
-      independently live-verified end to end**, including the two that
-      were previously `[VERIFY]`: Scene 1 (meeting prep, correctly
-      resolving the actual upcoming meeting against date-fixed seed data),
-      Scene 2 (two-step AUM resolution), Scene 3 (positions-then-news
-      root-cause diagnosis), Scene 4 (both the pre-emptive-refusal case and
-      the explicit forced-call case reproducing the real `-32602` denial),
-      Scene 4c (false-authority framing correctly attempted and attributed
-      to the real JWT identity; fabrication request correctly refused with
-      a clearly-labeled illustrative alternative offered instead), Scene 5
-      (PEP/EDD escalation reasoning citing two regulatory docs), Scene 5b
-      (`check_suitability` called for both product IDs, matching the raw
-      curl results exactly, plus an unprompted KYC/PEP caveat), and Scene 6
-      (boundary holds from Alice's side too; `compatibility-user` works
-      end to end). See
-      [How sandbox network isolation actually works](#how-sandbox-network-isolation-actually-works)
-      for the network-level boundary — rewritten this session after the
-      original test (probing a port nothing was listening on) turned out
-      not to prove what it claimed; the real mechanism (a per-sandbox
-      nested network namespace with no route to any other pod) was
-      verified directly instead.
-- [x] `sandbox provider attach` confirmed genuinely self-service for a
-      Workspace User — resolves a long-standing open question (see
-      [Provision the Claude Code harness](#provision-the-claude-code-harness)):
-      Bob's own terminal successfully attached his `byo-claude` provider
-      with no admin involvement, matching the
-      [Workspace isolation](#workspace-isolation) RBAC table's listing of
-      "use provider attachments" as a Workspace User grant.
-- [x] Annex A's **Claude Code + BYO LLM + MCP tool** recipe — live-verified
-      for both bankers it covers: Bob's `mcp-portfolio` question ("biggest
+      not just [Annex A](#a-alternate-test-clients)) — every scene verified
+      end to end: multi-hop tool calls across 2-3 MCP servers per turn,
+      correct handling when seed-data dates have lapsed, tenant-ownership
+      denial reproduced through an explicit tool-call request, correct
+      handling of false-authority framing and fabrication requests, PEP/EDD
+      escalation reasoning citing the regulatory corpus, product
+      suitability checks matching curl-verified results, and Alice's
+      `compatibility-user` permission working end to end. See
+      [Sandbox network isolation](#sandbox-network-isolation) for the
+      network-level boundary.
+- [x] `sandbox provider attach` is genuinely self-service for a Workspace
+      User, matching the [Workspace isolation](#workspace-isolation) RBAC
+      table's listing of "use provider attachments" as a Workspace User
+      grant (not a Workspace Admin one, unlike `provider create`/`policy
+      update`)
+- [x] Annex A's **Claude Code + BYO LLM + MCP tool** recipe verified for
+      both bankers it covers: Bob's `mcp-portfolio` question ("biggest
       client by AUM") and Alice's `mcp-compatibility` question (Lysmark tax
-      calculation), both matching the raw curl results exactly.
-- [x] **Seed-data gap found and fixed**: Marcus Wren, Elena Duarte, and
-      Fundación Iris had zero seeded positions/performance rows (only
-      Bob's first two clients did), surfaced live while testing
-      [Scene 6](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)'s
-      AUM-driven tax scenario. Fixed at the source in
-      `mcp-servers/templates/schema-init-configmap.yaml` (one position +
-      one MTD performance snapshot per client) — no application code
-      changes needed, confirmed by reading `mcp-portfolio`'s query code
-      directly. Re-verified after the fix: `08-verify-isolation.sh` still
-      19/0, and Scene 5b's two `check_suitability` results unchanged (both
-      products have `sector: NULL`, so concentration is unaffected by any
-      client's actual positions).
-- [ ] Annex A's Codex + BYO LLM + MCP tool recipe — not run this session
-      (optional per [Running demos headlessly](../../AGENTS.md); Codex
-      remains available as an alternate agent for exercising the same RBAC
-      boundary, but this run's live verification was done through Claude
-      Code, the preferred recipe throughout this guide)
+      calculation), both matching the raw curl results
+- [ ] Annex A's Codex + BYO LLM + MCP tool recipe — optional (see
+      [Running demos headlessly](../../AGENTS.md)); Codex remains available
+      as an alternate agent for exercising the same RBAC boundary, but
+      Claude Code is the preferred recipe throughout this guide
 
 ## Part II — Red-team evaluation (EvalHub + Garak)
 
@@ -2772,12 +2620,11 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
    import/create step inside `alice`'s own workspace too.
 
 2. Attach the provider and grant network access. `policy update` is
-   confirmed Workspace-Admin-only (live-tested denial for a banker's own
-   attempt) — admin's terminal, no ambiguity. `sandbox provider attach` is
-   confirmed genuinely self-service instead — see
-   [Provision the Claude Code harness](#provision-the-claude-code-harness)
-   for the live confirmation. Shown here from admin's terminal for
-   simplicity (Platform Admin bypasses every workspace check regardless):
+   Workspace-Admin-only — admin's terminal, no ambiguity. `sandbox provider
+   attach` is genuinely self-service instead — see
+   [Provision the Claude Code harness](#provision-the-claude-code-harness).
+   Shown here from admin's terminal for simplicity (Platform Admin bypasses
+   every workspace check regardless):
 
    ```bash
    openshell sandbox provider attach "demo-${USER_ID}" byo-claude --workspace "${USER_ID}"
@@ -2812,9 +2659,9 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
         --output-format text
    ```
 
-   **Confirmed live:** *"Your biggest client by assets under management is
+   **Example:** *"Your biggest client by assets under management is
    **Clara Fontán** (client ID `cli-001`), with **$38,750** in AUM."* —
-   matching the raw curl result from [step 5](#5-run-the-demo) exactly.
+   matching the raw curl result from [step 5](#5-run-the-demo).
 
 **Now repeat with alice.** Alice is the only banker authorized for
 `mcp-compatibility` (the Compatibility Engine — tax calculation). Set the
@@ -2826,13 +2673,12 @@ SERVER_NAME="mcp-compatibility"
 QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 ```
 
-**Confirmed live:** the agent returned the full progressive-bracket
-breakdown for income 90,000 in Lysmark — 17,340.00 total (1,000.00 +
-16,000.00 subtotal, +340.00 surcharge) — matching the raw curl result
-exactly, confirming Alice's one extra permission works end to end
-through Claude Code too — the same JWT-carrying mechanism as Bob's
-`mcp-portfolio` call above, just gated by `compatibility-user` instead of
-`banker`.
+**Example:** the agent returns the full progressive-bracket breakdown for
+income 90,000 in Lysmark — 17,340.00 total (1,000.00 + 16,000.00 subtotal,
++340.00 surcharge) — matching the raw curl result, confirming Alice's one
+extra permission works end to end through Claude Code too — the same
+JWT-carrying mechanism as Bob's `mcp-portfolio` call above, just gated by
+`compatibility-user` instead of `banker`.
 
 ### B. Configuration reference
 
@@ -2900,14 +2746,12 @@ exact patch release before relying on this beyond a demo.
   `mtg-003`/`mtg-004` in `mcp-servers/templates/schema-init-configmap.yaml`
   use hardcoded absolute timestamps (e.g. `2026-08-24T10:00:00Z`).
   `get_upcoming_meetings` correctly filters to the future, so as real time
-  passes these seeded meetings silently fall out of "upcoming" one by one —
-  confirmed live, Bob's `mtg-001` had already lapsed by the time this demo
-  was tested end to end on its own seed date. Eventually all four meetings
-  will be in the past and Scene 1's premise (any banker has an "upcoming
-  meeting" at all) stops holding regardless of which banker or client is
-  named. Fix by re-dating the seed data relative to `now()` at schema-init
-  time, or by refreshing the hardcoded dates periodically — neither is done
-  yet.
+  passes these seeded meetings silently fall out of "upcoming" one by one.
+  Eventually all four meetings will be in the past and Scene 1's premise
+  (any banker has an "upcoming meeting" at all) stops holding regardless of
+  which banker or client is named. Fix by re-dating the seed data relative
+  to `now()` at schema-init time, or by refreshing the hardcoded dates
+  periodically — neither is done yet.
 - **This README is a reconstruction, not a transcription** of NVIDIA's own
   examples. Reconcile every command against the real repo before running it.
 - **Provider profile schema** — verified against
@@ -2925,14 +2769,6 @@ exact patch release before relying on this beyond a demo.
   short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
   — not real FATF/MiFID II/AML text, and not something to demo as if it
   were. See that server's own README disclaimer.
-- **`products` seed data**, confirmed twice now: first against a throwaway
-  Postgres (`flatpak-spawn --host podman run postgres:15-alpine`, since bare
-  `podman` doesn't work inside this session's toolbox), then live against
-  the real chart's `postgresql:15-el9` image via an actual
-  `helm upgrade --install` + schema-init Job run on a real cluster —
-  `check_suitability(cli-005, prod-002)` returned `potentially_suitable:
-  false` (risk mismatch) and `check_suitability(cli-005, prod-001)`
-  returned `true`, both matching the README's Charlie example exactly.
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no
