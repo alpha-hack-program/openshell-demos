@@ -20,8 +20,8 @@
   - [3. Onboard a banker](#3-onboard-a-banker)
   - [4. Deploy MCP servers](#4-deploy-mcp-servers)
   - [5. Run the demo](#5-run-the-demo)
-    - [Provision the Claude Code harness](#provision-the-claude-code-harness)
     - [Write each banker's MCP server config once](#write-each-bankers-mcp-server-config-once)
+    - [Provision the Claude Code harness](#provision-the-claude-code-harness)
     - [Explore interactively](#explore-interactively)
     - [Scene 1 — Bob preps for a meeting](#scene-1--bob-preps-for-a-meeting)
     - [Scene 2 — Bob resolves his biggest client](#scene-2--bob-resolves-his-biggest-client)
@@ -1255,6 +1255,84 @@ further down. **The recommended way to actually run the demo is through Claude
 Code** — a real agentic harness making its own multi-hop tool-call decisions,
 not a scripted sequence of JSON-RPC bodies — covered next.
 
+#### Write each banker's MCP server config once
+
+Every scene below needs to hand `claude --mcp-config` a JSON blob listing
+each MCP server's URL and an `Authorization: Bearer $USER_ACCESS_TOKEN`
+header. Earlier versions of this guide rebuilt that JSON inline, by hand,
+inside every single scene's command — repetitive, easy to typo, and it
+buried the actual point of each scene (a one-line question) under a wall of
+escaped JSON.
+
+**This is admin's job, done once per banker, right here — immediately
+after creating their sandbox above, before anything else.** It only needs
+the `user-<id>` provider each sandbox was already created with; it has
+nothing to do with the Claude-specific harness in the next section, so
+there's no reason to defer it. `sandbox exec` happens to be self-service
+(a banker could run their own version of this from their own terminal),
+but doing it ad hoc, per banker, whenever someone gets around to it, is
+exactly the kind of drift this file exists to avoid — do it once, for all
+three, as part of admin's standard setup, and every scene downstream can
+assume it already exists.
+
+**Why this can't just be a provider-profile credential, injected once and
+forgotten** (the more obviously "correct" fix): `$USER_ACCESS_TOKEN` isn't a
+real token — it's a resolve-placeholder string
+(`openshell:resolve:env:v<random>_USER_ACCESS_TOKEN`) that the sandbox's own
+egress proxy substitutes for a real Keycloak access token per outbound
+request. That placeholder's random component is generated when the
+provider is attached to a specific sandbox — it doesn't exist yet at
+`provider create`/`profile import` time, so there's no way to bake a
+finished MCP config into a profile authored ahead of time. It only exists
+as a live environment variable *inside* that specific sandbox, once
+attached. So instead: write the finished config to a file **inside each
+sandbox, once**, right after `sandbox create` above — every later `sandbox
+exec` in that same sandbox sees the same file, because `/sandbox` persists
+across separate `exec` calls (confirmed live: the resolve placeholder's
+random suffix is stable across calls, and a file written in one `exec` is
+still there in the next).
+
+**Use `printf`, not a heredoc.** A `cat > file <<EOF ... EOF` heredoc nested
+inside `sandbox exec ... -- bash -c '...'` reliably hangs — the layered
+quoting confuses where the heredoc terminator actually is. `printf` with a
+format string sidesteps the problem entirely.
+
+**Bob and Charlie get the same four servers, so one loop covers both. Alice
+gets a fifth (`compatibility`, her extra permission) — a separate, complete
+command, not a hand-edit of the loop's `printf`.** Editing a format string
+by hand to add a server is exactly the kind of error-prone step this file
+exists to avoid — one missed `%s`/argument pair and the JSON silently comes
+out malformed:
+
+```bash
+# Terminal A — admin, right after "Create a sandbox for each banker" above
+source .env
+for USER_ID in bob charlie; do
+  openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
+mkdir -p /sandbox/.claude
+printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
+  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
+  > /sandbox/.claude/mcp-servers.json
+'
+done
+
+# Alice — five servers, the extra "compatibility" entry already included below
+openshell sandbox exec -n demo-alice --workspace alice --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
+mkdir -p /sandbox/.claude
+printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"compatibility\":{\"type\":\"http\",\"url\":\"http://mcp-compatibility.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
+  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
+  > /sandbox/.claude/mcp-servers.json
+'
+```
+
+From here on, every scene's command is just `--mcp-config
+/sandbox/.claude/mcp-servers.json` — no more per-scene JSON construction.
+The file lists every server that banker is authorized for (not a
+hand-picked subset per question), which is also more realistic: a real
+banker's agent doesn't get rewired per question, and each scene's **"Servers
+this exercises"** line still tells you which of them that particular
+question is actually expected to touch.
+
 #### Provision the Claude Code harness
 
 Claude Code is pre-installed in the base sandbox image. This reuses the same
@@ -1325,88 +1403,6 @@ openshell policy update "demo-alice" \
   --add-endpoint "mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/local/bin/claude --workspace "alice" --wait
 ```
-
-#### Write each banker's MCP server config once
-
-Every scene below needs to hand `claude --mcp-config` a JSON blob listing
-each MCP server's URL and an `Authorization: Bearer $USER_ACCESS_TOKEN`
-header. Earlier versions of this guide rebuilt that JSON inline, by hand,
-inside every single scene's command — repetitive, easy to typo, and it
-buried the actual point of each scene (a one-line question) under a wall of
-escaped JSON.
-
-**Why this can't just be a provider-profile credential, injected once and
-forgotten** (the more obviously "correct" fix): `$USER_ACCESS_TOKEN` isn't a
-real token — it's a resolve-placeholder string
-(`openshell:resolve:env:v<random>_USER_ACCESS_TOKEN`) that the sandbox's own
-egress proxy substitutes for a real Keycloak access token per outbound
-request. That placeholder's random component is generated when the
-provider is attached to a specific sandbox — it doesn't exist yet at
-`provider create`/`profile import` time, so there's no way to bake a
-finished MCP config into a profile authored ahead of time. It only exists
-as a live environment variable *inside* that specific sandbox, once
-attached. So instead: write the finished config to a file **inside each
-sandbox, once**, right after attaching `byo-claude` above — every later
-`sandbox exec` in that same sandbox sees the same file, because `/sandbox`
-persists across separate `exec` calls (confirmed live: the resolve
-placeholder's random suffix is stable across calls, and a file written in
-one `exec` is still there in the next).
-
-**Use `printf`, not a heredoc.** A `cat > file <<EOF ... EOF` heredoc nested
-inside `sandbox exec ... -- bash -c '...'` reliably hangs — the layered
-quoting confuses where the heredoc terminator actually is. `printf` with a
-format string sidesteps the problem entirely.
-
-This step can run from each banker's own terminal (`sandbox exec` is
-self-service) or from admin's, right after `sandbox provider attach` above.
-**Bob and Charlie get the same four servers; Alice gets a fifth
-(`compatibility`, her extra permission) — don't hand-edit one command into
-the other.** Editing a `printf` format string by hand to add a server is
-exactly the kind of error-prone step this file exists to avoid — one
-missed `%s`/argument pair and the JSON silently comes out malformed. Use
-the matching command below for each banker instead:
-
-```bash
-# Terminal C — bob (or Terminal A — admin, with --workspace bob)
-source .env
-openshell sandbox exec -n demo-bob --workspace bob --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
-mkdir -p /sandbox/.claude
-printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
-  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
-  > /sandbox/.claude/mcp-servers.json
-'
-```
-
-```bash
-# Terminal D — charlie (same four servers as Bob)
-source .env
-openshell sandbox exec -n demo-charlie --workspace charlie --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
-mkdir -p /sandbox/.claude
-printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
-  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
-  > /sandbox/.claude/mcp-servers.json
-'
-```
-
-```bash
-# Terminal B — alice (five servers — the extra "compatibility" entry is
-# already included below, not something to add by hand)
-source .env
-openshell sandbox exec -n demo-alice --workspace alice --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
-mkdir -p /sandbox/.claude
-printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"compatibility\":{\"type\":\"http\",\"url\":\"http://mcp-compatibility.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
-  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
-  > /sandbox/.claude/mcp-servers.json
-'
-```
-
-From here on, every scene's command is just `--mcp-config
-/sandbox/.claude/mcp-servers.json` — no more per-scene JSON construction.
-The file lists every server that banker is authorized for (not a
-hand-picked subset per question), which is also more realistic: a real
-banker's agent doesn't get rewired per question, and each scene's **"Servers
-this exercises"** line still tells you which of them that particular
-question is actually expected to touch.
 
 Each scene below is a full, self-contained command: which terminal to run it
 from, a `whoami` check to confirm that terminal is actually the persona it
