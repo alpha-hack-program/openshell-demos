@@ -150,7 +150,7 @@ screen:**
   all) — demo-only, since it requires the operator to know the banker's
   password.
 
-Practical tips:
+Practical tip:
 
 - **Keycloak sessions are per-browser.** When onboarding multiple bankers,
   log out of Keycloak between them — otherwise the browser reuses the
@@ -184,7 +184,7 @@ export XDG_CONFIG_HOME=/tmp/oc-charlie/config XDG_STATE_HOME=/tmp/oc-charlie/sta
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 ```
 
-Run step 2b/2c's `gateway add` in each terminal, logging in as that
+Make sure you run `gateway add` in each terminal, logging in as that
 terminal's own persona (Terminal A as admin, B as alice, C as bob, D as
 charlie — each triggers its own Keycloak login). **Before running anything
 in a given terminal, confirm it's authenticated as the identity you think
@@ -202,6 +202,8 @@ which terminal typed the command. But running each banker's own scenes
 from their own terminal is what actually **proves** the isolation instead
 of asserting it, and it's how [step 5](#5-run-the-demo) is written below.
 
+**Some testing won't hurt**
+
 After [step 3](#3-onboard-a-banker) has created each banker's workspace and
 granted their membership, try from Terminal B (alice):
 
@@ -217,6 +219,8 @@ access to another workspace, even with the same Keycloak roles), and the
 third is denied (provider management stays admin-only even in your own
 workspace). That's the full RBAC boundary this guide relies on, made
 concrete instead of asserted.
+
+**Caveat**
 
 This works on Linux with openshell CLI 0.0.106, running four concurrent
 identities (admin, alice, bob, charlie) with no state bleed between them
