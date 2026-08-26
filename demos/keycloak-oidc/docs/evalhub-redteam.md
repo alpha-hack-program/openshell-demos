@@ -1,23 +1,24 @@
 # EvalHub Red-Team Extension — keycloak-oidc demo
 
-Status: **Validated end-to-end on a live cluster** (2026-08-18). Originally
-drafted as a design/planning doc — see
+Status: **Validated end-to-end on a live cluster**, most recently
+2026-08-26 (Claude Code path, current Meridian naming — see
+[Annex G](#g-validated-findings-log)). Originally drafted as a
+design/planning doc — see
 [`evalhub-redteam-orig.md`](evalhub-redteam-orig.md) for that history if
 needed; this file is now the authoritative, current guide.
 
-> **Naming note (post Meridian Private Bank re-theme):** the instructional
-> sections below (Demo steps, Annex D's roles/naming) have been updated to
-> the current Part I naming — `alice`/`bob`/`charlie` instead of the old
-> `user1`/`user2`, and `mcp-portfolio` instead of the old, now-removed
-> `mcp-server-a` (an "eligibility engine" unrelated to the current banking
-> domain). **[Annex G — Validated findings log](#g-validated-findings-log)
-> is the one section deliberately left unchanged**: it's a literal
-> historical record (sandbox names, JWT payloads, container logs) from the
-> live run that used the old naming, predating the Meridian re-theme, and
-> hasn't yet been re-validated against the current setup — rewriting it to
-> `alice`/`mcp-portfolio` would fabricate a result never actually observed
-> with those names. Treat Annex G as "this mechanism was proven once, under
-> old naming" until it's re-run and superseded.
+> **Naming note:** the instructional sections below (Demo steps, Annex D's
+> roles/naming) use the current Part I naming — `alice`/`bob`/`charlie`,
+> and `mcp-portfolio` instead of the old, removed `mcp-server-a` (an
+> "eligibility engine" unrelated to the current banking domain).
+> [Annex G — Validated findings log](#g-validated-findings-log) is mixed:
+> its earlier entries (2026-08-18) are a literal historical record under
+> the old `user1`/`mcp-server-a` naming, predating both the Meridian
+> re-theme and per-banker workspace isolation — left as-is rather than
+> rewritten into a result that naming never actually produced. Its latest
+> entry (2026-08-26) re-confirms the Claude Code path end to end under the
+> current naming and is what the Demo steps section above now reflects.
+> The Codex variant has not been re-run under current naming.
 
 ## Table of contents
 
@@ -157,7 +158,11 @@ users, automated loops across all of them).
      -p '{"spec":{"components":{"trustyai":{"managementState":"Managed"}}}}'
 
    # Wait for the TrustyAI operator pod
-   oc -n redhat-ods-applications get pods -l app=trustyai-operator --watch
+   oc -n redhat-ods-applications get pods -l control-plane=controller-manager,app.kubernetes.io/part-of=trustyai --watch
+   # If that label selector doesn't match on your RHOAI version, just watch
+   # for a pod named trustyai-service-operator-controller-manager-* instead —
+   # confirmed live (RHOAI 3.4.3): the pod name doesn't match the label this
+   # guide originally assumed (app=trustyai-operator matches nothing).
    # Ctrl-C once a pod shows Running
 
    # Confirm the EvalHub CRD exists
@@ -369,28 +374,37 @@ GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpat
 ```
 
 **1. Create the `byo-claude` provider** (skip if you already created it for
-the "Claude Code + BYO LLM + MCP tool" recipe in the main README):
+the "Claude Code + BYO LLM + MCP tool" recipe in the main README). Note
+`--workspace "${USER_ID}"`: providers live in the target banker's own
+workspace, not admin's — see
+[Workspace isolation](../README.md#workspace-isolation) in the main guide:
 
 ```bash
 TMPFILE=$(mktemp --suffix=.yaml)
 sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
-openshell provider profile import -f "$TMPFILE"
+openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
 rm -f "$TMPFILE"
 
 openshell provider create --name byo-claude --type byo-claude \
-  --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+  --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+  --workspace "${USER_ID}"
 ```
 
 **2. Create a sandbox from the stock Claude Code image, attach providers,
-and grant network access:**
+and grant network access.** The sandbox itself must also live in
+`${USER_ID}`'s workspace (`--workspace "${USER_ID}"` on every command
+below) — each banker gets a dedicated workspace, and providers/sandboxes in
+different workspaces can't reach each other regardless of who's driving
+the session:
 
 ```bash
-openshell sandbox create --name "$SANDBOX" --from "$CLAUDE_IMAGE" -- true
+openshell sandbox create --name "$SANDBOX" --from "$CLAUDE_IMAGE" \
+  --workspace "${USER_ID}" -- true
 
-openshell sandbox provider attach "$SANDBOX" byo-claude
-openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}"
+openshell sandbox provider attach "$SANDBOX" byo-claude --workspace "${USER_ID}"
+openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}" --workspace "${USER_ID}"
 
-openshell policy update "$SANDBOX" \
+openshell policy update "$SANDBOX" --workspace "${USER_ID}" \
   --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
   --binary /usr/local/bin/claude \
   --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
@@ -421,10 +435,10 @@ exec claude -p "\$1" \\
   --output-format text
 EOF
 
-openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy
-openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/agent-proxy
-openshell sandbox upload "$SANDBOX" /tmp/run-claude.sh /sandbox/run-claude.sh
-openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/run-claude.sh
+openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy --workspace "${USER_ID}"
+openshell sandbox exec -n "$SANDBOX" --workspace "${USER_ID}" -- chmod +x /sandbox/agent-proxy
+openshell sandbox upload "$SANDBOX" /tmp/run-claude.sh /sandbox/run-claude.sh --workspace "${USER_ID}"
+openshell sandbox exec -n "$SANDBOX" --workspace "${USER_ID}" -- chmod +x /sandbox/run-claude.sh
 ```
 
 **4. Start the proxy in background and expose the service.** Claude Code's
@@ -432,7 +446,7 @@ openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/run-claude.sh
 below), so a plain background start is fine:
 
 ```bash
-nohup openshell sandbox exec -n "$SANDBOX" \
+nohup openshell sandbox exec -n "$SANDBOX" --workspace "${USER_ID}" \
   --env 'AGENT_COMMAND=/sandbox/run-claude.sh' \
   --env 'OUTPUT_FILE_FLAG=' \
   --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
@@ -443,19 +457,20 @@ nohup openshell sandbox exec -n "$SANDBOX" \
   -- /sandbox/agent-proxy --port 8100 > /tmp/agent-proxy-exec.log 2>&1 &
 PROXY_EXEC_PID=$!
 
-openshell service expose "$SANDBOX" 8100
+openshell service expose "$SANDBOX" 8100 --workspace "${USER_ID}"
 ```
 
 Verify the proxy is reachable and MCP tool use works: a real, tool-derived
 answer (not a hallucination) should be checkable against `mcp-portfolio`'s
 own container logs (`called_by`/`roles` claims should match the
-authenticated user's real JWT — see the pattern in
-[Annex G — Validated findings log](#g-validated-findings-log), recorded
-against the old `mcp-server-a`):
+authenticated user's real JWT). Note the exposed `SERVICE_HOST` is prefixed
+with the banker's **workspace**, not `default` — the pod naming pattern is
+`<workspace>--<sandbox-name>`, same as the main demo's `demo-<id>`
+sandboxes:
 
 ```bash
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
-SERVICE_HOST="default--${SANDBOX}.openshell.localhost"
+SERVICE_HOST="${USER_ID}--${SANDBOX}.openshell.localhost"
 
 curl -sk -X POST "https://${ROUTE_HOST}/v1/chat/completions" \
   -H "Host: ${SERVICE_HOST}" \
@@ -465,10 +480,10 @@ curl -sk -X POST "https://${ROUTE_HOST}/v1/chat/completions" \
 
 **5. Submit an EvalHub evaluation through `garak-envoy`.** Point
 `--model-url` at `garak-envoy`'s Route with the sandbox's Host-header key
-embedded in the path — **confirmed working end-to-end on a live cluster**
-(the `quick` and `owasp_llm_top10` benchmarks both completed with real
-metrics). Add `--experiment` to log results to MLflow, wired up in
-Prerequisites step 3:
+embedded in the path. Add `--experiment` to log results to MLflow, wired up
+in Prerequisites step 3. Start with `quick` — it's fast and cheap; heavier
+benchmarks like `owasp_llm_top10` run far longer and issue many more probes
+against the live LLM backend, so only reach for one once `quick` works:
 
 ```bash
 evalhub eval run \
@@ -497,8 +512,8 @@ below to browse or query them.
 
 ```bash
 kill "$PROXY_EXEC_PID" 2>/dev/null
-openshell service delete "$SANDBOX"
-openshell sandbox delete "$SANDBOX"
+openshell service delete "$SANDBOX" --workspace "${USER_ID}"
+openshell sandbox delete "$SANDBOX" --workspace "${USER_ID}"
 ```
 
 ## Demo steps — Codex (optional)
@@ -524,19 +539,22 @@ AGENT_PROXY_BIN="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release
 GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpath='{.spec.host}')
 ```
 
-**1. Create the sandbox and attach providers:**
+**1. Create the sandbox and attach providers.** As in the Claude Code
+variant, the sandbox and its providers must all live in `${USER_ID}`'s own
+workspace:
 
 ```bash
-openshell sandbox create --name "$SANDBOX" --from "$AGENT_IMAGE" -- true
-openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}"
-openshell sandbox provider attach "$SANDBOX" byo-codex
+openshell sandbox create --name "$SANDBOX" --from "$AGENT_IMAGE" \
+  --workspace "${USER_ID}" -- true
+openshell sandbox provider attach "$SANDBOX" "user-${USER_ID}" --workspace "${USER_ID}"
+openshell sandbox provider attach "$SANDBOX" byo-codex --workspace "${USER_ID}"
 ```
 
 **2. Upload the agent-proxy binary:**
 
 ```bash
-openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy
-openshell sandbox exec -n "$SANDBOX" -- chmod +x /sandbox/agent-proxy
+openshell sandbox upload "$SANDBOX" "$AGENT_PROXY_BIN" /sandbox/agent-proxy --workspace "${USER_ID}"
+openshell sandbox exec -n "$SANDBOX" --workspace "${USER_ID}" -- chmod +x /sandbox/agent-proxy
 ```
 
 **3. Start the proxy in the FOREGROUND with `--tty`, backgrounded on the
@@ -551,12 +569,12 @@ regardless. See
 [Annex B — Troubleshooting](#b-troubleshooting) for the full investigation:
 
 ```bash
-nohup openshell sandbox exec -n "$SANDBOX" --tty \
+nohup openshell sandbox exec -n "$SANDBOX" --tty --workspace "${USER_ID}" \
   --env 'AGENT_COMMAND=codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' \
   -- /sandbox/agent-proxy --port 8100 > /tmp/agent-proxy-exec.log 2>&1 &
 PROXY_EXEC_PID=$!
 
-openshell service expose "$SANDBOX" 8100
+openshell service expose "$SANDBOX" 8100 --workspace "${USER_ID}"
 ```
 
 **4. Verify, submit the eval, track results, and clean up** — same as the
@@ -1140,6 +1158,56 @@ demo's DeepSeek BYO backend. Confirmed end-to-end on a live cluster:
   — plan around this, don't redeploy mid-run). This finding is why
   Prerequisites step 3 now wires `MLFLOW_TRACKING_URI` in at CR creation
   time instead of patching it in afterward.
+
+#### Full re-run under current Meridian naming, on a second fresh cluster (2026-08-26)
+
+Re-ran the entire Claude Code path end to end (RHOAI 3.4.3) after the
+Meridian Private Bank re-theme, using `alice`/`mcp-portfolio` instead of
+the original `user1`/`mcp-server-a` — the first time this demo section was
+tested against the current naming and against per-banker workspace
+isolation (which didn't exist yet when the 2026-08-18 findings above were
+recorded). Two things broke that the Prerequisites/Demo steps sections
+above have since been corrected for:
+
+- **The `agent-proxy` binary now installs from a real release, not a local
+  build.** The GitHub Release workflow existed but had never actually been
+  triggered — no `agent-proxy-v*` tag existed yet, so "download the
+  prebuilt binary" silently had nothing to download. Cut `agent-proxy-v0.1.1`
+  (root cause of the release being blocked: an untracked `.worktrees/`
+  directory unrelated to this crate was tripping `cargo-release`'s
+  repo-wide dirty-check — fixed by gitignoring it, not by working around
+  the tool). Verified: the exact `curl` command in Prerequisites step 6
+  downloads a working, static-pie-linked binary.
+- **Every `openshell` command in the Demo steps needed `--workspace
+  "${USER_ID}"` added** — the sandbox, both providers, the policy update,
+  the upload/chmod calls, and `service expose`/`delete` all failed with
+  "not found" or "provider not found" without it. The original recipe
+  predates per-banker workspace isolation (each banker's provider,
+  sandbox, and everything else now lives in their own dedicated
+  workspace, not `default` — see the main guide's
+  [Workspace isolation](../README.md#workspace-isolation)). This also
+  changes the exposed service's `Host` header: it's
+  `<workspace>--<sandbox-name>.openshell.localhost`, not
+  `default--<sandbox-name>...` as originally documented.
+
+With those two fixes applied, the full chain worked cleanly on the first
+attempt: `garak-claude-alice` created in alice's workspace, `byo-claude` +
+`user-alice` providers attached, agent-proxy uploaded and started,
+service exposed as `alice--garak-claude-alice.openshell.localhost`. A
+direct curl through the proxy asking "Who is my biggest client by assets
+under management?" returned *"Your biggest client by assets under
+management is **Elena Duarte** (client ID `cli-004`), with **$33,000** in
+total AUM"* — confirmed genuine (not a hallucination) against
+`mcp-portfolio`'s own container logs, which showed `"called_by": "alice"`
+and her real role set (including `compatibility-user`, unique to her)
+alongside the exact same `get_top_client_by_aum` result. Submitted the
+`quick` Garak benchmark through `garak-envoy` — completed in under two
+minutes with real metrics (`attack_success_rate: 0`, `dan.Dan_11_0_asr: 0`)
+and an MLflow experiment reference in the response. Also found and fixed:
+the Prerequisites' TrustyAI readiness check used a pod label
+(`app=trustyai-operator`) that matches nothing on RHOAI 3.4.3 — the actual
+pod is `trustyai-service-operator-controller-manager-*`, matched by
+`control-plane=controller-manager,app.kubernetes.io/part-of=trustyai`.
 
 ### H. Open items
 
