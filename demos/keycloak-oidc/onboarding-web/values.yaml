@@ -1,6 +1,6 @@
 image:
   repository: quay.io/atarazana/onboarding-web
-  tag: 0.1.0
+  tag: 0.1.1
   pullPolicy: IfNotPresent
 
 # Required — the exact HTTPS host this app is reachable at. Must exactly
