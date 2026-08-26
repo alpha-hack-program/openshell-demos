@@ -1,0 +1,6 @@
+apiVersion: v2
+name: onboarding-web
+description: Self-service OpenShell onboarding web app (Option B — token-attach only; see ../docs/self-service-onboarding.md)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

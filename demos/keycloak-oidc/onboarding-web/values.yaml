@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/alpha-hack-program/openshell-demos/onboarding-web
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Required — the exact HTTPS host this app is reachable at. Must exactly
+# match the redirectUris registered on the openshell-onboarding-web
+# Keycloak client (../keycloak/realm-export.json), since Keycloak rejects
+# any mismatch. Unlike garak-envoy's route.host (which can be left empty
+# and OpenShift-auto-generated), this one can't be: the Keycloak client
+# has to be registered with the final URL *before* first use, so the host
+# must be known and fixed up front. By convention:
+# onboarding-web-<namespace>.<apps-domain>.
+route:
+  host: ""
+
+keycloak:
+  host: "" # e.g. keycloak.apps.<cluster-domain>
+  realm: openshell
+  # Public client (PKCE-secured), not confidential — confirmed live that
+  # Providers v2's own refresh grant (run by the gateway using only the
+  # client_id material, no secret) gets rejected by Keycloak for a
+  # confidential client. No client-secret Secret needed for this app.
+  clientId: openshell-onboarding-web
+
+# Name of the Secret produced by
+# ../scripts/10-bootstrap-onboarding-web-admin.sh — contains
+# admin-session.tar.gz, this app's own standing Platform-Admin `openshell`
+# session (see ../docs/self-service-onboarding.md, decision #2). An
+# initContainer unpacks it into an emptyDir before the app starts.
+adminSessionSecretName: onboarding-web-admin-session
+
+sessionTtlSecs: 600
+
+resources: {}

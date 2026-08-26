@@ -1,0 +1,73 @@
+# Tier-0 workload — this pod holds a standing Platform-Admin-equivalent
+# `openshell` session (see ../docs/self-service-onboarding.md). No Envoy
+# sidecar, no extra cluster RBAC beyond its own ServiceAccount: this pod
+# *is* the trusted party, not something else gating access to it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding-web
+  labels:
+    app.kubernetes.io/name: onboarding-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: onboarding-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: onboarding-web
+    spec:
+      serviceAccountName: onboarding-web
+      volumes:
+        - name: admin-session-secret
+          secret:
+            secretName: {{ .Values.adminSessionSecretName }}
+        # A Secret's data keys are flat, so the multi-file
+        # config/state tree produced by
+        # ../scripts/10-bootstrap-onboarding-web-admin.sh is packaged as a
+        # single admin-session.tar.gz — unpacked here into a real
+        # directory tree the openshell CLI can read (and rewrite, as it
+        # refreshes its own access token — see the open risk in
+        # ../docs/self-service-onboarding.md about this not surviving a
+        # pod restart).
+        - name: admin-session
+          emptyDir: {}
+      initContainers:
+        - name: unpack-admin-session
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c", "tar xzf /secret/admin-session.tar.gz -C /session"]
+          volumeMounts:
+            - name: admin-session-secret
+              mountPath: /secret
+              readOnly: true
+            - name: admin-session
+              mountPath: /session
+      containers:
+        - name: onboarding-web
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: KEYCLOAK_HOST
+              value: {{ required "keycloak.host is required" .Values.keycloak.host | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+            - name: ONBOARDING_WEB_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+            - name: ONBOARDING_WEB_BASE_URL
+              value: "https://{{ required "route.host is required" .Values.route.host }}"
+            - name: OPENSHELL_ADMIN_XDG_CONFIG_HOME
+              value: /session/config
+            - name: OPENSHELL_ADMIN_XDG_STATE_HOME
+              value: /session/state
+            - name: SESSION_TTL_SECS
+              value: {{ .Values.sessionTtlSecs | quote }}
+          volumeMounts:
+            - name: admin-session
+              mountPath: /session
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

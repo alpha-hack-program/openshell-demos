@@ -989,6 +989,36 @@ Useful flags:
 
 Once all three bankers are onboarded, skip to [step 4](#4-deploy-mcp-servers).
 
+#### Step 3b — Self-service alternative: `onboarding-web`
+
+Step 3a above still requires an admin to run a binary once per banker. If
+you'd rather each banker onboard themselves — visiting a URL, logging in
+via Keycloak, and ending up with a working provider, with no admin running
+anything on their behalf at onboarding time — deploy
+[`onboarding-web`](onboarding-web/) instead of running `onboard` for the
+token-attach step.
+
+**It does not replace step 3.0 or the provisioning parts of steps 3a/4/5.**
+Admin still does everything through creating the provider (with its
+`pending` placeholder credential) — see
+[`docs/manual-onboarding.md`](docs/manual-onboarding.md#store-the-refresh-token-in-openshell)'s
+`provider profile import` and `provider create` commands, stopping there
+rather than continuing to `refresh configure`/`refresh rotate` — plus the
+sandbox creation, MCP config, policy authorization, and agent harness
+provisioning in steps 4 and 5. Once that's done, the banker visits
+`onboarding-web`'s URL, logs in as themselves, and the web app runs the
+`refresh configure`/`refresh rotate` calls that `onboard` would otherwise
+run on their behalf.
+
+See
+[`docs/self-service-onboarding.md`](docs/self-service-onboarding.md) for
+the full design rationale and
+[`util/onboarding-web/README.md`](../../util/onboarding-web/README.md) for
+the service itself. **Verified end to end against a live cluster**: a
+test user logged in via a real browser, activated his pre-provisioned
+provider, and a real MCP call from inside his sandbox using the resulting
+credential succeeded.
+
 ### 4. Deploy MCP servers
 
 Five downstream services (MCP servers) back Meridian's agent, each
