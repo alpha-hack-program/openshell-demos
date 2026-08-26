@@ -954,6 +954,17 @@ workspace for another.
 
 #### Step 3a — Onboard the banker with the `onboard` tool
 
+> **NOTICE.** The `onboard` binary below still has an admin run a tool on
+> each banker's behalf, once per banker, from an admin's own terminal.
+> That's fine for a demo, but it doesn't match how an enterprise identity
+> team typically wants onboarding to work — self-service, with no admin
+> action required at the moment a user activates their own credential. If
+> that's closer to what you need, skip ahead to
+> [Step 3b — Self-service alternative: `onboarding-web`](#step-3b--self-service-alternative-onboarding-web),
+> which replaces just this token-attach step with a small web app the
+> banker visits and logs into themselves. Admin-side provisioning (steps
+> 3.0/4/5) is unchanged either way.
+
 **Who runs this:** the `onboard` binary itself runs in **Terminal A —
 admin** (it shells out to `openshell provider create`/`refresh
 configure`/`refresh rotate`, which require the Platform Admin role), but
@@ -1058,6 +1069,46 @@ provisioning in steps 4 and 5. Once that's done, the banker visits
 `onboarding-web`'s URL, logs in as themselves, and the web app runs the
 `refresh configure`/`refresh rotate` calls that `onboard` would otherwise
 run on their behalf.
+
+**Who runs this:** Terminal A — admin, for all of the following (the
+`openshell-onboarding-svc` browser login in step 1 below is a *service*
+identity admin logs into on the app's behalf, not a banker).
+
+1. Set `ONBOARDING_WEB_ROUTE_HOST` in your `.env` — it must exactly match
+   the `redirectUris` host registered on the `openshell-onboarding-web`
+   Keycloak client in `realm-export.json`.
+
+2. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
+   session — the credential the backend uses to run `provider refresh
+   configure`/`refresh rotate` on behalf of whoever logs in through the web
+   app. This opens a browser; log in as **`openshell-onboarding-svc`**, not
+   the human admin account:
+
+   ```bash
+   source .env
+   ./scripts/10-bootstrap-onboarding-web-admin.sh
+   ```
+
+   It packages the resulting session into `admin-session.tar.gz` and prints
+   the exact `oc create secret` command to run next — copy/paste it as
+   shown, or run it directly:
+
+   ```bash
+   oc -n "$OPENSHELL_NAMESPACE" create secret generic onboarding-web-admin-session \
+     --from-file=admin-session.tar.gz=./onboarding-web-admin-session/admin-session.tar.gz
+   ```
+
+3. Deploy the chart — this waits on the Deployment rollout and prints the
+   app's URL when done:
+
+   ```bash
+   ./scripts/11-deploy-onboarding-web.sh
+   ```
+
+Once deployed, each banker visits `https://${ONBOARDING_WEB_ROUTE_HOST}/`,
+logs in as themselves, and activates the provider an admin already
+pre-provisioned for them (steps 3.0/3a/4/5, stopping short of `refresh
+configure`/`refresh rotate` as described above).
 
 See
 [`docs/self-service-onboarding.md`](docs/self-service-onboarding.md) for
