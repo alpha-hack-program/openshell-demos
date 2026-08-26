@@ -67,8 +67,38 @@ script:
 ./scripts/10-bootstrap-onboarding-web-admin.sh: line 42: ROUTE_HOST: set to the OpenShell gateway Route host (same value used in step 2b)
 ```
 
-**Fix:** `export ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"`
-before invoking the script.
+**First fix (superseded):** `export ROUTE_HOST=...` before invoking the
+script, mirroring Step 3a's explicit-flag fix. That papered over the
+symptom in the README but left the same trap for the very next standalone
+script (`11-deploy-onboarding-web.sh`'s `ONBOARDING_WEB_ROUTE_HOST` hit it
+immediately after). **Actual fix:** push the derivation into the scripts
+themselves. `scripts/10-bootstrap-onboarding-web-admin.sh`,
+`scripts/11-deploy-onboarding-web.sh`, and `scripts/01-deploy-keycloak.sh`
+now each source both `.env` files internally (`set -a; source ...; set
++a`, already the existing pattern in `scripts/03-onboard-user.sh`) *and*
+compute the same default formula themselves:
+
+```bash
+ROUTE_HOST="${ROUTE_HOST:-openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
+ONBOARDING_WEB_ROUTE_HOST="${ONBOARDING_WEB_ROUTE_HOST:-onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
+```
+
+So the README no longer needs to compute or export either variable before
+calling these scripts — `source .env` (for the *other* commands in the
+same step that aren't the script itself, e.g. the follow-on `oc create
+secret`) is enough. An explicit `export VAR=...` is still honored as an
+override, for anyone who rendered the realm with a non-default hostname.
+
+This also closed a related bug: `01-deploy-keycloak.sh` is what renders
+`keycloak/realm-export.rendered.json` from the checked-in template,
+substituting the `openshell-onboarding-web` Keycloak client's
+`<onboarding-web-base-url>` placeholder — a substitution nothing did
+automatically before (unlike `onboard`'s own provider-profile
+placeholders). That script now derives `ONBOARDING_WEB_ROUTE_HOST` with
+the *exact same formula* as `11-deploy-onboarding-web.sh`, so the
+Keycloak client's registered redirect URI and the actual deployed Route
+host can't drift apart just because they're computed in two different
+scripts run at two different times.
 
 ## General rule for this repo
 
@@ -79,9 +109,12 @@ When adding or reviewing a README step:
   `source .env` is fine.
 - **Separate process** (any `./scripts/*.sh`, the `onboard` binary,
   `onboarding-web` itself, anything invoked as its own executable) — the
-  variable must either be `export`ed beforehand or passed as an explicit
-  CLI flag. Prefer the explicit flag where the tool supports it (see
-  Step 3a above for why); fall back to `export` (or `set -a; source
-  .env; set +a`, as `scripts/03-onboard-user.sh` and
-  `scripts/10-bootstrap-onboarding-web-admin.sh` already do internally)
-  when the tool only reads from its process environment.
+  variable must either be `export`ed beforehand, passed as an explicit CLI
+  flag, or — best, when the value has a deterministic default — **derived
+  inside the script itself** from things already in `.env`
+  (`OPENSHELL_NAMESPACE`, `CLUSTER_APPS_DOMAIN`), the way `ROUTE_HOST` and
+  `ONBOARDING_WEB_ROUTE_HOST` are now. That's more robust than any
+  README-level convention, because it can't be broken by running steps out
+  of order or in a fresh shell. Reach for the explicit-flag fix (Step 3a)
+  when the value has no sane default and must come from the reader;
+  reach for in-script derivation when it does.

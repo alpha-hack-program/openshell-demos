@@ -5,17 +5,30 @@ set -euo pipefail
 #   1. The `openshell-onboarding-web` client (public, PKCE-required — see
 #      the comment on that client in keycloak/realm-export.json for why
 #      it must be public, not confidential) and `openshell-onboarding-svc`
-#      user must already exist (realm-export.json, imported in step 1c).
+#      user must already exist (realm-export.rendered.json, imported in
+#      step 1c — see scripts/01-deploy-keycloak.sh, which renders it).
 #   2. scripts/10-bootstrap-onboarding-web-admin.sh must have already run
 #      and its output Secret (onboarding-web-admin-session) must exist in
 #      $OPENSHELL_NAMESPACE.
 #
-# ROUTE_HOST here is onboarding-web's OWN route (not the gateway's) — set
-# it to whatever you registered as this client's exact redirectUri host in
-# realm-export.json, since Keycloak rejects any mismatch.
+# ONBOARDING_WEB_ROUTE_HOST here is onboarding-web's OWN route (not the
+# gateway's). By convention it's onboarding-web-<namespace>.<apps-domain>,
+# derived below the same way ROUTE_HOST is in step 2a — this MUST match
+# the redirectUri host baked into the openshell-onboarding-web Keycloak
+# client, which scripts/01-deploy-keycloak.sh renders into
+# keycloak/realm-export.rendered.json using the exact same formula before
+# the realm is imported in step 1c. Override by
+# exporting ONBOARDING_WEB_ROUTE_HOST yourself if you rendered the realm
+# with a different value.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
+
+# Source root .env for CLUSTER_APPS_DOMAIN
+ROOT_ENV="$SCRIPT_DIR/../../../.env"
+if [[ -f "$ROOT_ENV" ]]; then
+  set -a; source "$ROOT_ENV"; set +a
+fi
 
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
@@ -25,7 +38,8 @@ fi
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 : "${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
-: "${ONBOARDING_WEB_ROUTE_HOST:?set ONBOARDING_WEB_ROUTE_HOST in .env — must match the openshell-onboarding-web Keycloak client redirectUri host exactly}"
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+ONBOARDING_WEB_ROUTE_HOST="${ONBOARDING_WEB_ROUTE_HOST:-onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 if ! oc -n "$OPENSHELL_NAMESPACE" get secret onboarding-web-admin-session >/dev/null 2>&1; then
   echo "Missing Secret 'onboarding-web-admin-session' in namespace $OPENSHELL_NAMESPACE." >&2

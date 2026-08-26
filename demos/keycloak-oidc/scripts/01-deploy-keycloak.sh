@@ -17,22 +17,41 @@ if [[ -f "$DEMO_ENV" ]]; then
 fi
 
 : "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+: "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-openshell}"
 KEYCLOAK_HOST="${KEYCLOAK_HOST:-keycloak.${CLUSTER_APPS_DOMAIN}}"
+# Same formula scripts/10-.../11-... derive independently for the actual
+# deploy — keep in sync if this ever changes.
+ONBOARDING_WEB_ROUTE_HOST="${ONBOARDING_WEB_ROUTE_HOST:-onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 REALM_JSON="$DEMO_DIR/keycloak/realm-export.json"
+RENDERED_JSON="$DEMO_DIR/keycloak/realm-export.rendered.json"
+
+# realm-export.json ships with one literal placeholder:
+# <onboarding-web-base-url>, in the openshell-onboarding-web client's
+# redirectUris. Unlike onboard's provider-profile placeholders (substituted
+# by the onboard binary at onboarding time), nothing substitutes this one
+# automatically — it has to happen before the realm is imported in step 1c,
+# since Keycloak enforces an exact redirect URI match and this client's
+# config is otherwise static from here on. Render a real, gitignored copy
+# rather than editing the checked-in template in place.
+sed "s#<onboarding-web-base-url>#https://${ONBOARDING_WEB_ROUTE_HOST}#g" \
+  "$REALM_JSON" > "$RENDERED_JSON"
 
 echo "Deploy Keycloak via your chart of choice, then confirm it's reachable at:"
 echo "  https://$KEYCLOAK_HOST"
 echo
-echo "Realm JSON ready to import at:"
-echo "  $REALM_JSON"
+echo "Rendered realm JSON ready to import at:"
+echo "  $RENDERED_JSON"
+echo "(<onboarding-web-base-url> substituted with https://${ONBOARDING_WEB_ROUTE_HOST} —"
+echo "override by exporting ONBOARDING_WEB_ROUTE_HOST before re-running this script"
+echo "if you need a different onboarding-web hostname than the default convention.)"
 echo
 echo "The gateway client secret is hardcoded in the realm JSON"
 echo "(openshell-gateway-demo-secret) — demo only."
 echo
-echo "Import it via the Keycloak admin console or the Admin REST API."
+echo "Import the rendered file via the Keycloak admin console or the Admin REST API."
 echo
 echo "The realm includes demo users (alice, bob, charlie) — Meridian"
 echo "Private Bank's bankers — with the openshell-user + banker roles"

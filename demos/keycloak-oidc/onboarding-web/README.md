@@ -28,7 +28,11 @@ Both must already exist before installing this chart:
 
 1. The `openshell-onboarding-web` Keycloak client (public, PKCE-required)
    and `openshell-onboarding-svc` user, declared in
-   `../keycloak/realm-export.json` and imported in
+   `../keycloak/realm-export.json` and imported — as
+   `../keycloak/realm-export.rendered.json`, produced by
+   [`../scripts/01-deploy-keycloak.sh`](../scripts/01-deploy-keycloak.sh),
+   not the raw template, since the client's `redirectUris` contains a
+   `<onboarding-web-base-url>` placeholder that script substitutes — in
    [step 1c](../README.md#1c-import-the-realm-json).
 2. The `onboarding-web-admin-session` Secret, produced by running
    [`../scripts/10-bootstrap-onboarding-web-admin.sh`](../scripts/10-bootstrap-onboarding-web-admin.sh)
@@ -56,7 +60,7 @@ helm upgrade --install onboarding-web ./demos/keycloak-oidc/onboarding-web \
 |---|---|---|
 | `image.repository` | `ghcr.io/alpha-hack-program/openshell-demos/onboarding-web` | |
 | `image.tag` | `latest` | Pin to a released tag for anything beyond a quick demo |
-| `route.host` | *(required)* | Must exactly match the `redirectUris` host on the `openshell-onboarding-web` Keycloak client — Keycloak rejects any mismatch. Convention: `onboarding-web-<namespace>.<apps-domain>` |
+| `route.host` | *(required by the chart; `11-deploy-onboarding-web.sh` derives `onboarding-web-<namespace>.<apps-domain>` if `ONBOARDING_WEB_ROUTE_HOST` isn't set)* | Must exactly match the `redirectUris` host on the `openshell-onboarding-web` Keycloak client — Keycloak rejects any mismatch |
 | `keycloak.host` | *(required)* | e.g. `keycloak.apps.<cluster-domain>` |
 | `keycloak.realm` | `openshell` | |
 | `keycloak.clientId` | `openshell-onboarding-web` | Public client — see the design doc for why it can't be confidential |

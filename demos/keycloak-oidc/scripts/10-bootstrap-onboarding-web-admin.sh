@@ -31,15 +31,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
+# Source root .env for CLUSTER_APPS_DOMAIN
+ROOT_ENV="$SCRIPT_DIR/../../../.env"
+if [[ -f "$ROOT_ENV" ]]; then
+  set -a; source "$ROOT_ENV"; set +a
+fi
+
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
 
+: "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 : "${KEYCLOAK_HOST:?set in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
 : "${KEYCLOAK_CLIENT_ID_CLI:=openshell-cli}"
-: "${ROUTE_HOST:?set to the OpenShell gateway Route host (same value used in step 2b)}"
+# Same formula as the gateway Route host computed inline in step 2a — not
+# stored in .env, so derive it here rather than requiring the caller to
+# export it. Override by exporting ROUTE_HOST yourself beforehand.
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+ROUTE_HOST="${ROUTE_HOST:-openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 OUTPUT_DIR="${1:-$DEMO_DIR/onboarding-web-admin-session}"
 mkdir -p "$OUTPUT_DIR/config" "$OUTPUT_DIR/state"

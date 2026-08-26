@@ -5,12 +5,16 @@ image:
 
 # Required — the exact HTTPS host this app is reachable at. Must exactly
 # match the redirectUris registered on the openshell-onboarding-web
-# Keycloak client (../keycloak/realm-export.json), since Keycloak rejects
-# any mismatch. Unlike garak-envoy's route.host (which can be left empty
-# and OpenShift-auto-generated), this one can't be: the Keycloak client
-# has to be registered with the final URL *before* first use, so the host
-# must be known and fixed up front. By convention:
-# onboarding-web-<namespace>.<apps-domain>.
+# Keycloak client, which ../scripts/01-deploy-keycloak.sh bakes into
+# ../keycloak/realm-export.rendered.json (the file actually imported —
+# see ../keycloak/realm-export.json for the raw template with the
+# unsubstituted <onboarding-web-base-url> placeholder), since Keycloak
+# rejects any mismatch. Unlike garak-envoy's route.host (which can be left
+# empty and OpenShift-auto-generated), this one can't be: the Keycloak
+# client has to be registered with the final URL *before* first use, so
+# the host must be known and fixed up front. By convention:
+# onboarding-web-<namespace>.<apps-domain> — scripts/11-deploy-onboarding-web.sh
+# derives this same default automatically.
 route:
   host: ""
 

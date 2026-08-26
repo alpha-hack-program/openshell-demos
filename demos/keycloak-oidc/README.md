@@ -459,10 +459,9 @@ after it runs, so you'll come back and complete your `.env` then.
 
 ### 1. Deploy Keycloak
 
-#### 1a. Check the realm JSON
+#### 1a. Render the realm JSON
 
-The realm JSON at `keycloak/realm-export.json` is ready to import as-is —
-no substitution needed. The gateway client secret is hardcoded as
+The gateway client secret in `keycloak/realm-export.json` is hardcoded as
 `openshell-gateway-demo-secret`. **Every user in this realm has a password
 equal to their username** — `alice`/`alice`, `bob`/`bob`,
 `charlie`/`charlie`, `openshell-admin`/`openshell-admin`, and
@@ -472,11 +471,32 @@ that's the password to type. This keeps the demo simple; in production you
 would generate a unique secret/password per environment and never reuse
 username as password.
 
-Optionally, run the helper script to verify your `.env` values match:
+`keycloak/realm-export.json` has one placeholder that **does** need
+substituting before import: the `openshell-onboarding-web` client's
+`redirectUris` contains the literal text `<onboarding-web-base-url>`.
+Unlike `onboard`'s provider-profile placeholders (substituted by the
+`onboard` binary itself at onboarding time), nothing substitutes this one
+automatically — and since Keycloak enforces an exact redirect URI match,
+importing the raw file as-is will make [Step 3b](#step-3b--self-service-alternative-onboarding-web)
+(the `onboarding-web` self-service app) fail at login time later, even
+though nothing about it looks broken yet. Run the helper script — not
+optional, unlike in earlier revisions of this guide — to render a real
+copy with that placeholder filled in:
 
 ```bash
 ./scripts/01-deploy-keycloak.sh
 ```
+
+This writes `keycloak/realm-export.rendered.json` (gitignored — never
+commit it) with `<onboarding-web-base-url>` replaced by
+`https://onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`,
+the same convention [Step 3b](#step-3b--self-service-alternative-onboarding-web)'s
+`ONBOARDING_WEB_ROUTE_HOST` derives independently later — so the two stay
+in sync without you setting anything by hand. If you need a different
+`onboarding-web` hostname, `export ONBOARDING_WEB_ROUTE_HOST=<your-host>`
+before re-running this script, and export the same value again before
+running `scripts/11-deploy-onboarding-web.sh` in step 3b.
+It also prints the `.env` values to confirm.
 
 #### 1b. Deploy Keycloak on the cluster
 
@@ -586,16 +606,18 @@ OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
 
 #### 1c. Import the realm JSON
 
-Import the realm JSON into Keycloak via the admin console or the Admin
-REST API.
+Import the **rendered** realm JSON from step 1a
+(`keycloak/realm-export.rendered.json`, not the checked-in
+`realm-export.json` template) into Keycloak via the admin console or the
+Admin REST API.
 
 **Option A — Admin console (browser):**
 
 1. Open `https://<KEYCLOAK_HOST>/admin` in your browser (use the admin
    credentials you extracted in step 1b).
 2. In the left sidebar, click **Manage realms**, then click **Create realm**.
-3. Click **Browse**, select `keycloak/realm-export.json`, and click
-   **Create**.
+3. Click **Browse**, select `keycloak/realm-export.rendered.json`, and
+   click **Create**.
 
 **Option B — Admin REST API (CLI):**
 
@@ -614,7 +636,7 @@ curl -sk -X POST \
   "https://${KEYCLOAK_HOST}/admin/realms" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d @keycloak/realm-export.json
+  -d @keycloak/realm-export.rendered.json
 ```
 
 The realm template includes Meridian's three demo bankers (`alice`,
@@ -864,7 +886,7 @@ openshell gateway login
 
 Log in as `openshell-admin` / `openshell-admin` (the account with the
 `openshell-admin` realm role — see the credentials note in
-[step 1a](#1a-check-the-realm-json)).
+[step 1a](#1a-render-the-realm-json)).
 
 #### 2d. Enable Providers v2
 
@@ -1080,28 +1102,21 @@ run on their behalf.
 `openshell-onboarding-svc` browser login in step 1 below is a *service*
 identity admin logs into on the app's behalf, not a banker).
 
-1. Set `ONBOARDING_WEB_ROUTE_HOST` in your `.env` — it must exactly match
-   the `redirectUris` host registered on the `openshell-onboarding-web`
-   Keycloak client in `realm-export.json`.
+Both scripts below derive `ROUTE_HOST`/`ONBOARDING_WEB_ROUTE_HOST`
+themselves (same formulas as step 1a/2a) from `OPENSHELL_NAMESPACE` and
+`CLUSTER_APPS_DOMAIN` — nothing to set by hand unless you rendered the
+realm in step 1a with a non-default `ONBOARDING_WEB_ROUTE_HOST`, in which
+case `export` the same value again before running `11-deploy-onboarding-web.sh`.
 
-2. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
+1. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
    session — the credential the backend uses to run `provider refresh
    configure`/`refresh rotate` on behalf of whoever logs in through the web
    app. This opens a browser; log in as **`openshell-onboarding-svc`** /
    `openshell-onboarding-svc` (see the credentials note in
-   [step 1a](#1a-check-the-realm-json)), not the human admin account. The
-   script needs `ROUTE_HOST` — the *gateway's*
-   Route host, same value computed in [step 2a](#2a-helm-install) — which
-   isn't stored in `.env`, so recompute it here if you're in a fresh shell:
+   [step 1a](#1a-render-the-realm-json)), not the human admin account:
 
    ```bash
    source .env
-   source ../../.env
-   # export, not a plain assignment — the script below runs as a separate
-   # process and only sees variables in its own environment, not this
-   # shell's. See docs/env-export-gotchas.md for the full writeup
-   # (this bit onboard's --keycloak-host too).
-   export ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
    ./scripts/10-bootstrap-onboarding-web-admin.sh
    ```
 
@@ -1114,7 +1129,7 @@ identity admin logs into on the app's behalf, not a banker).
      --from-file=admin-session.tar.gz=./onboarding-web-admin-session/admin-session.tar.gz
    ```
 
-3. Deploy the chart — this waits on the Deployment rollout and prints the
+2. Deploy the chart — this waits on the Deployment rollout and prints the
    app's URL when done:
 
    ```bash
