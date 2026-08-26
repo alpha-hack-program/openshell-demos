@@ -4,9 +4,27 @@ BIN          := onboarding-web
 MUSL_TARGET  := x86_64-unknown-linux-musl
 MUSL_BIN     := target/$(MUSL_TARGET)/release/$(BIN)
 
+IMAGE_REGISTRY ?= quay.io/atarazana
+# Same version cargo-release would bump to and tag as onboarding-web-v<version>
+# (see release.toml/release-patch below) — keeps a locally built/pushed image
+# tag matching what's actually in Cargo.toml, not a moving "latest".
+CARGO_VERSION  := $(shell awk -F'"' '/^version/ {print $$2; exit}' Cargo.toml)
+IMAGE_TAG      ?= $(CARGO_VERSION)
+IMAGE          := $(IMAGE_REGISTRY)/$(BIN):$(IMAGE_TAG)
+
+# Bare `podman` fails inside this project's toolbox (nested user-namespace/
+# pause-process error) — re-exec against the host's podman via flatpak-spawn
+# when running from inside one.
+ifneq ($(wildcard /run/.toolboxenv),)
+PODMAN := flatpak-spawn --host podman
+else
+PODMAN := podman
+endif
+
 .PHONY: help build release musl install run watch \
         fmt fmt-check clippy check ci \
         clean doc \
+        image-build image-push \
         release-patch release-minor release-major
 
 help: ## Show this help
@@ -50,6 +68,12 @@ clean: ## Remove build artifacts
 
 doc: ## Build and open docs
 	cargo doc --open --no-deps
+
+image-build: ## Build the container image, tagged with Cargo.toml's version (override with IMAGE_TAG=...)
+	$(PODMAN) build -t $(IMAGE) -f Containerfile .
+
+image-push: image-build ## Build and push the container image (override registry with IMAGE_REGISTRY=...)
+	$(PODMAN) push $(IMAGE)
 
 ## --- Release management with cargo-release ---
 ## Bumps Cargo.toml version, runs `make ci` as a gate (see release.toml),
