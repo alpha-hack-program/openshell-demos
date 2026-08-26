@@ -995,10 +995,14 @@ Set the banker to onboard — change this to switch bankers:
 USER_ID="alice"
 ```
 
-Run `onboard` for `alice`:
+Run `onboard` for `alice`. `--keycloak-host` is passed explicitly because
+`onboard` is a separate binary that reads it from its own process
+environment (via clap's `env = "KEYCLOAK_HOST"`), not from this shell's
+variables — `source .env` alone doesn't export it:
 
 ```bash
-onboard -u "$USER_ID" --profile providers/user-refresh-profile.yaml
+onboard -u "$USER_ID" --keycloak-host "$KEYCLOAK_HOST" \
+  --profile providers/user-refresh-profile.yaml
 ```
 
 This opens a browser, waits for `alice` to log in, and creates her
