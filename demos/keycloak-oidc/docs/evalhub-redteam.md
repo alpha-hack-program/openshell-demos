@@ -5,23 +5,19 @@ drafted as a design/planning doc — see
 [`evalhub-redteam-orig.md`](evalhub-redteam-orig.md) for that history if
 needed; this file is now the authoritative, current guide.
 
-> **Naming note (post Meridian Private Bank re-theme):** this doc predates
-> the rename of Part I's demo users from `user1`/`user2` to Alice/Bob/
-> Charlie, and predates the removal of the old `mcp-server-a`/`mcp-server-b`
-> Path B placeholder servers (see [`../README.md`](../README.md)). It still
-> says `user1` and `mcp-server-a` throughout — those are the literal names
-> used during the live validation recorded here (sandbox names, JWT
-> payloads, container logs, etc.), left as-is rather than rewritten to
-> values that weren't actually tested. Two things to substitute when
-> actually running this against the current Part I setup:
-> - Read `user1` as "whichever onboarded banker you're using" — e.g. `alice`.
-> - **`mcp-server-a` no longer exists** — `mcp-server-b` survives, renamed
->   to `mcp-compatibility` (role `compatibility-user`, Alice-only). Wherever
->   this doc references `mcp-server-a` (its role, its container logs, its
->   endpoint), substitute one of the four current servers instead —
->   `mcp-portfolio` (role `mcp-portfolio-user`, granted to every banker via
->   `banker`) is the closest drop-in, since it's reachable without needing
->   Alice's special permission.
+> **Naming note (post Meridian Private Bank re-theme):** the instructional
+> sections below (Demo steps, Annex D's roles/naming) have been updated to
+> the current Part I naming — `alice`/`bob`/`charlie` instead of the old
+> `user1`/`user2`, and `mcp-portfolio` instead of the old, now-removed
+> `mcp-server-a` (an "eligibility engine" unrelated to the current banking
+> domain). **[Annex G — Validated findings log](#g-validated-findings-log)
+> is the one section deliberately left unchanged**: it's a literal
+> historical record (sandbox names, JWT payloads, container logs) from the
+> live run that used the old naming, predating the Meridian re-theme, and
+> hasn't yet been re-validated against the current setup — rewriting it to
+> `alice`/`mcp-portfolio` would fabricate a result never actually observed
+> with those names. Treat Annex G as "this mechanism was proven once, under
+> old naming" until it's re-run and superseded.
 
 ## Table of contents
 
@@ -134,15 +130,15 @@ live, not simulated. The proxy is exposed only on demand via
 **Note on roles:** In production, red-team evaluation is a secops
 function, run automatically by an automation/service-account identity —
 never a human, and never the target user themselves (self-auditing is a
-conflict of interest). **`user1` in the steps below names *whose provider
+conflict of interest). **`alice` in the steps below names *whose provider
 and MCP roles get attached to the sandbox*, not who issues the
 commands.** Every command — sandbox creation, provider attachment, policy
 updates, proxy startup, eval submission — runs from **one continuous
 admin/secops session**. This works because Providers v2 injects
 credentials per *attached* provider and MCP RBAC checks whatever JWT that
 provider supplies at request time — neither cares who ran `sandbox
-create`. So the sandbox gets exactly `user1`'s security context (their MCP
-roles, their credentials) even though an admin/secops identity created and
+create`. So the sandbox gets exactly `alice`'s security context (her MCP
+roles, her credentials) even though an admin/secops identity created and
 drove it end to end. See
 [Annex D — Roles and responsibilities](#d-roles-and-responsibilities) for
 the full production model (representative profiles instead of named
@@ -343,27 +339,27 @@ users, automated loops across all of them).
 ## Demo steps — Claude Code (recommended)
 
 > Runs from the same admin/secops session as the Prerequisites above,
-> targeting `user1`'s context — see
+> targeting `alice`'s context — see
 > [How to follow this guide](#how-to-follow-this-guide) above for what that
-> means in practice. Nothing here requires logging in as user1.
+> means in practice. Nothing here requires logging in as alice.
 
 Run these after completing steps 1-5 of the main demo (see
-[`../README.md`](../README.md)) — `user1` must already have their provider
-and MCP roles configured there. **Claude Code is the recommended agent for
-this section**: its Anthropic Messages API works fully (including MCP
-tool use) against this demo's DeepSeek BYO backend. The Codex variant
-below only supports model-only probes here (see why in that variant's
-intro).
+[`../README.md`](../README.md)) — `alice` must already be onboarded, with
+her provider and MCP roles configured there. **Claude Code is the
+recommended agent for this section**: its Anthropic Messages API works
+fully (including MCP tool use) against this demo's DeepSeek BYO backend.
+The Codex variant below only supports model-only probes here (see why in
+that variant's intro).
 
 ```bash
 source .env
 source ../../.env
-USER_ID="user1"
+USER_ID="alice"
 SANDBOX="garak-claude-${USER_ID}"
 CLAUDE_IMAGE="quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36"
 AGENT_PROXY_BIN="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy"
 LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
-SERVER_NAME="mcp-server-a"
+SERVER_NAME="mcp-portfolio"
 # Re-derive if this is a fresh shell from the Prerequisites section:
 GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpath='{.spec.host}')
 ```
@@ -413,7 +409,7 @@ on whitespace — it can't express the shell quoting this needs:
 cat > /tmp/run-claude.sh << EOF
 #!/bin/bash
 set -e
-MCP_JSON="{\\"mcpServers\\":{\\"eligibility\\":{\\"type\\":\\"http\\",\\"url\\":\\"http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp\\",\\"headers\\":{\\"Authorization\\":\\"Bearer \$USER_ACCESS_TOKEN\\"}}}}"
+MCP_JSON="{\\"mcpServers\\":{\\"portfolio\\":{\\"type\\":\\"http\\",\\"url\\":\\"http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp\\",\\"headers\\":{\\"Authorization\\":\\"Bearer \$USER_ACCESS_TOKEN\\"}}}}"
 exec claude -p "\$1" \\
   --mcp-config "\$MCP_JSON" \\
   --strict-mcp-config \\
@@ -446,11 +442,12 @@ PROXY_EXEC_PID=$!
 openshell service expose "$SANDBOX" 8100
 ```
 
-Verify the proxy is reachable and MCP tool use works — **validated on a
-live cluster**: the eligibility engine returned a real, tool-derived
-answer (not a hallucination), confirmed against `mcp-server-a`'s own
-container logs (`called_by`/`roles` claims matched the authenticated
-user's real JWT):
+Verify the proxy is reachable and MCP tool use works: a real, tool-derived
+answer (not a hallucination) should be checkable against `mcp-portfolio`'s
+own container logs (`called_by`/`roles` claims should match the
+authenticated user's real JWT — see the pattern in
+[Annex G — Validated findings log](#g-validated-findings-log), recorded
+against the old `mcp-server-a`):
 
 ```bash
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
@@ -459,7 +456,7 @@ SERVICE_HOST="default--${SANDBOX}.openshell.localhost"
 curl -sk -X POST "https://${ROUTE_HOST}/v1/chat/completions" \
   -H "Host: ${SERVICE_HOST}" \
   -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"My mother is at the hospital, can I get an aid while I am on unpaid leave?"}]}' | jq .
+  -d '{"messages":[{"role":"user","content":"Who is my biggest client by assets under management?"}]}' | jq .
 ```
 
 **5. Submit an EvalHub evaluation through `garak-envoy`.** Point
@@ -503,7 +500,7 @@ openshell sandbox delete "$SANDBOX"
 ## Demo steps — Codex (optional)
 
 > Same session model as the Claude Code steps above — nothing here
-> requires logging in as user1.
+> requires logging in as alice.
 
 Codex requires an on-cluster vLLM **≥0.25.0** (upstream — RHOAI 3.4.x
 ships 0.18.0, too old) for MCP tool use; its `namespace` tool type isn't
@@ -516,7 +513,7 @@ isolation.
 ```bash
 source .env
 source ../../.env
-USER_ID="user1"
+USER_ID="alice"
 SANDBOX="garak-codex-${USER_ID}"
 AGENT_IMAGE="quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012"
 AGENT_PROXY_BIN="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy"
@@ -664,7 +661,7 @@ full reference.
 |---|---|---|
 | Proxy name / location | `agent-proxy` at `util/agent-proxy/` (repo root) | Reusable across demos, consistent with `util/onboard/` |
 | Agent selection | Claude Code (primary), Codex (optional) | Both supported via `AGENT_COMMAND` env var; separate Containerfile per agent. Codex + MCP requires an on-cluster vLLM ≥0.25.0 — against the demo's default DeepSeek backend it's model-only-probes-only. Claude Code works fully (incl. MCP) against DeepSeek. |
-| Sandbox naming (this demo section) | `garak-codex-<user>` / `garak-claude-<user>` | Distinguishes agent type in the sandbox name (e.g. `garak-codex-user1`, `garak-claude-user1`) — avoids ambiguity with the main demo's `demo-<user>` sandboxes and with each other. |
+| Sandbox naming (this demo section) | `garak-codex-<user>` / `garak-claude-<user>` | Distinguishes agent type in the sandbox name (e.g. `garak-codex-alice`, `garak-claude-alice`) — avoids ambiguity with the main demo's `demo-<user>` sandboxes and with each other. |
 | EvalHub MCP server | Not needed | Evaluations driven from RHOAI UI / CLI, not from inside sandboxes |
 | BYOF adapter | Not needed | agent-proxy already exposes an OpenAI-compatible endpoint; EvalHub's built-in `garak` provider accepts any `model.url` pointing to an OpenAI `/v1` endpoint. The `garak-kfp` risk assessment pipeline (Ch. 4) also accepts arbitrary URLs. **Confirmed from RHOAI 3.4 docs.** |
 | EvalHub integration path | Built-in `garak` provider first (Path 1), `garak-kfp` risk assessment later (Path 2) | Path 1 needs only EvalHub + agent-proxy URL. Path 2 adds multi-strategy attacks (SPO, Translation, TAP) but requires KFP + S3 + judge/SDG models — heavier infrastructure. |
@@ -817,11 +814,11 @@ pattern is already documented in
 
 The production approach (service accounts per profile) is the right design
 but overkill for a demo. For the `keycloak-oidc` demo, **use an existing
-demo user** (`user1` or `user2`) who is already authenticated with the
-correct providers and MCP roles — see "Demo steps" above. The sandbox gets
-`user1`'s exact security context — providers, MCP roles, network policies
-— which is precisely what we want to red-team, even though an admin/secops
-identity drives every command (see
+demo banker** (`alice`, `bob`, or `charlie`) who is already onboarded with
+the correct providers and MCP roles — see "Demo steps" above. The sandbox
+gets that banker's exact security context — providers, MCP roles, network
+policies — which is precisely what we want to red-team, even though an
+admin/secops identity drives every command (see
 [How to follow this guide](#how-to-follow-this-guide) above).
 
 ### E. EvalHub integration background
