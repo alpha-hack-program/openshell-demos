@@ -309,21 +309,25 @@ users, automated loops across all of them).
 6. **Get the `agent-proxy` static binary.** No Rust toolchain needed —
    download the prebuilt musl binary from GitHub Releases into the same
    path a local build would produce, so the `AGENT_PROXY_BIN` variable
-   used below works either way:
+   used below works either way. Check
+   [the Releases page](https://github.com/alpha-hack-program/openshell-demos/releases)
+   for the current `agent-proxy-v*` tag first: the repo's overall "latest"
+   release tracks whichever component published most recently, not
+   necessarily `agent-proxy`, so `releases/latest/download/...` isn't
+   reliable — use the explicit tag shown below (or whichever is newer):
 
    ```bash
    AGENT_PROXY_DIR="../../util/agent-proxy/target/x86_64-unknown-linux-musl/release"
    mkdir -p "$AGENT_PROXY_DIR"
    curl -fsSL -o "$AGENT_PROXY_DIR/agent-proxy" \
-     https://github.com/alpha-hack-program/openshell-demos/releases/latest/download/agent-proxy-linux-x86_64-musl
+     https://github.com/alpha-hack-program/openshell-demos/releases/download/agent-proxy-v0.1.1/agent-proxy-linux-x86_64-musl
    chmod +x "$AGENT_PROXY_DIR/agent-proxy"
    ```
 
-   If you're actively developing `agent-proxy` (or no release exists yet),
-   build from source instead — requires Rust 2024 edition (1.85+) and the
-   `x86_64-unknown-linux-musl` target. See
-   [`util/agent-proxy/README.md`](../../../util/agent-proxy/README.md) for the
-   full build/release/image workflow:
+   If you're actively developing `agent-proxy`, build from source instead —
+   requires Rust 2024 edition (1.85+) and the `x86_64-unknown-linux-musl`
+   target. See [`util/agent-proxy/README.md`](../../../util/agent-proxy/README.md)
+   for the full build/release/image workflow:
 
    ```bash
    make -C ../../util/agent-proxy musl
