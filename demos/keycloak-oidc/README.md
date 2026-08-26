@@ -1089,6 +1089,10 @@ identity admin logs into on the app's behalf, not a banker).
    ```bash
    source .env
    source ../../.env
+   # export, not a plain assignment — the script below runs as a separate
+   # process and only sees variables in its own environment, not this
+   # shell's. See docs/env-export-gotchas.md for the full writeup
+   # (this bit onboard's --keycloak-host too).
    export ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
    ./scripts/10-bootstrap-onboarding-web-admin.sh
    ```

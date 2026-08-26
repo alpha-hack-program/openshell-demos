@@ -11,3 +11,4 @@ target/
 scratch/
 .claude/*
 !.claude/skills/
+demos/keycloak-oidc/onboarding-web-admin-session/
