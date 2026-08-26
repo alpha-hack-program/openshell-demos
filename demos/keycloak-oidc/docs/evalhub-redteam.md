@@ -145,6 +145,32 @@ drove it end to end. See
 the full production model (representative profiles instead of named
 users, automated loops across all of them).
 
+**Note on `--workspace` — not the same thing as a namespace.** This guide
+uses two different partitioning concepts, and mixing them up breaks
+things silently:
+
+- **Kubernetes/OpenShift namespace** (`$OPENSHELL_NAMESPACE`,
+  `$EVALHUB_NAMESPACE`) — the usual cluster-level boundary. `oc`/`helm`
+  commands use this.
+- **OpenShell workspace** (`--workspace <name>`) — a *separate*,
+  gateway-internal multi-tenancy boundary that lives entirely inside one
+  namespace. Sandboxes, providers, and policies belong to a workspace, and
+  workspace membership is what OpenShell's own RBAC checks against —
+  independent of which Kubernetes namespace anything runs in. `openshell`
+  commands use this.
+
+Part I gives each banker their own dedicated workspace (named after them —
+`alice`, `bob`, `charlie`), created once in
+[step 3.0](../README.md#step-30--create-the-users-own-workspace). Every
+`openshell provider`/`sandbox`/`policy`/`service` command below that
+touches a banker's resources needs `--workspace "${USER_ID}"` — omit it and
+the command looks in the *wrong* workspace (usually `default`) and fails
+with "not found," even though the resource genuinely exists, just
+somewhere else. See
+[Workspace isolation](../README.md#workspace-isolation) in the main guide
+for the full mechanics (why per-banker workspaces exist at all, and what
+breaks without them).
+
 ## Prerequisites (admin, one-time)
 
 1. **Enable the TrustyAI component** — EvalHub is deployed by
@@ -374,10 +400,7 @@ GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpat
 ```
 
 **1. Create the `byo-claude` provider** (skip if you already created it for
-the "Claude Code + BYO LLM + MCP tool" recipe in the main README). Note
-`--workspace "${USER_ID}"`: providers live in the target banker's own
-workspace, not admin's — see
-[Workspace isolation](../README.md#workspace-isolation) in the main guide:
+the "Claude Code + BYO LLM + MCP tool" recipe in the main README):
 
 ```bash
 TMPFILE=$(mktemp --suffix=.yaml)
