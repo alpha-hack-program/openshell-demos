@@ -987,8 +987,17 @@ openshell whoami   # confirm: Name: openshell-admin — the tool's own
                     # browser tab it's about to open is the banker logging
                     # in as themselves, not admin
 source .env
+```
 
+Set the banker to onboard — change this to switch bankers:
+
+```bash
 USER_ID="alice"
+```
+
+Run `onboard` for `alice`:
+
+```bash
 onboard -u "$USER_ID" --profile providers/user-refresh-profile.yaml
 ```
 
