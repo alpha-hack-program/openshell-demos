@@ -1089,7 +1089,7 @@ identity admin logs into on the app's behalf, not a banker).
    ```bash
    source .env
    source ../../.env
-   ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
+   export ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
    ./scripts/10-bootstrap-onboarding-web-admin.sh
    ```
 
