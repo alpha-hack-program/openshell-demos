@@ -924,7 +924,7 @@ the *browser tab it opens* is where the banker logs in as themselves —
 the one genuine identity switch in this step, a login form, not a
 terminal.
 
-Install the pre-built binary once — no Rust toolchain needed. Check
+Install the pre-built binary once. Check
 [the Releases page](https://github.com/alpha-hack-program/openshell-demos/releases)
 for the current `onboard-v*` tag first: the repo's overall "latest"
 release tracks the main chart version, not `onboard`, so
