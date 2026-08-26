@@ -809,9 +809,12 @@ Extract the client mTLS certificates and register the gateway:
 ```bash
 # Terminal A — admin
 GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
+# Where the CLI expects this gateway's mTLS material to live
 MTLS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/${GATEWAY_NAME}/mtls"
 mkdir -p "$MTLS_DIR"
 
+# Pull the CA + client cert/key the chart generated for mTLS out of the
+# openshell-client-tls Secret and lay them out where the CLI looks for them
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
@@ -830,7 +833,10 @@ if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
     | awk '/-----BEGIN CERTIFICATE-----/{n++} n>=2' >> "$MTLS_DIR/ca.crt"
 fi
 
+# Drop any stale entry from a previous run so re-registration is clean
 openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
+# Register the gateway; this also triggers the browser-based OIDC login
+# (see 2c) — no separate `gateway login` needed on a first-time setup
 openshell gateway add "https://${ROUTE_HOST}:443" \
   --name "$GATEWAY_NAME" \
   --oidc-issuer "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
