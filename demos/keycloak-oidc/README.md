@@ -918,9 +918,17 @@ Platform Admin operations) and only needs to run once per banker:
 openshell whoami   # confirm: Name: openshell-admin — this whole step is admin-only
 
 source .env
+```
 
+Set the banker to onboard — change this to switch bankers:
+
+```bash
 USER_ID="alice"
+```
 
+Look up `alice`'s Keycloak subject and create her workspace:
+
+```bash
 # Look up the banker's Keycloak subject (OIDC 'sub' claim = Keycloak user ID)
 KEYCLOAK_ADMIN_TOKEN=$(curl -sk -X POST \
   "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
