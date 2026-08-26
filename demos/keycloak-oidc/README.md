@@ -862,6 +862,10 @@ Log in as the admin user (the one with the `openshell-admin` realm role).
 
 #### 2d. Enable Providers v2
 
+This changes a **global** setting, so the CLI asks for confirmation — type
+`y` and press Enter when prompted. (Running headlessly/non-interactively?
+Append `--yes` instead — see AGENTS.md.)
+
 ```bash
 # Terminal A — admin
 openshell settings set --global --key providers_v2_enabled --value true
