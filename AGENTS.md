@@ -184,6 +184,12 @@ and constraints that aren't obvious from the code alone:
   inside sandboxes. Contains resolved design decisions, validated
   lifecycle findings, and open items. Lives under `demos/keycloak-oidc/`
   because the demo extends that stack.
+- **[Self-service onboarding design notes](demos/keycloak-oidc/docs/self-service-onboarding.md)** —
+  **DRAFT, brainstorm only.** Explores replacing the operator-run `onboard`
+  CLI with a self-service web app. Covers why every provisioning call
+  requires Platform Admin today, a security-first analysis (authentication
+  vs. authorization to provision, JML/approval patterns, standing-credential
+  risk), architecture options, and a recommendation. No implementation yet.
 
 ## 7. References (repo-wide)
 
