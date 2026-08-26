@@ -29,21 +29,22 @@
     - [Scene 4 — Bob overreaches](#scene-4--bob-overreaches)
     - [Sandbox network isolation](#sandbox-network-isolation)
     - [Scene 4c — Bob tries to talk his way in](#scene-4c--bob-tries-to-talk-his-way-in)
-    - [Scene 5 — Charlie works a compliance-sensitive case](#scene-5--charlie-works-a-compliance-sensitive-case)
+    - [Scene 5a — Charlie works a compliance-sensitive case](#scene-5a--charlie-works-a-compliance-sensitive-case)
     - [Scene 5b — Charlie checks product suitability](#scene-5b--charlie-checks-product-suitability)
     - [Scene 6 — Alice: the boundary from the other side, and the second permission](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)
-    - [Raw MCP protocol calls (curl, for scripting/CI)](#raw-mcp-protocol-calls-curl-for-scriptingci)
+    - [Demo wrap-up](#demo-wrap-up)
   - [Definition of done](#definition-of-done)
 - [Part II — Red-team evaluation (EvalHub + Garak)](#part-ii--red-team-evaluation-evalhub--garak)
 - [Annexes](#annexes)
   - [A. Alternate test clients](#a-alternate-test-clients)
     - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
     - [Claude Code + BYO LLM + MCP tool](#claude-code--byo-llm--mcp-tool)
-  - [B. Configuration reference](#b-configuration-reference)
-  - [C. Secrets and security notes](#c-secrets-and-security-notes)
-  - [D. Troubleshooting](#d-troubleshooting)
-  - [E. Open risks](#e-open-risks)
-  - [F. References](#f-references)
+  - [B. Raw MCP protocol calls (curl, for scripting/CI)](#b-raw-mcp-protocol-calls-curl-for-scriptingci)
+  - [C. Configuration reference](#c-configuration-reference)
+  - [D. Secrets and security notes](#d-secrets-and-security-notes)
+  - [E. Troubleshooting](#e-troubleshooting)
+  - [F. Open risks](#f-open-risks)
+  - [G. References](#g-references)
 
 ## Overview
 
@@ -1104,10 +1105,11 @@ openshell policy update "demo-alice" \
   --workspace "alice"
 ```
 
-The endpoint/binary grants above cover `curl`, used by the raw-protocol walkthrough
-further down. **The recommended way to actually run the demo is through Claude
-Code** — a real agentic harness making its own multi-hop tool-call decisions,
-not a scripted sequence of JSON-RPC bodies — covered next.
+The endpoint/binary grants above cover `curl`, used by the raw-protocol
+walkthrough in [Annex B](#b-raw-mcp-protocol-calls-curl-for-scriptingci).
+**The recommended way to actually run the demo is through Claude Code** —
+a real agentic harness making its own multi-hop tool-call decisions, not a
+scripted sequence of JSON-RPC bodies — covered next.
 
 #### Write each banker's MCP server config once
 
@@ -1285,7 +1287,7 @@ run these yourself.
 > naming a specific client, and expect the agent to correctly report "no
 > such meeting found" if the seed date has passed — that's the tool working
 > correctly, not
-> a bug. See [Open risks](#e-open-risks).
+> a bug. See [Open risks](#f-open-risks).
 
 #### Scene 1 — Bob preps for a meeting
 
@@ -1535,6 +1537,14 @@ This reliably reproduces the real boundary — HTTP 200, a JSON-RPC-level
 denial, never Elena Duarte's actual data. Every denial like this is logged
 server-side under `target: "tenant_violation"`.
 
+This scene only shows one banker probing one other banker's client. To see
+every banker/server combination denied or allowed correctly in one pass —
+including Bob probing both Alice's and Charlie's clients through two
+different servers — admin can run `./scripts/08-verify-isolation.sh`
+(see [Annex B](#b-raw-mcp-protocol-calls-curl-for-scriptingci)), which
+exercises the same boundary via raw curl instead of an agent, for all 19
+checks at once.
+
 #### Sandbox network isolation
 
 Scene 4 shows the *application-level* boundary: a shared MCP server's own
@@ -1635,7 +1645,7 @@ The technical boundary was never in doubt here (identity is JWT-derived,
 not prompt-derived) — the actual risk was the agent's narration/behavior
 layer, and it held on both counts.
 
-#### Scene 5 — Charlie works a compliance-sensitive case
+#### Scene 5a — Charlie works a compliance-sensitive case
 
 **Logged in as:** Charlie. **Servers this exercises:** `mcp-portfolio`
 (client-name resolution — `mcp-kyc-compliance`'s tools take a `client_id`,
@@ -1697,16 +1707,16 @@ regulatory documents by name rather than giving a flat yes/no.
 #### Scene 5b — Charlie checks product suitability
 
 **Logged in as:** Charlie. **Servers this exercises:** `mcp-portfolio`
-(client-name resolution, same as Scene 5), `mcp-kyc-compliance`.
+(client-name resolution, same as Scene 5a), `mcp-kyc-compliance`.
 
 **What this tests, and why:** two separate name-resolution problems, and
 they're not symmetric. The **client** can be named naturally ("Fundación
 Iris") — `mcp-portfolio`'s `list_my_clients` resolves that to `cli-005`
-the same way Scene 5 did. The **product** genuinely cannot: `mcp-kyc-compliance`
+the same way Scene 5a did. The **product** genuinely cannot: `mcp-kyc-compliance`
 has no `list_products` tool, so nothing in this banker's toolset can
 resolve "Meridian Balanced Growth Fund" to `prod-002` on its own — that
 mapping only exists in this guide's own reference data (see
-[Open risks](#e-open-risks)). Rather than hand the agent a bare, meaningless
+[Open risks](#f-open-risks)). Rather than hand the agent a bare, meaningless
 ID, the prompt gives both the human name and the ID together, the way a
 banker would actually reference a fund by name while the system underneath
 still keys on a code — closer to how you'd say "AAPL (Apple)" than to
@@ -1716,7 +1726,7 @@ inventing a fake lookup capability that isn't there.
 given the ID; the agent calls `check_suitability` for both product IDs
 given (not just the first), correctly reporting `prod-002` unsuitable (risk
 mismatch) and `prod-001` suitable — matching the raw curl-verified results
-in [Open risks](#e-open-risks) exactly.
+in [Open risks](#f-open-risks) exactly.
 
 ```bash
 # Terminal D — charlie
@@ -1750,7 +1760,7 @@ openshell sandbox exec -n demo-charlie --workspace charlie \
 
 The agent resolved "Fundación Iris" to `cli-005` on its own (no ID given
 for the client), matching the raw curl-verified results in
-[Open risks](#e-open-risks) exactly. It also pulled in the pending
+[Open risks](#f-open-risks) exactly. It also pulled in the pending
 KYC/PEP flag unprompted, correctly treating the suitability pass as
 necessary but not sufficient.
 
@@ -1926,303 +1936,43 @@ export ANTHROPIC_BASE_URL=... ANTHROPIC_MODEL=...   # or export these before con
 claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config --permission-mode bypassPermissions
 ```
 
-#### What the run-through adds up to
+#### Demo wrap-up
 
-The same MCP servers, the same identity-propagation mechanism, and the same
-tenant-ownership check do the work in every scene — prepping a meeting,
-resolving an ambiguous reference, diagnosing a dip, reasoning about a
-regulatory edge case, and refusing an overreach all come out of the same
-underlying machinery, driven by an agent's own tool-calling decisions, not a
-scripted sequence of curl commands.
+Six scenes, one mechanism each time: the same MCP servers, the same
+identity-propagation, and the same tenant-ownership check, all driven by an
+agent's own tool-calling decisions rather than a scripted sequence of curl
+commands.
 
-[Sandbox network isolation](#sandbox-network-isolation)
-adds the layer the scenes above don't touch: even if a banker's agent tried
-to go around the MCP servers entirely and reach another banker's sandbox
-directly, there's no network path to do it — isolation here is
-defense-in-depth, not a single check that a clever enough prompt could talk
-its way around. Three independent layers, any one of which alone would have
-stopped Bob: sandbox network isolation (can't even open a socket to another
-banker's sandbox), OpenShell workspace membership (can't `sandbox exec`
-into it even with valid credentials from the right terminal), and each MCP
-server's own tenant-ownership check (can't read another banker's client
-data even through a service both bankers legitimately share).
+- **Scene 1** — a vague ask forces multi-hop resolution (meeting → client →
+  positions → news), with no server list handed to the agent up front.
+- **Scene 2** — a two-step dependency: "biggest client" has to be computed
+  before it can be looked up.
+- **Scene 3** — grounding an explanation in the client's actual holdings
+  instead of a generic market summary.
+- **Scene 4** — Bob reaching for another banker's client is denied by the
+  server's own `assert_owns_client` check, regardless of how the request is
+  phrased or whether the agent tries the call at all.
+- **Scene 4c** — social engineering aimed at the agent (false authority,
+  a request to fabricate data) fails the same way: identity comes from the
+  JWT, not the prompt, and the agent declines to fabricate a substitute.
+- **Scene 5a** — compliance reasoning that cites the specific regulatory
+  clause, not a flat yes/no.
+- **Scene 5b** — a second name-resolution problem (client by name, product
+  by name+ID) and a suitability check matching curl-verified results.
+- **Scene 6** — the same boundary holds from Alice's side, and her one
+  extra permission (`compatibility-user`) works end to end.
 
-#### Raw MCP protocol calls (curl, for scripting/CI)
-
-The same tool calls above, issued directly as JSON-RPC over curl — no LLM in
-the loop. Treat these as **preliminary/raw-protocol checks**, not the real
-demo: they're how you validate a server's wire-level behavior quickly and
-deterministically (this is what `08-verify-isolation.sh` below does)
-before ever pointing an agent at it. They're useful for scripting, CI, and
-fast iteration, since nothing here decides *which* tool to call or *in
-what order* — that's hardcoded instead of left to a model.
-
-**The actual demo — the thing to run and to trust as end-to-end
-verification — is [step 5](#5-run-the-demo)'s scenes, driven by a real
-agent** making its own multi-hop tool-calling decisions against these same
-servers: **Claude Code**, the preferred and primary recipe used throughout
-this guide, with **Codex** available as an optional alternate agent (see
-[Annex A](#a-alternate-test-clients)) for exercising the identical RBAC
-boundary through a different agentic harness. A curl call proving a server
-returns the right JSON-RPC error is necessary but not sufficient — it says
-nothing about whether an agent given only a natural-language ask actually
-invokes the right tool, with the right arguments, and reports the result
-(or the denial) faithfully. That agent-level behavior is exactly what
-[step 5](#5-run-the-demo)'s scenes and [Annex A](#a-alternate-test-clients)
-verify, and what curl alone cannot.
-
-**Who runs this:** every command block below runs from **Terminal A —
-admin**, using `--workspace <id>` to target each banker's sandbox — the
-same admin-runs-everything-via-`--workspace` convention this guide used
-before [step 5](#5-run-the-demo) introduced per-banker terminals. Running
-these from each banker's own terminal instead (B/C/D, matching the Claude
-Code scenes above) works identically — `sandbox exec` is self-service
-within a banker's own workspace.
-
-#### Alice: the one extra permission
-
-Alice's book is small (just Elena Duarte), but she's the only banker who
-can reach `mcp-compatibility` — the platform has to get this right for a
-low-traffic user with an unusual second permission just as reliably as for
-Bob's much busier book:
-
-```bash
-MCP_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 both times — Alice holds compatibility-user via the
-# compatibility-users group; nobody else in this demo does.
-```
-
-#### Bob: biggest client, meeting prep, performance diagnosis
-
-Bob's book is the largest and most varied — this is where the multi-hop
-work happens. First, who's his biggest client by AUM:
-
-```bash
-MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_top_client_by_aum\",\"arguments\":{}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Clara Fontán (cli-001), highest combined market_value
-# across her positions in Bob's book.
-```
-
-Then meeting prep — resolve the next meeting via `mcp-crm-calendar`, then
-pull that client's notes:
-
-```bash
-CRM_URL="http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_upcoming_meetings\",\"arguments\":{}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Bob's own meetings only (mtg-001 with Clara Fontán,
-# mtg-002 with Grupo Delta Textil), but ONLY whichever of those two still
-# lie in the future relative to when you run this — the seed data uses
-# fixed timestamps (mtg-001 is 2026-08-24T10:00:00Z), not dates relative to
-# "now". Running this after that timestamp returns only mtg-002. See the
-# seed-data note above Scene 1.
-```
-
-Finally, performance diagnosis: Grupo Delta Textil's MTD return (`perf-002`)
-is -3.4% against a +1.5% benchmark — a real underperformance worth
-explaining before the meeting, not after. `get_performance` surfaces the
-number; `get_relevant_news` (filtered by that client's sector) is how the
-agent correlates it with an actual market event instead of guessing:
-
-```bash
-NEWS_URL="http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_relevant_news\",\"arguments\":{\"tickers\":[],\"sectors\":[\"textile\"]}}}" \
-    "$MCP_URL"'
-# Expected: 200 — public news, no per-client isolation on this server, but
-# still requires mcp-market-news-user (composited into banker).
-```
-
-#### Bob probes the boundary
-
-With a promotion decision looming and his numbers looking thin next to
-Alice's and Charlie's, Bob tries to look at their books. Two different
-mechanisms have to both hold for this to fail safely:
-
-```bash
-# Role-based (Envoy rbac filter) — Bob legitimately lacks compatibility-user
-COMPAT_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${COMPAT_URL}" \
-  -- bash -c 'curl -so /dev/null -w "%{http_code}" -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-# Expected: 403 — valid token, but Bob lacks compatibility-user entirely.
-
-# Tenant-based (mcp-portfolio's assert_owns_client) — Bob legitimately
-# holds mcp-portfolio-user, so this reaches the app; the app itself has to
-# refuse. cli-004 is Alice's Elena Duarte. Expected: HTTP 200 with a
-# JSON-RPC-level error (code -32602).
-PORTFOLIO_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${PORTFOLIO_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_positions\",\"arguments\":{\"client_id\":\"cli-004\"}}}" \
-    "$MCP_URL"'
-# Expected: the same deliberately-ambiguous "client_id no encontrado para
-# el llamante autenticado" error Bob would get for a client_id that
-# doesn't exist at all — never Elena Duarte's actual positions.
-```
-
-#### Charlie: KYC-aware reasoning
-
-Charlie's one client, Fundación Iris, carries a pending KYC review and a
-PEP flag. Two servers back this up with real data: `mcp-portfolio`'s
-`list_my_clients` surfaces the flags themselves (also requires
-mcp-portfolio-v0.1.4+ — 0.1.3 returns id/name only); `mcp-kyc-compliance`
-is the dedicated tool — it can look up the flags directly
-(`get_risk_profile`) and, more importantly, search the actual regulatory
-text and cite the clause instead of giving a flat yes/no
-(`search_regulatory_guidance`):
-
-```bash
-MCP_URL="http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-005\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Fundación Iris, kyc_status "pending", pep_flag true.
-
-openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"search_regulatory_guidance\",\"arguments\":{\"query\":\"What approval is required before a PEP client transaction can proceed?\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — a fragment from the (fictional) corpus's PEP doc: prior
-# compliance-officer approval plus a documented source-of-funds review,
-# with the source document named — Charlie can cite the rule, not just
-# assert an answer.
-
-openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"check_suitability\",\"arguments\":{\"client_id\":\"cli-005\",\"product_id\":\"prod-002\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — potentially_suitable: false. prod-002 ("Meridian Balanced
-# Growth Fund") is rated moderate; Fundación Iris is conservative, so
-# risk_ok is false regardless of sector concentration. Try prod-001
-# ("Meridian Capital Preservation Note", conservative, no sector) instead
-# for a potentially_suitable: true result — see
-# mcp-servers/templates/schema-init-configmap.yaml for the full 6-product
-# catalog and which client/product pairs exercise which branch (risk vs.
-# sector-concentration rejection).
-```
-
-Alternatively, run the isolation verification script to test every
-banker/server combination — including Bob's boundary probe — automatically:
-
-```bash
-./scripts/08-verify-isolation.sh
-```
-
-Expected output:
-
-```
-PASS  alice → mcp-compatibility (calc_tax)  HTTP 200 (expected 200)
-PASS  alice → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  alice → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  alice → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  alice → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  bob → mcp-compatibility  HTTP 403 (expected 403)
-PASS  bob → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  bob → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  bob → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  bob → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  charlie → mcp-compatibility  HTTP 403 (expected 403)
-PASS  charlie → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  charlie → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  charlie → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  charlie → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
-PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
-PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
-PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
-
-Results: 19 passed, 0 failed
-```
-
-> For alternate ways to exercise this same RBAC boundary through a real
-> coding agent (Codex or Claude Code) instead of raw `curl`, see
-> [Annex A](#a-alternate-test-clients).
+Underneath all of that, [Sandbox network isolation](#sandbox-network-isolation)
+is a layer none of the scenes touch directly: even if a banker's agent tried
+to go around the MCP servers entirely and reach another banker's sandbox,
+there's no network path to do it. That makes three independent layers, any
+one of which alone would have stopped Bob: sandbox network isolation (can't
+even open a socket to another banker's sandbox), OpenShell workspace
+membership (can't `sandbox exec` into it even with valid credentials from
+the right terminal), and each MCP server's own tenant-ownership check
+(can't read another banker's client data even through a service both
+bankers legitimately share). Isolation here is defense-in-depth, not a
+single check a clever enough prompt could talk its way around.
 
 ### Definition of done
 
@@ -2673,7 +2423,285 @@ end to end through Claude Code too — the same JWT-carrying mechanism as
 Bob's `mcp-portfolio` call above, just gated by `compatibility-user`
 instead of `banker`.
 
-### B. Configuration reference
+### B. Raw MCP protocol calls (curl, for scripting/CI)
+
+The same tool calls exercised by [step 5](#5-run-the-demo)'s scenes,
+issued directly as JSON-RPC over curl — no LLM in the loop. Treat these as
+**preliminary/raw-protocol checks**, not the real demo: they're how you
+validate a server's wire-level behavior quickly and deterministically
+(this is what `08-verify-isolation.sh` below does) before ever pointing an
+agent at it. They're useful for scripting, CI, and fast iteration, since
+nothing here decides *which* tool to call or *in what order* — that's
+hardcoded instead of left to a model.
+
+**The actual demo — the thing to run and to trust as end-to-end
+verification — is [step 5](#5-run-the-demo)'s scenes, driven by a real
+agent** making its own multi-hop tool-calling decisions against these same
+servers: **Claude Code**, the preferred and primary recipe used throughout
+this guide, with **Codex** available as an optional alternate agent (see
+[Annex A](#a-alternate-test-clients)) for exercising the identical RBAC
+boundary through a different agentic harness. A curl call proving a server
+returns the right JSON-RPC error is necessary but not sufficient — it says
+nothing about whether an agent given only a natural-language ask actually
+invokes the right tool, with the right arguments, and reports the result
+(or the denial) faithfully. That agent-level behavior is exactly what
+[step 5](#5-run-the-demo)'s scenes and [Annex A](#a-alternate-test-clients)
+verify, and what curl alone cannot.
+
+**Who runs this:** every command block below runs from **Terminal A —
+admin**, using `--workspace <id>` to target each banker's sandbox — the
+same admin-runs-everything-via-`--workspace` convention this guide used
+before [step 5](#5-run-the-demo) introduced per-banker terminals. Running
+these from each banker's own terminal instead (B/C/D, matching the Claude
+Code scenes above) works identically — `sandbox exec` is self-service
+within a banker's own workspace.
+
+#### Alice: the one extra permission
+
+Alice's book is small (just Elena Duarte), but she's the only banker who
+can reach `mcp-compatibility` — the platform has to get this right for a
+low-traffic user with an unusual second permission just as reliably as for
+Bob's much busier book:
+
+```bash
+MCP_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 both times — Alice holds compatibility-user via the
+# compatibility-users group; nobody else in this demo does.
+```
+
+#### Bob: biggest client, meeting prep, performance diagnosis
+
+Bob's book is the largest and most varied — this is where the multi-hop
+work happens. First, who's his biggest client by AUM:
+
+```bash
+MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_top_client_by_aum\",\"arguments\":{}}}" \
+    "$MCP_URL"'
+# Expected: 200 — Clara Fontán (cli-001), highest combined market_value
+# across her positions in Bob's book.
+```
+
+Then meeting prep — resolve the next meeting via `mcp-crm-calendar`, then
+pull that client's notes:
+
+```bash
+CRM_URL="http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_upcoming_meetings\",\"arguments\":{}}}" \
+    "$MCP_URL"'
+# Expected: 200 — Bob's own meetings only (mtg-001 with Clara Fontán,
+# mtg-002 with Grupo Delta Textil), but ONLY whichever of those two still
+# lie in the future relative to when you run this — the seed data uses
+# fixed timestamps (mtg-001 is 2026-08-24T10:00:00Z), not dates relative to
+# "now". Running this after that timestamp returns only mtg-002. See the
+# seed-data note above Scene 1.
+```
+
+Finally, performance diagnosis: Grupo Delta Textil's MTD return (`perf-002`)
+is -3.4% against a +1.5% benchmark — a real underperformance worth
+explaining before the meeting, not after. `get_performance` surfaces the
+number; `get_relevant_news` (filtered by that client's sector) is how the
+agent correlates it with an actual market event instead of guessing:
+
+```bash
+NEWS_URL="http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_relevant_news\",\"arguments\":{\"tickers\":[],\"sectors\":[\"textile\"]}}}" \
+    "$MCP_URL"'
+# Expected: 200 — public news, no per-client isolation on this server, but
+# still requires mcp-market-news-user (composited into banker).
+```
+
+#### Bob probes the boundary
+
+With a promotion decision looming and his numbers looking thin next to
+Alice's and Charlie's, Bob tries to look at their books. Two different
+mechanisms have to both hold for this to fail safely:
+
+```bash
+# Role-based (Envoy rbac filter) — Bob legitimately lacks compatibility-user
+COMPAT_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${COMPAT_URL}" \
+  -- bash -c 'curl -so /dev/null -w "%{http_code}" -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+# Expected: 403 — valid token, but Bob lacks compatibility-user entirely.
+
+# Tenant-based (mcp-portfolio's assert_owns_client) — Bob legitimately
+# holds mcp-portfolio-user, so this reaches the app; the app itself has to
+# refuse. cli-004 is Alice's Elena Duarte. Expected: HTTP 200 with a
+# JSON-RPC-level error (code -32602).
+PORTFOLIO_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+openshell sandbox exec -n demo-bob --workspace bob --env "MCP_URL=${PORTFOLIO_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_positions\",\"arguments\":{\"client_id\":\"cli-004\"}}}" \
+    "$MCP_URL"'
+# Expected: the same deliberately-ambiguous "client_id no encontrado para
+# el llamante autenticado" error Bob would get for a client_id that
+# doesn't exist at all — never Elena Duarte's actual positions.
+```
+
+#### Charlie: KYC-aware reasoning
+
+Charlie's one client, Fundación Iris, carries a pending KYC review and a
+PEP flag. Two servers back this up with real data: `mcp-portfolio`'s
+`list_my_clients` surfaces the flags themselves (also requires
+mcp-portfolio-v0.1.4+ — 0.1.3 returns id/name only); `mcp-kyc-compliance`
+is the dedicated tool — it can look up the flags directly
+(`get_risk_profile`) and, more importantly, search the actual regulatory
+text and cite the clause instead of giving a flat yes/no
+(`search_regulatory_guidance`):
+
+```bash
+MCP_URL="http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
+    "$MCP_URL"'
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-005\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — Fundación Iris, kyc_status "pending", pep_flag true.
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"search_regulatory_guidance\",\"arguments\":{\"query\":\"What approval is required before a PEP client transaction can proceed?\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — a fragment from the (fictional) corpus's PEP doc: prior
+# compliance-officer approval plus a documented source-of-funds review,
+# with the source document named — Charlie can cite the rule, not just
+# assert an answer.
+
+openshell sandbox exec -n demo-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
+  -- bash -c 'curl -sS -X POST \
+    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"check_suitability\",\"arguments\":{\"client_id\":\"cli-005\",\"product_id\":\"prod-002\"}}}" \
+    "$MCP_URL"'
+# Expected: 200 — potentially_suitable: false. prod-002 ("Meridian Balanced
+# Growth Fund") is rated moderate; Fundación Iris is conservative, so
+# risk_ok is false regardless of sector concentration. Try prod-001
+# ("Meridian Capital Preservation Note", conservative, no sector) instead
+# for a potentially_suitable: true result — see
+# mcp-servers/templates/schema-init-configmap.yaml for the full 6-product
+# catalog and which client/product pairs exercise which branch (risk vs.
+# sector-concentration rejection).
+```
+
+Alternatively, run the isolation verification script to test every
+banker/server combination — including Bob's boundary probe — automatically:
+
+```bash
+./scripts/08-verify-isolation.sh
+```
+
+Expected output:
+
+```
+PASS  alice → mcp-compatibility (calc_tax)  HTTP 200 (expected 200)
+PASS  alice → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  alice → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  alice → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  alice → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
+PASS  bob → mcp-compatibility  HTTP 403 (expected 403)
+PASS  bob → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  bob → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  bob → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  bob → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
+PASS  charlie → mcp-compatibility  HTTP 403 (expected 403)
+PASS  charlie → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
+PASS  charlie → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
+PASS  charlie → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
+PASS  charlie → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
+PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
+PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
+PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
+PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
+
+Results: 19 passed, 0 failed
+```
+
+> For alternate ways to exercise this same RBAC boundary through a real
+> coding agent (Codex or Claude Code) instead of raw `curl`, see
+> [Annex A](#a-alternate-test-clients).
+
+### C. Configuration reference
 
 | Variable | Where used | Notes |
 |---|---|---|
@@ -2684,7 +2712,7 @@ instead of `banker`.
 | `KEYCLOAK_CLIENT_SECRET` | Gateway client secret | Never commit a real value |
 | `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-user.sh` | Short-lived; obtain via your own admin login |
 
-### C. Secrets and security notes
+### D. Secrets and security notes
 
 - The gateway client secret in `keycloak/realm-export.json` is a hardcoded
   demo value (`openshell-gateway-demo-secret`). In production, generate a
@@ -2705,7 +2733,7 @@ instead of `banker`.
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — evaluation-only, never expose to a public network.
 
-### D. Troubleshooting
+### E. Troubleshooting
 
 **Profile `token_url` substitution.** The provider profile
 `providers/user-refresh-profile.yaml` contains `<keycloak-host>` as a
@@ -2733,7 +2761,7 @@ not for production.
 **Envoy image tag.** `envoyproxy/envoy:v1.31-latest` is a moving tag. Pin an
 exact patch release before relying on this beyond a demo.
 
-### E. Open risks
+### F. Open risks
 
 - **Seed meeting dates are fixed, not relative to "now."** `mtg-001`/`mtg-002`/
   `mtg-003`/`mtg-004` in `mcp-servers/templates/schema-init-configmap.yaml`
@@ -2793,7 +2821,7 @@ exact patch release before relying on this beyond a demo.
   every command; wrap it in tooling (as `util/onboard` now defaults
   `--workspace` to the user ID) rather than leaving it to manual discipline.
 
-### F. References
+### G. References
 
 - OpenShift install path: https://docs.nvidia.com/openshell/kubernetes/openshift
 - Access Control / OIDC: https://docs.nvidia.com/openshell/kubernetes/access-control
