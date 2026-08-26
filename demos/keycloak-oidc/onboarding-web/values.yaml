@@ -1,6 +1,6 @@
 image:
-  repository: ghcr.io/alpha-hack-program/openshell-demos/onboarding-web
-  tag: latest
+  repository: quay.io/atarazana/onboarding-web
+  tag: 0.1.0
   pullPolicy: IfNotPresent
 
 # Required — the exact HTTPS host this app is reachable at. Must exactly
