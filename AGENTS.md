@@ -184,6 +184,18 @@ and constraints that aren't obvious from the code alone:
   inside sandboxes. Contains resolved design decisions, validated
   lifecycle findings, and open items. Lives under `demos/keycloak-oidc/`
   because the demo extends that stack.
+- **[Self-service onboarding design notes](demos/keycloak-oidc/docs/self-service-onboarding.md)** —
+  **Option B implemented (v1) as `util/onboarding-web/` +
+  `demos/keycloak-oidc/onboarding-web/`, verified end to end against a live
+  cluster.** Replaces the operator-run `onboard` CLI's token-attach step
+  with a self-service web app: admin still fully pre-provisions the
+  workspace/provider/sandbox/MCP-config/agent-harness out of band (steps
+  3.0/3a/4/5), and the web app only lets the user log in and run `provider
+  refresh configure`/`refresh rotate` against what's already there — never
+  `workspace create`/`provider create`/`sandbox create`. See
+  [Self-service onboarding at scale — Option A](demos/keycloak-oidc/docs/self-service-onboarding-option-a-at-scale.md)
+  for the full-self-service alternative reserved for much larger user
+  counts, and the known upstream blocker standing in its way.
 
 ## 7. References (repo-wide)
 

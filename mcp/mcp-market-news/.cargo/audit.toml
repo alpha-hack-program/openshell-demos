@@ -1,0 +1,13 @@
+# cargo-audit configuration. See `make audit`.
+#
+# RUSTSEC-2023-0071 ("Marvin Attack" timing side-channel in `rsa` 0.9.10,
+# no fixed upgrade available) is pulled in transitively by `sqlx-mysql`,
+# which appears in Cargo.lock as part of the `sqlx` workspace's dependency
+# resolution — but this project only enables sqlx's `postgres` feature.
+# Neither `sqlx-mysql` nor `rsa` are compiled or linked into either binary
+# (verified: absent from `cargo build --release`'s compile list). Ignored
+# here rather than silently failing `make audit` on a crate that isn't
+# actually part of the built artifact. Re-check this entry if the sqlx
+# dependency ever gains a `mysql` feature.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

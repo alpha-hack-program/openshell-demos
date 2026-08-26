@@ -1,0 +1,15 @@
+/target
+
+# Cargo.lock is intentionally tracked (this is a binary project, not a
+# library) — do not add it here.
+
+# Generated corpus artifacts. `news_generator` (or the `tests/fixture.rs`
+# local-fixture test) writes these; they are not source and should not be
+# committed. In Kubernetes this whole directory is a PVC.
+/data/*.jsonl
+/data/*.tv
+/data/.cache/
+
+.env
+*.env
+!.env.example

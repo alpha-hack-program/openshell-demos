@@ -1,5 +1,8 @@
 {{- $keycloak := .Values.keycloak -}}
 {{- $envoy := .Values.envoy -}}
+{{- $postgres := .Values.postgres -}}
+{{- $newsGen := .Values.newsGenerator -}}
+{{- $embeddings := .Values.embeddings -}}
 {{- range .Values.servers }}
 apiVersion: apps/v1
 kind: Deployment
@@ -54,21 +57,155 @@ spec:
               value: {{ $keycloak.clientId | quote }}
             - name: MCP_REQUIRED_ROLE
               value: {{ .requiredRole | quote }}
-            # No BIND_ADDRESS set here deliberately — the app then defaults
-            # to its own 127.0.0.1:<internalPort> binding, which is exactly
-            # what we want now that Envoy, not the app, is the externally
-            # reachable, authenticating entrypoint in this pod.
+            # Explicit loopback bind: some images (e.g. this repo's own
+            # mcp-portfolio/mcp-crm-calendar/mcp-market-news, whose
+            # Containerfiles bake ENV BIND_ADDRESS=0.0.0.0:<port>) do NOT
+            # default to loopback on their own, which would make the app
+            # reachable on the pod IP directly, bypassing Envoy's jwt_authn
+            # + rbac checks entirely. Setting it here overrides any such
+            # image default and keeps the app loopback-only regardless.
+            - name: BIND_ADDRESS
+              value: "127.0.0.1:{{ .internalPort }}"
             - name: MCP_DISABLE_HOST_CHECK
               value: "true"
             - name: MCP_STATEFUL_MODE
               value: {{ .statefulMode | default false | quote }}
             - name: RUST_LOG
               value: "debug"
+            {{- if .database }}
+            # Shared postgres — see values.yaml's postgres: block comment.
+            - name: DATABASE_URL
+              value: "postgres://{{ $postgres.user }}:{{ $postgres.password }}@mcp-postgres:5432/{{ $postgres.database }}"
+            {{- end }}
+            {{- if .newsGenerator }}
+            # How often this process re-reads data/news.jsonl + data/news.tv
+            # from the shared PVC below — picks up the news-generator-loop
+            # sidecar's writes without a restart. See mcp-market-news's
+            # README ("Live reload in mcp_server") for what this does.
+            - name: NEWS_RELOAD_INTERVAL_MINUTES
+              value: {{ $newsGen.intervalMinutes | default 5 | quote }}
+            {{- end }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # Shared vLLM/KServe embeddings InferenceService — see
+            # values.yaml's embeddings: block and templates/embeddings.yaml.
+            # Points at OUR OWN `<name>-clusterip` Service (defined in
+            # embeddings.yaml), not KServe's own auto-created `<name>-predictor`
+            # one — this cluster's RHOAI/KServe install has
+            # `serviceClusterIPNone: true` set cluster-wide
+            # (inferenceservice-config ConfigMap), making every
+            # InferenceService's own predictor Service headless (no
+            # virtual-IP load-balancing). See embeddings.yaml's comment for
+            # the full story.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
+            {{- end }}
           resources:
             {{- toYaml (.resources | default dict) | nindent 12 }}
+          {{- if .newsGenerator }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          {{- end }}
+        {{- if .newsGenerator }}
+        # Keeps the corpus "live" for the length of a demo session without
+        # anyone re-running news_generator by hand — see mcp-market-news's
+        # README ("Continuous mode"). Its writes only reach traffic because
+        # the app container above polls NEWS_RELOAD_INTERVAL_MINUTES.
+        - name: news-generator-loop
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
+          command: ["/app/news_generator"]
+          env:
+            - name: GENERATION_MODE
+              value: "loop"
+            - name: GENERATION_INTERVAL_MINUTES
+              value: {{ $newsGen.intervalMinutes | default 5 | quote }}
+            - name: GENERATION_BATCH_SIZE
+              value: {{ $newsGen.batchSize | default 5 | quote }}
+            - name: DATABASE_URL
+              value: "postgres://{{ $postgres.user }}:{{ $postgres.password }}@mcp-postgres:5432/{{ $postgres.database }}"
+            - name: OPENAI_API_KEY
+              value: {{ $newsGen.openaiApiKey | quote }}
+            - name: OPENAI_BASE_URL
+              value: {{ $newsGen.openaiBaseUrl | quote }}
+            - name: OPENAI_MODEL
+              value: {{ $newsGen.openaiModel | quote }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # news_generator also embeds each corpus item as it writes
+            # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
+            # needs the same shared embeddings service as the app container.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
+            {{- end }}
+            - name: RUST_LOG
+              value: "info"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources: {}
+        {{- end }}
+      {{- if .newsGenerator }}
+      # Blocks pod startup until a corpus exists (GENERATION_MODE defaults
+      # to "once"), so mcp_server never hits the "No such file or
+      # directory" crash a missing corpus used to cause — see
+      # values.yaml's comment on this server's `newsGenerator: true`.
+      initContainers:
+        - name: news-generator-init
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
+          command: ["/app/news_generator"]
+          env:
+            - name: DATABASE_URL
+              value: "postgres://{{ $postgres.user }}:{{ $postgres.password }}@mcp-postgres:5432/{{ $postgres.database }}"
+            - name: OPENAI_API_KEY
+              value: {{ $newsGen.openaiApiKey | quote }}
+            - name: OPENAI_BASE_URL
+              value: {{ $newsGen.openaiBaseUrl | quote }}
+            - name: OPENAI_MODEL
+              value: {{ $newsGen.openaiModel | quote }}
+            {{- if and .needsEmbeddings $embeddings.enabled }}
+            # news_generator also embeds each corpus item as it writes
+            # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
+            # needs the same shared embeddings service as the app container.
+            - name: EMBEDDINGS_BASE_URL
+              value: "http://{{ $embeddings.name }}-clusterip.{{ $.Release.Namespace }}.svc.cluster.local:8080"
+            - name: EMBEDDINGS_MODEL
+              value: {{ $embeddings.name | quote }}
+            {{- end }}
+            - name: RUST_LOG
+              value: "info"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources: {}
+      {{- end }}
       volumes:
         - name: envoy-config
           configMap:
             name: {{ .name }}-envoy
+        {{- if .newsGenerator }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .name }}-data
+        {{- end }}
 ---
+{{- if .newsGenerator }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .name }}-data
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ $newsGen.pvcSize | default "1Gi" }}
+---
+{{- end }}
 {{- end }}

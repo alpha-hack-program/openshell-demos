@@ -1,0 +1,117 @@
+# syntax=docker/dockerfile:1
+
+# Build arguments
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
+ARG BASE_TAG=9.6
+ARG VERSION=0.1.0
+ARG MAINTAINER="Alpha Hack Group <alpha@github.com>"
+ARG DESCRIPTION="mcp-kyc-compliance - Model Context Protocol server for fictional KYC/compliance checks and regulatory-guidance search"
+ARG APP_NAME=mcp-kyc-compliance
+ARG PORT=8003
+ARG SOURCE=https://github.com/alpha-hack-program/openshell-demos.git
+
+# Multi-stage build
+# Stage 1: Build stage with Rust toolchain
+FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
+
+# No C/C++ toolchain needed — sqlx (tls-rustls), reqwest (rustls-tls), and
+# turbovec are all pure Rust. Unlike the sibling mcp-market-news server
+# before its embeddings migration, this project never depended on
+# tokenizers/candle/hf-hub, so there's no gcc-c++ requirement here at all.
+RUN dnf update -y && \
+    dnf install -y \
+        gcc \
+        make \
+        pkg-config && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+# Install Rust
+ENV RUSTUP_HOME=/opt/rust
+ENV CARGO_HOME=/opt/rust
+ENV PATH=/opt/rust/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
+
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src
+
+RUN cargo build --release --bins
+
+# Stage 2: Runtime stage with minimal UBI
+FROM ${BASE_IMAGE}:${BASE_TAG}
+
+ARG VERSION
+ARG BUILD_DATE
+ARG VCS_REF
+ARG MAINTAINER
+ARG DESCRIPTION
+ARG APP_NAME
+ARG PORT
+ARG SOURCE
+
+LABEL org.opencontainers.image.title="${APP_NAME}" \
+      org.opencontainers.image.description="${DESCRIPTION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.authors="${MAINTAINER}" \
+      org.opencontainers.image.vendor="Alpha Hack Group" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.url="${SOURCE}" \
+      org.opencontainers.image.documentation="${SOURCE}" \
+      io.k8s.description="${DESCRIPTION}" \
+      io.k8s.display-name="${APP_NAME}" \
+      io.openshift.tags="mcp,kyc,compliance,rust,server" \
+      maintainer="${MAINTAINER}"
+
+# openssl runtime is NOT needed — every TLS-using dependency (sqlx,
+# reqwest) is configured for rustls, same rationale as the builder stage.
+RUN microdnf update -y && \
+    microdnf install -y ca-certificates && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+RUN useradd -r -u 1001 -g 0 -s /sbin/nologin \
+    -c "mcp-kyc-compliance server user" mcpserver
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/mcp_server /app/mcp_server
+COPY --from=builder /build/target/release/corpus_indexer /app/corpus_indexer
+# The regulatory corpus's markdown source is static and baked into the
+# image (unlike mcp-market-news's LLM-generated corpus). `data/` still
+# needs to be writable at runtime: mcp_server builds data/corpus.tv (+ its
+# doc sidecar) there on first startup if it doesn't exist yet — see
+# README's "Self-healing index" section. Should still be a PVC in
+# Kubernetes so that build isn't repeated on every pod restart.
+COPY data/corpus/ /app/data/corpus/
+
+RUN chown -R 1001:0 /app && \
+    chmod -R g=u /app && \
+    chmod +x /app/mcp_server /app/corpus_indexer
+
+USER 1001
+
+EXPOSE ${PORT}
+
+ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
+ENV BIND_ADDRESS=0.0.0.0:${PORT}
+ENV CORPUS_DIR=/app/data/corpus
+ENV CORPUS_INDEX_PATH=/app/data/corpus.tv
+# EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL have no working default — they must
+# point at the shared embeddings service's in-cluster DNS name (see the
+# demos/keycloak-oidc/mcp-servers Helm chart) and are injected by that
+# chart's Deployment template, not baked in here.
+
+# rmcp's streamable-http transport doesn't expose a dedicated /health
+# endpoint, and GET /mcp legitimately returns 405 (it's a POST-only JSON-RPC
+# endpoint) — so this only checks TCP-level reachability (no `-f`,
+# intentionally not treating the 405 as failure), not protocol correctness.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -s -o /dev/null http://localhost:${PORT}/mcp || exit 1
+
+CMD ["/app/mcp_server"]

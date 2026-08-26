@@ -1,0 +1,47 @@
+[package]
+name = "mcp-portfolio"
+version = "0.1.4"
+edition = "2021"
+
+[dependencies]
+rmcp = { version = "1.8", features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+] }
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "std",
+    "fmt",
+] }
+axum = { version = "0.8" }
+base64 = "0.22"
+http = "1"
+
+[[bin]]
+name = "mcp_server"
+path = "src/mcp_server.rs"
+
+[package.metadata.release]
+# Don't publish to crates.io (this is a binary project)
+publish = false
+# Push the commit and tag to the remote — triggers release-mcp-portfolio.yml
+push = true
+# This crate lives in a monorepo, so the tag must be scoped to it to avoid
+# colliding with other demos'/components' tags (matches the trigger in
+# .github/workflows/release-mcp-portfolio.yml)
+tag-name = "mcp-portfolio-v{{version}}"
+sign-tag = false

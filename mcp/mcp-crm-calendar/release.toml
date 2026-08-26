@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "mcp-crm-calendar-v{{version}}"
+pre-release-commit-message = "release(mcp-crm-calendar): {{version}}"
+tag-message = "mcp-crm-calendar v{{version}}"
+pre-release-hook = ["make", "check"]

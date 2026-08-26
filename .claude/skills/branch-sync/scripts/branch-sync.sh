@@ -61,7 +61,7 @@ else
 fi
 
 if [ "$PUSH" -eq 1 ]; then
-  git push -q origin "$BRANCH"
+  git push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
   PUSH_RESULT="pushed to origin/$BRANCH"
 else
   PUSH_RESULT="not pushed (--no-push)"

@@ -1,0 +1,57 @@
+[package]
+name = "mcp-kyc-compliance"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server exposing simplified, fictional KYC/compliance checks and regulatory-guidance search over a small RAG corpus"
+license = "MIT"
+
+[lib]
+name = "mcp_kyc_compliance"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp_server"
+path = "src/mcp_server.rs"
+
+[[bin]]
+name = "corpus_indexer"
+path = "src/bin/corpus_indexer.rs"
+
+[dependencies]
+# --- MCP server ---
+rmcp = { version = "1.8", features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+    "fs",
+] }
+axum = { version = "0.8" }
+http = "1"
+schemars = { version = "1.0" }
+
+# --- Shared ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
+base64 = "0.22"
+
+# --- Database ---
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls"] }
+
+# --- Embeddings: HTTP client for the shared, in-namespace vLLM/KServe
+# embeddings service (jinaai/jina-embeddings-v3 on CPU) — see
+# src/common/embedder.rs. Same approach as the sibling mcp-market-news
+# server (duplicated, not shared — see that server's README).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Vector index ---
+turbovec = "1.0.0"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,8 +1,9 @@
-# Onboarding additional users
+# Onboarding additional bankers
 
-The demo realm JSON ships with two pre-configured users (`user1`, `user2`)
-whose Keycloak roles and OpenShell providers are set up by the main guide.
-This document explains how to onboard a new user beyond those two.
+The demo realm JSON ships with three pre-configured bankers (`alice`,
+`bob`, `charlie`) whose Keycloak roles and OpenShell providers are set up
+by the main guide. This document explains how to onboard a new banker
+beyond those three — e.g. a fourth private banker joining Meridian's team.
 
 There are three things to do: create the user in Keycloak, obtain their
 refresh token, and register it with OpenShell.
@@ -13,8 +14,10 @@ Use the Admin REST API or the admin console. The user needs:
 - A username and password
 - The `openshell-user` realm role (baseline sandbox access)
 - The `offline_access` realm role (so the refresh token doesn't expire)
-- One or more MCP server roles (`mcp-server-a-user`, `mcp-server-b-user`)
-  depending on which servers they should access
+- The `banker` realm role (composite — grants `mcp-portfolio-user`,
+  `mcp-crm-calendar-user`, and `mcp-market-news-user` in one shot). Add
+  membership in the `compatibility-users` group instead/as well if this
+  banker should also reach `mcp-compatibility`.
 - Profile fields filled in (firstName, lastName, email) to avoid
   first-login prompts
 
@@ -29,8 +32,8 @@ ADMIN_TOKEN=$(curl -sk -X POST \
   -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
   | jq -r '.access_token')
 
-NEW_USER="user3"
-NEW_PASS="user3"
+NEW_USER="dana"
+NEW_PASS="dana"
 
 # Create the user
 curl -sk -X POST \
@@ -41,8 +44,8 @@ curl -sk -X POST \
     "username": "'"${NEW_USER}"'",
     "enabled": true,
     "firstName": "'"${NEW_USER}"'",
-    "lastName": "Demo",
-    "email": "'"${NEW_USER}"'@demo.local",
+    "lastName": "Meridian",
+    "email": "'"${NEW_USER}"'@meridian.demo.local",
     "emailVerified": true,
     "credentials": [{"type": "password", "value": "'"${NEW_PASS}"'", "temporary": false}],
     "requiredActions": []
@@ -55,7 +58,7 @@ USER_UUID=$(curl -sk \
   | jq -r '.[0].id')
 
 # Assign realm roles
-for ROLE_NAME in openshell-user offline_access mcp-server-a-user; do
+for ROLE_NAME in openshell-user offline_access banker; do
   ROLE_JSON=$(curl -sk \
     "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/roles/${ROLE_NAME}" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}")
@@ -157,7 +160,7 @@ openshell provider refresh rotate "user-${NEW_USER}" \
 ## 4. Create a sandbox and authorize
 
 ```bash
-SERVER_NAME="mcp-server-a"
+SERVER_NAME="mcp-portfolio"
 MCP_URL="http://${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
 
 openshell sandbox create --name "demo-${NEW_USER}" --workspace "${NEW_USER}" -- true

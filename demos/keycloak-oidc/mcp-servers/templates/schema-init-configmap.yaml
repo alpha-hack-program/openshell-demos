@@ -1,0 +1,170 @@
+{{- $needed := false -}}
+{{- range .Values.servers -}}
+  {{- if .database -}}{{- $needed = true -}}{{- end -}}
+{{- end -}}
+{{- if $needed }}
+# Single source of truth for the shared banking-demo schema. Previously each
+# of mcp-portfolio/mcp-crm-calendar ran `sqlx::migrate!` against its own
+# bundled copy of this SQL at startup, which meant the copies had to stay
+# byte-identical or sqlx's shared `_sqlx_migrations` checksum table would
+# reject whichever service started second. Owning the DDL here instead of in
+# either service's binary removes that failure mode entirely — see
+# schema-init-job.yaml, which applies these files once per `helm
+# install`/`upgrade` via a post-install/post-upgrade hook. Each MCP server
+# now only does a fail-fast existence check for the tables it needs (see its
+# own mcp_server.rs) instead of creating/migrating anything itself.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-servers-schema-sql
+  labels:
+    app.kubernetes.io/name: mcp-servers-schema-init
+    app.kubernetes.io/part-of: mcp-servers
+data:
+  0001_init.sql: |
+    CREATE TABLE IF NOT EXISTS bankers (
+        id TEXT PRIMARY KEY,              -- matches preferred_username from the JWT
+        name TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS clients (
+        id TEXT PRIMARY KEY,
+        banker_id TEXT NOT NULL REFERENCES bankers(id),
+        name TEXT NOT NULL,
+        risk_profile TEXT NOT NULL CHECK (risk_profile IN ('conservative', 'moderate', 'aggressive')),
+        kyc_status TEXT NOT NULL CHECK (kyc_status IN ('complete', 'pending')),
+        pep_flag BOOLEAN NOT NULL DEFAULT FALSE,
+        sector_focus TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_clients_banker_id ON clients(banker_id);
+
+    CREATE TABLE IF NOT EXISTS positions (
+        id TEXT PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id),
+        ticker TEXT NOT NULL,
+        isin TEXT,
+        sector TEXT NOT NULL,
+        quantity NUMERIC(18,4) NOT NULL,
+        price NUMERIC(18,4) NOT NULL,
+        market_value NUMERIC(18,4) NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'EUR'
+    );
+    CREATE INDEX IF NOT EXISTS idx_positions_client_id ON positions(client_id);
+
+    CREATE TABLE IF NOT EXISTS transactions (
+        id TEXT PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id),
+        transaction_type TEXT NOT NULL CHECK (transaction_type IN ('buy', 'sell', 'deposit', 'withdrawal')),
+        amount NUMERIC(18,4) NOT NULL,
+        origin_country TEXT,
+        date TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_transactions_client_id ON transactions(client_id);
+
+    CREATE TABLE IF NOT EXISTS performance_snapshots (
+        id TEXT PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id),
+        period TEXT NOT NULL CHECK (period IN ('MTD', 'QTD', 'YTD')),
+        twr NUMERIC(9,6) NOT NULL,
+        benchmark_twr NUMERIC(9,6) NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_performance_snapshots_client_id ON performance_snapshots(client_id);
+
+    CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        risk_rating TEXT NOT NULL CHECK (risk_rating IN ('conservative', 'moderate', 'aggressive')),
+        asset_class TEXT NOT NULL,
+        sector TEXT,
+        min_investment NUMERIC(18,4) NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS meetings (
+        id TEXT PRIMARY KEY,
+        banker_id TEXT NOT NULL REFERENCES bankers(id),
+        client_id TEXT NOT NULL REFERENCES clients(id),
+        datetime TIMESTAMPTZ NOT NULL,
+        notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_meetings_banker_id ON meetings(banker_id);
+    CREATE INDEX IF NOT EXISTS idx_meetings_client_id ON meetings(client_id);
+
+    -- Idempotent seeds
+    INSERT INTO bankers (id, name) VALUES ('alice','Alice'), ('bob','Bob'), ('charlie','Charlie')
+      ON CONFLICT (id) DO NOTHING;
+    INSERT INTO clients (id, banker_id, name, risk_profile, kyc_status, pep_flag, sector_focus) VALUES
+      ('cli-001','bob','Clara Fontán','moderate','complete',false,'logistics'),
+      ('cli-002','bob','Grupo Delta Textil','aggressive','complete',false,'textile'),
+      ('cli-003','bob','Marcus Wren','conservative','complete',false,'import'),
+      ('cli-004','alice','Elena Duarte','moderate','complete',false,'technology'),
+      ('cli-005','charlie','Fundación Iris','conservative','pending',true,'health')
+      ON CONFLICT (id) DO NOTHING;
+    -- cli-003/cli-004/cli-005 originally had NO positions or performance
+    -- rows at all (only Bob's first two clients did) — found live while
+    -- testing Scene 6's AUM-driven tax scenario, where Elena Duarte's
+    -- "biggest client" AUM came back empty and get_top_client_by_aum()
+    -- errored outright (its query INNER JOINs positions, so a client with
+    -- none never appears). Added one position + one MTD performance
+    -- snapshot per client below so every banker's book has *something* to
+    -- query, not just Bob's. Verified this doesn't change any
+    -- already-documented check_suitability result: prod-001/prod-002 (the
+    -- two products Scene 5b exercises against Fundación Iris) both have
+    -- sector = NULL, and check_suitability's concentration check always
+    -- returns 0% when the product itself has no sector, regardless of the
+    -- client's actual positions — see kyc_service.rs's check_suitability.
+    INSERT INTO positions (id, client_id, ticker, isin, sector, quantity, price, market_value, currency) VALUES
+      ('pos-001','cli-001','NDFR','XX0000000001','logistics',500,42.10,21050,'EUR'),
+      ('pos-002','cli-001','OCLN','XX0000000002','logistics',200,88.50,17700,'EUR'),
+      ('pos-003','cli-002','DLTX','XX0000000003','textile',1000,15.30,15300,'EUR'),
+      ('pos-004','cli-003','TRXN','XX0000000004','import',300,68.00,20400,'EUR'),
+      ('pos-005','cli-004','QNTX','XX0000000005','technology',150,220.00,33000,'EUR'),
+      ('pos-006','cli-005','MEDX','XX0000000006','health',400,45.00,18000,'EUR')
+      ON CONFLICT (id) DO NOTHING;
+    INSERT INTO performance_snapshots (id, client_id, period, twr, benchmark_twr) VALUES
+      ('perf-001','cli-001','MTD',0.021,0.015),
+      ('perf-002','cli-002','MTD',-0.034,0.015),
+      ('perf-003','cli-003','MTD',0.008,0.015),
+      ('perf-004','cli-004','MTD',0.045,0.015),
+      ('perf-005','cli-005','MTD',0.006,0.015)
+      ON CONFLICT (id) DO NOTHING;
+    -- mcp-kyc-compliance's check_suitability catalog. Deliberately covers
+    -- every combination its logic branches on (risk_rating vs client's
+    -- risk_profile; sector vs the client's existing sector concentration
+    -- in positions) rather than being a realistic product lineup:
+    --   prod-001 (conservative, no sector) — suitable for everyone.
+    --   prod-002 (moderate, no sector) — suitable for moderate/aggressive
+    --     clients, blocked on risk for conservative ones (Marcus Wren,
+    --     Fundación Iris).
+    --   prod-003 (moderate, logistics) — risk is fine for Clara Fontán
+    --     (moderate), but she's already 100% concentrated in logistics
+    --     (pos-001/pos-002) — blocked on concentration, not risk.
+    --   prod-004 (aggressive, textile) — same shape for Grupo Delta Textil
+    --     (aggressive, 100% textile via pos-003) — blocked on
+    --     concentration despite matching risk rating exactly.
+    --   prod-005 (aggressive, technology) — blocked on risk for Elena
+    --     Duarte (moderate); now also blocked on concentration since
+    --     pos-005 makes her 100% technology, but risk alone already fails
+    --     it regardless (both conditions are AND'd, neither short-circuits
+    --     the other, per check_suitability's implementation).
+    --   prod-006 (moderate, import) — blocked on risk for Marcus Wren
+    --     (conservative); pos-004 (his one import-sector position) doesn't
+    --     change that, same reasoning as prod-005 above.
+    INSERT INTO products (id, name, risk_rating, asset_class, sector, min_investment) VALUES
+      ('prod-001','Meridian Capital Preservation Note','conservative','fixed_income',NULL,2000),
+      ('prod-002','Meridian Balanced Growth Fund','moderate','balanced',NULL,10000),
+      ('prod-003','Meridian Global Logistics Equity Fund','moderate','equity','logistics',15000),
+      ('prod-004','Meridian Textile Sector Note','aggressive','structured_note','textile',25000),
+      ('prod-005','Meridian Technology Innovation Fund','aggressive','equity','technology',20000),
+      ('prod-006','Meridian Import Trade Finance Fund','moderate','fixed_income','import',12000)
+      ON CONFLICT (id) DO NOTHING;
+  0002_meetings_seed.sql: |
+    -- meetings seed data specific to the mcp-crm-calendar demo track.
+    -- Kept separate from 0001_init.sql purely for readability now that
+    -- schema application is centralized here instead of split across
+    -- three independent sqlx projects.
+    INSERT INTO meetings (id, banker_id, client_id, datetime, notes) VALUES
+      ('mtg-001','bob','cli-001','2026-08-24T10:00:00Z','Review logistics exposure after the port tariff increase discussed last time.'),
+      ('mtg-002','bob','cli-002','2026-08-25T16:30:00Z',NULL),
+      ('mtg-003','alice','cli-004','2026-08-24T09:00:00Z',NULL),
+      ('mtg-004','charlie','cli-005','2026-08-26T11:00:00Z','Annual KYC review follow-up — confirm source-of-funds documentation before renewing PEP monitoring.')
+      ON CONFLICT (id) DO NOTHING;
+{{- end }}

@@ -1,0 +1,37 @@
+# UBI9 has no official rust-toolset image (unlike python/nodejs/ruby),
+# so the builder stage is plain ubi9/ubi + rustup, same as the reference
+# repo (alpha-hack-program/elegibility-engine-mcp-rs).
+FROM registry.access.redhat.com/ubi9/ubi:9.6 AS builder
+
+RUN dnf install -y gcc gcc-c++ make pkg-config && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+ENV RUSTUP_HOME=/opt/rust
+ENV CARGO_HOME=/opt/rust
+ENV PATH=/opt/rust/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain stable --no-modify-path
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --release --bin mcp_server
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
+
+# Schema is applied once for the whole demo by the mcp-servers Helm chart's
+# schema-init hook Job, not by this binary — nothing else is needed at runtime.
+COPY --from=builder /build/target/release/mcp_server /usr/local/bin/mcp_server
+
+WORKDIR /opt/app-root
+
+RUN chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
+
+USER 1001
+
+ENV BIND_ADDRESS=0.0.0.0:8004
+EXPOSE 8004
+
+ENTRYPOINT ["/usr/local/bin/mcp_server"]

@@ -1,0 +1,32 @@
+name: CI mcp-kyc-compliance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mcp/mcp-kyc-compliance/**']
+  pull_request:
+    paths: ['mcp/mcp-kyc-compliance/**']
+
+defaults:
+  run:
+    working-directory: mcp/mcp-kyc-compliance
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  test:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: make build
+      - run: make test

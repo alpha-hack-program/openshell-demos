@@ -1,0 +1,23 @@
+name: CI mcp-crm-calendar
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mcp/mcp-crm-calendar/**']
+  pull_request:
+    paths: ['mcp/mcp-crm-calendar/**']
+
+defaults:
+  run:
+    working-directory: mcp/mcp-crm-calendar
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check

@@ -30,6 +30,112 @@ envoy:
   # Fine for evaluation, never for production.
   insecureSkipVerifyJwks: true
 
+# Shared PostgreSQL instance for the mcp-portfolio / mcp-crm-calendar /
+# mcp-market-news family. Schema + seed data are NOT applied by any of those
+# services anymore — they're owned once, centrally, by
+# templates/schema-init-configmap.yaml + templates/schema-init-job.yaml (a
+# post-install/post-upgrade Helm hook Job). Each service just does a
+# fail-fast existence check for the tables it needs on startup. This
+# replaced an earlier design where mcp-portfolio and mcp-crm-calendar each
+# ran their own `sqlx::migrate!` against a bundled, supposedly
+# byte-identical copy of the schema — any drift between those copies made
+# sqlx's shared `_sqlx_migrations` checksum table reject whichever service
+# started second. Only rendered/used when at least one entry in `servers`
+# sets `database: true`.
+#
+# Same template as the evalhub demo namespace's own `evalhub-db` Deployment
+# (`oc get deployment evalhub-db -n evalhub -o yaml`): the OpenShift-internal
+# `postgresql:15-el9` ImageStreamTag from the `openshift` namespace, plain
+# POSTGRESQL_DATABASE/USER/PASSWORD env vars, no PVC. That means data is
+# ephemeral — wiped on every pod restart — same known tradeoff evalhub-db
+# already accepts for its own demo-only use. The schema-init Job's DDL is
+# idempotent (CREATE TABLE IF NOT EXISTS, INSERT ... ON CONFLICT DO NOTHING),
+# but unlike the old per-service sqlx::migrate! design, it only reruns on a
+# Helm hook (install/upgrade) — NOT every time an app pod restarts. If
+# mcp-postgres restarts on its own between Helm runs (OOM, node drain, `oc
+# delete pod`), it comes back empty and the schema-init Job does not
+# automatically rerun: mcp-portfolio/mcp-crm-calendar will correctly refuse
+# to start (fail-fast) until someone runs `helm upgrade --install` again (or
+# manually re-triggers the Job) to reseed. Known, accepted gap for this demo
+# — surfaced loudly via CrashLoopBackOff rather than silently.
+postgres:
+  image:
+    repository: "image-registry.openshift-image-registry.svc:5000/openshift/postgresql"
+    tag: "15-el9"
+    pullPolicy: IfNotPresent
+  database: "mcpdemo"
+  user: "mcpdemo"
+  # Demo-only hardcoded credential (see AGENTS.md §3) — generate a unique
+  # secret per environment before using this outside a throwaway demo.
+  password: "mcpdemo-demo-password"
+  resources: {}
+
+# Config for the news_generator initContainer + GENERATION_MODE=loop
+# sidecar that back mcp-market-news (see that server's `newsGenerator:
+# true` flag below, and templates/deployment.yaml for the actual
+# containers/PVC). Kept at the TOP level, not inside `servers:`, so
+# `openaiApiKey` can be safely overridden with a plain `--set
+# newsGenerator.openaiApiKey=...` from 06-deploy-mcp-servers.sh — putting
+# it inside a `servers[N]` list entry would hit the documented `--set`
+# list-merge gotcha above.
+newsGenerator:
+  # Secret — intentionally left empty here, never commit a real key.
+  # 06-deploy-mcp-servers.sh passes it via --set, sourced from this demo's
+  # own .env (OPENAI_API_KEY), the same way keycloak.issuer above is
+  # derived from KEYCLOAK_HOST.
+  openaiApiKey: ""
+  # Reuses this demo's existing BYO-LLM DeepSeek endpoint (see
+  # demos/keycloak-oidc/.env and the README's "Codex + BYO LLM" recipe) —
+  # not secret, safe to default here; override via --set if you want a
+  # different provider/model.
+  openaiBaseUrl: "https://api.deepseek.com"
+  openaiModel: "deepseek-v4-flash"
+  intervalMinutes: 5
+  batchSize: 5
+  pvcSize: "1Gi"
+
+# Shared semantic-search embeddings backend for mcp-market-news and
+# mcp-kyc-compliance: jinaai/jina-embeddings-v3 served via vLLM CPU
+# inference behind a KServe InferenceService (see templates/embeddings.yaml
+# for the full rationale, including what was deliberately simplified vs.
+# the alpha-hack-program/llama-stack-demo deployment this was modeled on).
+# Explicit choice: KServe/RawDeployment, not a plain Deployment — matches
+# this demo family's other RHOAI-based demo instead of hand-rolling a
+# second way to serve a model. Requires the RHOAI operator with
+# KServe/ModelServing enabled — see this demo's README "Prerequisites".
+# Cluster-local only: no Route, consumed purely in-namespace by the
+# mcp-server Deployments below via `needsEmbeddings: true` (injects
+# EMBEDDINGS_BASE_URL/EMBEDDINGS_MODEL — see templates/deployment.yaml).
+# vectorDimension is informational here (documents what callers should
+# expect back); nothing in this chart enforces it.
+embeddings:
+  enabled: true
+  name: "jina-embeddings-v3-cpu"
+  model: "jinaai/jina-embeddings-v3"
+  # ModelCar: model weights ship as an OCI image, pulled directly by
+  # KServe's storage-initializer. Same public image
+  # alpha-hack-program/llama-stack-demo already publishes/uses — not
+  # rebuilt here.
+  image: "quay.io/atarazana/modelcar-catalog:jina-embeddings-v3"
+  vectorDimension: 1024
+  maxModelLen: "8192"
+  # The hardware profile name/namespace actually available depends on how
+  # RHOAI was installed on the target cluster — this is NOT a portable
+  # constant. "default-cpu" (the reference deployment's own name) does not
+  # exist on every cluster; "default-profile" is what was actually present
+  # (`oc get hardwareprofiles -n redhat-ods-applications`) on the cluster
+  # this was first deployed against (2 CPU/4Gi default, up to 4 CPU/8Gi —
+  # fits the resources block below). Re-check and override per cluster.
+  hardwareProfile: "default-profile"
+  runtimeImage: "registry.redhat.io/rhaiis/vllm-cpu-rhel9@sha256:f05e773647dddd37ec6c2215cb14bec87e4ab5a7d37f2e110d16cd92355427d3"
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 4Gi
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
@@ -47,26 +153,102 @@ envoy:
 # fields (name, port, requiredRole). Pass a full replacement values file
 # (all fields for that server) instead.
 servers:
-  - name: mcp-server-a
-    image:
-      repository: "quay.io/atarazana/elegibility-engine-mcp-rs"
-      tag: "2.4.1"
-      pullPolicy: IfNotPresent
-    port: 8000              # Envoy listens here; Service targets this
-    internalPort: 8001      # app's own hardcoded default when unconfigured
-                             # (confirmed for this image via testing)
-    requiredRole: "mcp-server-a-user"
-    statefulMode: false
-    resources: {}
-  - name: mcp-server-b
+  # Alice's extra permission (the theme's "compatibility-users" group) —
+  # granted only to her, unrelated to the `banker` role every banker holds.
+  # Same image as the old generic Path B "mcp-server-b" placeholder, just
+  # renamed + re-roled to match the Meridian Private Bank theme.
+  - name: mcp-compatibility
     image:
       repository: "quay.io/atarazana/compatibility-engine-mcp-rs"
       tag: "3.2.0"
       pullPolicy: IfNotPresent
     port: 8000
-    internalPort: 8001      # [VERIFY] assumed same default as mcp-server-a
-                             # (same author/framework) — not individually
-                             # confirmed for this image
-    requiredRole: "mcp-server-b-user"
+    internalPort: 8001      # [VERIFY] not individually confirmed for this image
+    requiredRole: "compatibility-user"
     statefulMode: false
+    resources: {}
+  # The three servers below are this repo's own Rust MCP servers (./mcp/),
+  # built and pushed by .github/workflows/release-mcp-*.yml to
+  # quay.io/atarazana/<name>:<version> and :latest. `latest` is used here
+  # deliberately per that same CI convention. `database: true` makes
+  # deployment.yaml inject DATABASE_URL pointing at the shared postgres
+  # (see postgres: above); mcp-market-news omits it (see next comment).
+  - name: mcp-portfolio
+    image:
+      repository: "quay.io/atarazana/mcp-portfolio"
+      # Pinned (not "latest") deliberately: with imagePullPolicy IfNotPresent,
+      # a floating "latest" tag silently stops updating once a node has any
+      # image cached under that name — pinning to the version that actually
+      # dropped the per-service sqlx::migrate! call guarantees this pulls
+      # the image that expects the Helm chart to own the schema.
+      # 0.1.4 is the version whose list_my_clients exposes risk_profile/
+      # kyc_status/pep_flag/sector_focus (Charlie's KYC scenario needs it).
+      tag: "0.1.4"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8001      # Containerfile: ARG PORT=8001 (confirmed)
+    requiredRole: "mcp-portfolio-user"
+    statefulMode: false
+    database: true
+    resources: {}
+  - name: mcp-crm-calendar
+    image:
+      repository: "quay.io/atarazana/mcp-crm-calendar"
+      # Pinned for the same reason as mcp-portfolio above — see that comment.
+      tag: "0.1.3"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8004      # Containerfile: ENV BIND_ADDRESS=0.0.0.0:8004 (confirmed)
+    requiredRole: "mcp-crm-calendar-user"
+    statefulMode: false
+    database: true
+    resources: {}
+  # mcp-market-news's mcp_server binary does NOT read DATABASE_URL at
+  # request time — it serves from data/news.jsonl + data/news.tv. Tags
+  # 0.1.2/0.1.3 crashlooped (`Error: No such file or directory` in
+  # NewsService::load) on EVERY tag, including these — the image never
+  # contained those two files and nothing in this chart ever created
+  # them; bumping the tag alone could not fix it. The actual fix is
+  # `newsGenerator: true` below: a PVC + initContainer (runs
+  # news_generator once, blocks pod startup until the corpus exists) + a
+  # GENERATION_MODE=loop sidecar (keeps it fresh) + mcp_server's own
+  # periodic reload (NEWS_RELOAD_INTERVAL_MINUTES, added in the same
+  # release as this fix) picking up the sidecar's writes without a
+  # restart. See templates/deployment.yaml and the top-level
+  # `newsGenerator:` block below for the actual wiring. The PVC is no
+  # longer also an HF model cache — since the candle/hf-hub -> vLLM
+  # embeddings-service migration, this server has no local model to
+  # download/cache; `needsEmbeddings: true` points it at the shared
+  # embeddings InferenceService instead (see `embeddings:` above).
+  - name: mcp-market-news
+    image:
+      repository: "quay.io/atarazana/mcp-market-news"
+      tag: "0.2.0"     # 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
+    requiredRole: "mcp-market-news-user"
+    statefulMode: false
+    database: false
+    newsGenerator: true
+    needsEmbeddings: true
+    resources: {}
+  # New 4th MCP server in this demo family (mcp-portfolio / mcp-crm-calendar
+  # / mcp-market-news / mcp-kyc-compliance) — regulatory-guidance search over
+  # a small fictional AML/KYC corpus, plus client risk-profile/suitability
+  # lookups against the same shared postgres as mcp-portfolio. tag "0.1.0"
+  # must actually exist in quay.io/atarazana before `helm upgrade --install`
+  # against this entry will succeed — i.e. that crate's first
+  # release-mcp-kyc-compliance.yml run.
+  - name: mcp-kyc-compliance
+    image:
+      repository: "quay.io/atarazana/mcp-kyc-compliance"
+      tag: "0.1.0"
+      pullPolicy: IfNotPresent
+    port: 8000
+    internalPort: 8003
+    requiredRole: "mcp-kyc-compliance-user"
+    statefulMode: false
+    database: true
+    needsEmbeddings: true
     resources: {}

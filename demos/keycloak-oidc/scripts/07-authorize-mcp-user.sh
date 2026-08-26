@@ -3,7 +3,7 @@ set -euo pipefail
 # Confirms a user holds the Keycloak realm role required for one MCP server,
 # then grants their sandbox policy permission to reach it.
 #
-# Usage: ./07-authorize-mcp-user.sh <user-id> <mcp-server-a|mcp-server-b>
+# Usage: ./07-authorize-mcp-user.sh <user-id> <mcp-compatibility|mcp-portfolio|mcp-crm-calendar|mcp-market-news>
 #
 # Assumes a sandbox named demo-<user-id> already exists in the user's own
 # workspace (named after <user-id>) — this script does not create one.

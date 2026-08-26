@@ -1,0 +1,68 @@
+name: Release onboarding-web
+
+on:
+  push:
+    tags: ['onboarding-web-v*']
+
+env:
+  REGISTRY: ghcr.io
+
+defaults:
+  run:
+    working-directory: util/onboarding-web
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+      - run: cargo build --release
+
+  # The Containerfile builds the binary itself in its own builder stage
+  # (mirrors mcp/mcp-portfolio/Containerfile) — no pre-built artifact to
+  # hand it, unlike agent-proxy's sandbox-image workflow. Pushes to GHCR
+  # with the built-in GITHUB_TOKEN, same pattern as agent-proxy's release
+  # workflow — no extra repo secrets needed.
+  image:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push onboarding-web
+        run: |
+          docker build \
+            -t "$REGISTRY/${{ github.repository }}/onboarding-web:${{ github.ref_name }}" \
+            -t "$REGISTRY/${{ github.repository }}/onboarding-web:latest" \
+            -f util/onboarding-web/Containerfile \
+            util/onboarding-web/
+          docker push "$REGISTRY/${{ github.repository }}/onboarding-web:${{ github.ref_name }}"
+          docker push "$REGISTRY/${{ github.repository }}/onboarding-web:latest"
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: cp target/release/onboarding-web onboarding-web-linux-x86_64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: util/onboarding-web/onboarding-web-linux-x86_64
