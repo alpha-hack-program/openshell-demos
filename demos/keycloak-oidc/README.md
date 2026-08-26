@@ -1082,10 +1082,14 @@ identity admin logs into on the app's behalf, not a banker).
    session — the credential the backend uses to run `provider refresh
    configure`/`refresh rotate` on behalf of whoever logs in through the web
    app. This opens a browser; log in as **`openshell-onboarding-svc`**, not
-   the human admin account:
+   the human admin account. The script needs `ROUTE_HOST` — the *gateway's*
+   Route host, same value computed in [step 2a](#2a-helm-install) — which
+   isn't stored in `.env`, so recompute it here if you're in a fresh shell:
 
    ```bash
    source .env
+   source ../../.env
+   ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
    ./scripts/10-bootstrap-onboarding-web-admin.sh
    ```
 
