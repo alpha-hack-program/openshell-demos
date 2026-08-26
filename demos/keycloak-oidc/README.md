@@ -157,8 +157,6 @@ Practical tips:
   previous session and you get the same banker's token again. The tool's
   success page includes a logout link, or use a private/incognito window
   for each banker.
-- Keep alice's and bob's sandboxes running while you set up and test the
-  others' — the isolation check in step 5 needs all three alive at once.
 
 **Run each identity in its own real terminal, scoped with
 `XDG_CONFIG_HOME`/`XDG_STATE_HOME`.** [Step 5](#5-run-the-demo)'s scenes
