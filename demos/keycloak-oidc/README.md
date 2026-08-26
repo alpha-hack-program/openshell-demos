@@ -139,26 +139,23 @@ whose membership they hold.
 **The one place a real second identity is unavoidable is the Keycloak login
 screen:**
 - Step 2c: **admin** logs in via browser — the admin's own authentication.
-- Step 3, Option B (the `onboard` tool): the browser login inside the tool
-  is **alice/bob/charlie authenticating as themselves** — that's the whole
-  point of Option B, the operator's admin session never sees their
+- Step 3 (the `onboard` tool): the browser login inside the tool is
+  **alice/bob/charlie authenticating as themselves** — that's the whole
+  point of using it, the operator's admin session never sees their
   password. Workspace creation (before the tool runs) and the token
   exchange itself still happen from admin's terminal / the tool's own
-  process.
-- Step 3, Option A (password grant): no separate login at all — admin's
-  script authenticates *as* the banker directly via the token endpoint,
-  using a password the operator was handed. This is why Option A is
-  marked demo-only.
+  process. [`docs/manual-onboarding.md`](docs/manual-onboarding.md) covers
+  the alternative (a password-grant shortcut with no separate login at
+  all) — demo-only, since it requires the operator to know the banker's
+  password.
 
 Practical tips:
 
-- **Keycloak sessions are per-browser.** When onboarding multiple bankers
-  with Option B, log out of Keycloak between them — otherwise the browser
-  reuses the previous session and you get the same banker's token again.
-  The tool's success page includes a logout link, or use a
-  private/incognito window for each banker.
-- With Option A there is no browser session to worry about — just change
-  `USER_ID` and `USER_PASS` in the same terminal.
+- **Keycloak sessions are per-browser.** When onboarding multiple bankers,
+  log out of Keycloak between them — otherwise the browser reuses the
+  previous session and you get the same banker's token again. The tool's
+  success page includes a logout link, or use a private/incognito window
+  for each banker.
 - Keep alice's and bob's sandboxes running while you set up and test the
   others' — the isolation check in step 5 needs all three alive at once.
 
@@ -860,26 +857,24 @@ This is the `whoami` check every later step (starting with
 
 ### 3. Onboard a banker
 
-Onboarding is a **two-step process by design**. OpenShell's Providers v2
-manages the *lifecycle* of a credential (refresh, rotate, inject into
-sandboxes) but leaves the *initial acquisition* of that credential to your
-identity plumbing. The upstream docs jump straight to
-`--material refresh_token=<value>` and assume you already have it — this
-section explains how to get it.
+Onboarding needs a long-lived **offline refresh token** (not a short-lived
+access token), because the gateway uses it to silently mint fresh access
+tokens on the banker's behalf over time, without the banker being logged
+in. OpenShell's Providers v2 manages that credential's *lifecycle* (refresh,
+rotate, inject into sandboxes) but leaves *initial acquisition* to your
+identity plumbing — the upstream docs jump straight to `--material
+refresh_token=<value>` and assume you already have it.
 
-You need a long-lived **offline refresh token** (not a short-lived access
-token) because the gateway uses it to silently mint fresh access tokens on
-the user's behalf over time, without the user being logged in.
+The `onboard` CLI tool below gets you one: it drives a real browser-based
+OAuth login as the banker themselves (the operator never sees their
+password) and wires the resulting token into OpenShell automatically. If
+you want the manual, step-by-step equivalent instead — useful for
+understanding what `onboard` does internally, onboarding without the
+binary, or a fully-controlled demo/test environment where a
+password-grant shortcut is acceptable — see
+[`docs/manual-onboarding.md`](docs/manual-onboarding.md).
 
-Two options for obtaining the token:
-
-- **Option A** uses a direct password grant — fast but demo-only, since the
-  operator must know the user's password.
-- **Option B** uses the `onboard` CLI tool to automate a browser-based
-  OAuth flow — the user logs in directly with Keycloak and the operator
-  never sees their password.
-
-#### Step 3.0 — Create the user's own workspace (do this first, either option)
+#### Step 3.0 — Create the user's own workspace
 
 **Every banker needs their own OpenShell workspace before onboarding.** See
 [Workspace isolation](#workspace-isolation) above for why: workspace
@@ -887,8 +882,7 @@ membership grants access to *every* sandbox in that workspace, not just
 your own, so putting multiple bankers in one shared workspace (including
 `default`) breaks the per-banker isolation this whole demo is about. This
 step is admin-only (creating a workspace and granting membership are
-Platform Admin operations) and only needs to run once per banker, before
-either Option A or B below:
+Platform Admin operations) and only needs to run once per banker:
 
 ```bash
 # Terminal A — admin
@@ -921,108 +915,68 @@ Repeat with `USER_ID="bob"` and `USER_ID="charlie"`. From here on, every
 `--workspace "${USER_ID}"` — don't drop it, and don't reuse one banker's
 workspace for another.
 
-#### Step 3a — Obtain the user's refresh token
+#### Step 3a — Onboard the banker with the `onboard` tool
 
-**Who runs this:** both options below run entirely from **Terminal A —
-admin**. Option A has no separate banker identity at all — that's exactly
-why it's demo-only (admin's own script authenticates *as* the banker using a
-password the operator shouldn't legitimately know). Option B does involve a
-second, real identity, but not a second terminal: the `onboard` binary
-itself still runs in Terminal A (it shells out to `openshell provider
-create`/`refresh configure`/`refresh rotate`, which require admin — see
-[step 3b](#step-3b--store-the-refresh-token-in-openshell)), while the
-*browser tab it opens* is where the actual banker logs in as themselves.
-That's the one genuine identity switch in this step — a login form, not a
+**Who runs this:** the `onboard` binary itself runs in **Terminal A —
+admin** (it shells out to `openshell provider create`/`refresh
+configure`/`refresh rotate`, which require the Platform Admin role), but
+the *browser tab it opens* is where the banker logs in as themselves —
+the one genuine identity switch in this step, a login form, not a
 terminal.
 
-**Option A — Password grant (demo only)**
-
-Only works because you control both sides and know the demo banker's
-password. Not viable in production — the operator must never know user
-credentials.
+Install the pre-built binary once — no Rust toolchain needed. Check
+[the Releases page](https://github.com/alpha-hack-program/openshell-demos/releases)
+for the current `onboard-v*` tag first: the repo's overall "latest"
+release tracks the main chart version, not `onboard`, so
+`releases/latest/download/...` 404s — use the explicit tag shown below (or
+whichever is newer):
 
 ```bash
-# Terminal A — admin
-openshell whoami   # confirm: Name: openshell-admin
-
-source .env
-
-USER_ID="alice"
-USER_PASS="<the-bankers-password>"
-
-REFRESH_TOKEN=$(curl -sk -X POST \
-  "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
-  -d "grant_type=password" \
-  -d "client_id=${KEYCLOAK_CLIENT_ID_CLI}" \
-  -d "username=${USER_ID}" \
-  -d "password=${USER_PASS}" \
-  -d "scope=openid offline_access" \
-  | jq -r '.refresh_token')
+# Linux (x86_64) — macOS (Apple Silicon): swap the asset for onboard-macos-aarch64
+curl -fsSL -o onboard \
+  https://github.com/alpha-hack-program/openshell-demos/releases/download/onboard-v0.1.2/onboard-linux-x86_64
+chmod +x onboard
+sudo install onboard /usr/local/bin/
 ```
 
-Then continue to [step 3b](#step-3b--store-the-refresh-token-in-openshell) to
-store the token.
-
-**Option B — `onboard` utility (browser-based OAuth flow)**
-
-The `onboard` CLI tool in [`util/onboard/`](../../util/onboard/) automates
-the full flow: opens the browser for the banker to log in, listens for the
-OAuth callback, exchanges the authorization code for a refresh token, and
-runs the OpenShell provider commands from
-[step 3b](#step-3b--store-the-refresh-token-in-openshell) automatically.
+Then onboard each banker. `-u` sets the user ID (also the default
+`--workspace` and the provider name, `user-<id>`), and `--profile` points
+at the provider profile that defines the credential refresh strategy:
 
 ```bash
 # Terminal A — admin
 openshell whoami   # confirm: Name: openshell-admin — the tool's own
                     # `provider create` call needs this, even though the
-                    # browser tab it's about to open is alice logging in
-                    # as herself, not admin
-
+                    # browser tab it's about to open is the banker logging
+                    # in as themselves, not admin
 source .env
 
-# Build once (requires Rust)
-cd ../../util/onboard && cargo build --release && cd -
-
-# Onboard alice — opens a browser, waits for login, creates the provider
-../../util/onboard/target/release/onboard \
-  -u alice \
-  --profile providers/user-refresh-profile.yaml
+USER_ID="alice"
+onboard -u "$USER_ID" --profile providers/user-refresh-profile.yaml
 ```
 
-Or use the shell wrapper (sources `.env` automatically, still Terminal A):
-
-```bash
-../../util/onboard/onboard.sh \
-  -u alice \
-  --profile providers/user-refresh-profile.yaml
-```
-
-The `--profile` flag is required — it tells the tool which provider profile
-to import. The profile defines the credential refresh strategy (how the
-gateway obtains fresh access tokens from Keycloak on the user's behalf). See
-[step 3b](#step-3b--store-the-refresh-token-in-openshell) for what the
-profile contains and why it matters.
+This opens a browser, waits for `alice` to log in, and creates her
+provider automatically. **Repeat with `USER_ID="bob"` and
+`USER_ID="charlie"`, logging out of Keycloak between each** (use the link
+on the tool's success page, or a private/incognito window) — otherwise the
+browser reuses the previous session and you get the same banker's token
+again.
 
 > The profile at `providers/user-refresh-profile.yaml` contains two
-> placeholders (`<keycloak-host>` and `<openshell-namespace>`) — unlike the
-> manual [step 3b](#step-3b--store-the-refresh-token-in-openshell) flow,
-> **you do not need to `sed` them yourself**: `onboard` substitutes both
-> before importing, reading the namespace from `--namespace` or the
-> `OPENSHELL_NAMESPACE` env var (`onboard.sh` already sources this from
-> `.env`). Running `onboard` unmodified against this demo's `.env` produces
-> a correctly-substituted profile with real endpoint hosts, not literal
-> placeholder text.
+> placeholders (`<keycloak-host>` and `<openshell-namespace>`) — `onboard`
+> substitutes both before importing, reading the namespace from
+> `--namespace` or the `OPENSHELL_NAMESPACE` env var (already set by
+> `source .env` above). Running it unmodified against this demo's `.env`
+> produces a correctly-substituted profile with real endpoint hosts, not
+> literal placeholder text.
 
 > **Workspace targeting.** `onboard` defaults `--workspace` to the user ID
 > (`-u alice` → workspace `alice`), matching
-> [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option)
-> above. It does not create the workspace or grant membership itself — that
-> must already exist, or `provider create` will fail with `"not a member of
+> [step 3.0](#step-30--create-the-users-own-workspace) above. It does not
+> create the workspace or grant membership itself — that must already
+> exist, or `provider create` will fail with `"not a member of
 > workspace"`. Override with `--workspace <name>` or `OPENSHELL_WORKSPACE`
 > if you're using a different naming scheme.
-
-Pre-built binaries for Linux (x86_64) and macOS (aarch64) are available from
-[GitHub Releases](../../releases) — download, `chmod +x`, and run.
 
 Useful flags:
 - `--token-only` — stop after obtaining the refresh token, print it to
@@ -1032,102 +986,7 @@ Useful flags:
 - `--dry-run` — show the OpenShell CLI commands without executing them
 - `--timeout <secs>` — how long to wait for the user to log in (default 120s)
 
-To onboard the next banker, log out of Keycloak first (use the link on the
-success page or open an incognito window), then run the same command with
-`-u bob`, then again with `-u charlie`.
-
-If you used Option B, step 3b is already done — the tool runs the same
-commands shown below. Skip to [step 4](#4-deploy-mcp-servers).
-
-#### Step 3b — Store the refresh token in OpenShell
-
-This is what OpenShell owns. The **provider profile** defines the credential
-refresh strategy — how the gateway obtains fresh access tokens from Keycloak
-on the user's behalf. The **provider instance** stores each user's refresh
-token and is linked to the profile.
-
-The profile defines both the credential refresh strategy and the
-**endpoint binding** — which endpoints the proxy is allowed to inject the
-credential for. In 0.0.106+, credentials are only delivered to sandboxes
-when the profile includes matching endpoints (this is a security
-enhancement that prevents credentials from leaking to unintended
-destinations). Envoy RBAC at each MCP server still enforces role-based
-access — the endpoint binding only tells the proxy "you may inject this
-credential for requests to these hosts."
-
-**Who runs this:** Terminal A — admin, throughout (provider profile
-import/create/refresh-configure/refresh-rotate all require the Platform
-Admin role, even inside a banker's own workspace — see
-[Workspace isolation](#workspace-isolation)).
-
-First, import the provider profile. The profile at
-`providers/user-refresh-profile.yaml` contains two placeholders:
-`<keycloak-host>` in `token_url` and `<openshell-namespace>` in the MCP
-server endpoint hostnames. Replace both with your actual values:
-
-```bash
-# Terminal A — admin
-openshell whoami   # confirm: Name: openshell-admin
-
-source .env
-
-USER_ID="alice"
-
-TMPFILE=$(mktemp --suffix=.yaml)
-sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
-    -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
-    providers/user-refresh-profile.yaml > "$TMPFILE"
-openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
-rm -f "$TMPFILE"
-```
-
-Then create a provider for the user and configure automatic token refresh —
-note `--workspace "${USER_ID}"` on every command, targeting the workspace
-created in [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option):
-
-```bash
-# Create the provider — this links the user to the profile's refresh strategy
-openshell provider create \
-  --name "user-${USER_ID}" \
-  --type user-scoped-api \
-  --credential USER_ACCESS_TOKEN=pending \
-  --workspace "${USER_ID}"
-
-# Store the user's refresh token and configure automatic rotation
-openshell provider refresh configure "user-${USER_ID}" \
-  --credential-key USER_ACCESS_TOKEN \
-  --strategy oauth2-refresh-token \
-  --material client_id="${KEYCLOAK_CLIENT_ID_CLI}" \
-  --material refresh_token="${REFRESH_TOKEN}" \
-  --secret-material-key refresh_token \
-  --workspace "${USER_ID}"
-
-# Trigger the first rotation to verify everything works
-openshell provider refresh rotate "user-${USER_ID}" \
-  --credential-key USER_ACCESS_TOKEN \
-  --workspace "${USER_ID}"
-```
-
-From this point forward, the gateway's refresh worker automatically mints
-short-lived access tokens and rotates the refresh token whenever the IdP
-returns a new one. The user just does `openshell sandbox connect` and gets a
-sandbox with a live credential — they never see a token.
-
-> **Why three separate commands?** A provider profile can define *multiple*
-> credentials, each with its own refresh strategy, token endpoint, and
-> timing. `provider create` registers the credential keys the provider will
-> manage. `refresh configure` binds a specific strategy and the per-user
-> material (the actual refresh token) to each credential key — one call per
-> key. `refresh rotate` triggers the first token exchange to verify the
-> wiring. The `--strategy` flag on `refresh configure` is not redundant
-> with the profile: when a profile declares several credentials with
-> different strategies, the flag tells the gateway which strategy applies to
-> which credential key on this particular provider instance.
-
-> The script `scripts/03-onboard-user.sh <user-id> <refresh-token>` wraps
-> these same commands — and also does
-> [step 3.0](#step-30--create-the-users-own-workspace-do-this-first-either-option)
-> for you (workspace create + membership), so it's safe to run standalone.
+Once all three bankers are onboarded, skip to [step 4](#4-deploy-mcp-servers).
 
 ### 4. Deploy MCP servers
 
@@ -2383,11 +2242,11 @@ Results: 19 passed, 0 failed
       (`"not a member of workspace"` / `"workspace role 'admin' required"`).
       See [Workspace isolation](#workspace-isolation)
 - [x] Providers v2 enabled
-- [x] All three demo bankers onboarded via **Option B** (the `onboard`
-      tool), each with their own provider in their own workspace: the
-      operator's admin session creates the workspace and runs the
-      provider-creation commands, while the OAuth browser login is driven
-      by the banker authenticating as themselves — the operator never sees
+- [x] All three demo bankers onboarded via the `onboard` tool, each with
+      their own provider in their own workspace: the operator's admin
+      session creates the workspace and runs the provider-creation
+      commands, while the OAuth browser login is driven by the banker
+      authenticating as themselves — the operator never sees
       their password
 - [x] Isolation test passes: `08-verify-isolation.sh` (workspace- and
       tenant-aware) — 19 passed, 0 failed
