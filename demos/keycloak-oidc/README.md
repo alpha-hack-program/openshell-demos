@@ -721,6 +721,13 @@ Route host doubles the `openshell-` prefix if the namespace already starts
 with it, which can push the Let's Encrypt certificate's CommonName over
 the 64-byte X.509 limit.
 
+Recommended `.env` values for this optional path:
+
+```bash
+CERT_MANAGER=true
+LETSENCRYPT_CLUSTER_ISSUER=letsencrypt-prod
+```
+
 ```bash
 source .env
 source ../../.env
