@@ -463,10 +463,14 @@ after it runs, so you'll come back and complete your `.env` then.
 
 The realm JSON at `keycloak/realm-export.json` is ready to import as-is —
 no substitution needed. The gateway client secret is hardcoded as
-`openshell-gateway-demo-secret` (along with the three demo bankers'
-passwords — `alice`/`alice`, `bob`/`bob`, `charlie`/`charlie`). This keeps
-the demo simple; in production you would generate a unique secret per
-environment.
+`openshell-gateway-demo-secret`. **Every user in this realm has a password
+equal to their username** — `alice`/`alice`, `bob`/`bob`,
+`charlie`/`charlie`, `openshell-admin`/`openshell-admin`, and
+`openshell-onboarding-svc`/`openshell-onboarding-svc` — so whenever a step
+below opens a browser and asks you to log in as one of these accounts,
+that's the password to type. This keeps the demo simple; in production you
+would generate a unique secret/password per environment and never reuse
+username as password.
 
 Optionally, run the helper script to verify your `.env` values match:
 
@@ -858,7 +862,9 @@ Keycloak:
 openshell gateway login
 ```
 
-Log in as the admin user (the one with the `openshell-admin` realm role).
+Log in as `openshell-admin` / `openshell-admin` (the account with the
+`openshell-admin` realm role — see the credentials note in
+[step 1a](#1a-check-the-realm-json)).
 
 #### 2d. Enable Providers v2
 
@@ -1081,8 +1087,10 @@ identity admin logs into on the app's behalf, not a banker).
 2. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
    session — the credential the backend uses to run `provider refresh
    configure`/`refresh rotate` on behalf of whoever logs in through the web
-   app. This opens a browser; log in as **`openshell-onboarding-svc`**, not
-   the human admin account. The script needs `ROUTE_HOST` — the *gateway's*
+   app. This opens a browser; log in as **`openshell-onboarding-svc`** /
+   `openshell-onboarding-svc` (see the credentials note in
+   [step 1a](#1a-check-the-realm-json)), not the human admin account. The
+   script needs `ROUTE_HOST` — the *gateway's*
    Route host, same value computed in [step 2a](#2a-helm-install) — which
    isn't stored in `.env`, so recompute it here if you're in a fresh shell:
 
