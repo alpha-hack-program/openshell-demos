@@ -569,13 +569,15 @@ OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
    ```
 
 5. Grab the admin credentials created by the Operator — you'll need them
-   to log into the admin console in the next step:
+   to log into the admin console in the next step. Set them as
+   `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` in this demo's `.env`
+   (used later by `03-onboard-user.sh` and `07-authorize-mcp-user.sh`):
 
    ```bash
-   oc -n keycloak get secret keycloak-initial-admin \
-     -o jsonpath='{.data.username}' | base64 -d; echo
-   oc -n keycloak get secret keycloak-initial-admin \
-     -o jsonpath='{.data.password}' | base64 -d; echo
+   echo "KEYCLOAK_ADMIN_USER=$(oc -n keycloak get secret keycloak-initial-admin \
+     -o jsonpath='{.data.username}' | base64 -d)"
+   echo "KEYCLOAK_ADMIN_PASSWORD=$(oc -n keycloak get secret keycloak-initial-admin \
+     -o jsonpath='{.data.password}' | base64 -d)"
    ```
 
 #### 1c. Import the realm JSON
