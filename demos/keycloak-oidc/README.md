@@ -728,6 +728,13 @@ CERT_MANAGER=true
 LETSENCRYPT_CLUSTER_ISSUER=letsencrypt-prod
 ```
 
+With those set, the command below creates the namespace and grants the
+sandbox SCC, computes `ROUTE_HOST`, then branches on `CERT_MANAGER` /
+`LETSENCRYPT_CLUSTER_ISSUER` to pick the right values file
+(`helm/values-certmanager.yaml`) and build the `SAN_SET`/`ISSUER_SET`
+`--set` overrides described above (Route-only SANs plus `serverIssuerRef`
+pointing at your `ClusterIssuer`) before running `helm upgrade --install`:
+
 ```bash
 source .env
 source ../../.env
