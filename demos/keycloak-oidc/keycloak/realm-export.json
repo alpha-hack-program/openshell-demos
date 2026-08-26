@@ -59,6 +59,18 @@
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "openshell-onboarding-web",
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["<onboarding-web-base-url>/callback"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
   "users": [
@@ -70,6 +82,16 @@
       "email": "openshell-admin@demo.local",
       "emailVerified": true,
       "credentials": [{ "type": "password", "value": "openshell-admin", "temporary": false }],
+      "realmRoles": ["openshell-admin", "offline_access"]
+    },
+    {
+      "username": "openshell-onboarding-svc",
+      "enabled": true,
+      "firstName": "OpenShell Onboarding",
+      "lastName": "Service",
+      "email": "openshell-onboarding-svc@demo.local",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "openshell-onboarding-svc", "temporary": false }],
       "realmRoles": ["openshell-admin", "offline_access"]
     },
     {

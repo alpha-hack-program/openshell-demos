@@ -1,0 +1,79 @@
+# syntax=docker/dockerfile:1
+#
+# onboarding-web needs both this binary and the `openshell` CLI in the same
+# image: the gateway only speaks gRPC (no REST/HTTP admin API), so every
+# provider call this service makes goes through shelling out to `openshell`
+# — same as util/onboard does. See
+# demos/keycloak-oidc/docs/self-service-onboarding.md for why this pod is a
+# Tier-0 asset (it holds a standing Platform-Admin-equivalent credential).
+#
+# Multi-stage build (cargo runs inside the builder stage — mirrors
+# mcp/mcp-portfolio/Containerfile's approach) rather than copying in a
+# pre-built musl binary the way util/agent-proxy's sandbox images do: that
+# pattern exists specifically to work around sandbox base images shipping
+# an older glibc than the dev machine, which doesn't apply here since we
+# control this image's base end to end.
+#
+#   podman build -t onboarding-web -f Containerfile .
+
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
+ARG BASE_TAG=9.6
+# Must match a real published OpenShell release; keep in step with
+# OPENSHELL_CHART_VERSION in demos/keycloak-oidc/.env. Confirmed against
+# https://github.com/NVIDIA/OpenShell/releases/tags/v0.0.106 — the musl
+# tarball asset really is named openshell-x86_64-unknown-linux-musl.tar.gz.
+ARG OPENSHELL_VERSION=0.0.106
+
+FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
+
+RUN dnf update -y && \
+    dnf install -y gcc gcc-c++ make pkg-config && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+ENV RUSTUP_HOME=/opt/rust
+ENV CARGO_HOME=/opt/rust
+ENV PATH=/opt/rust/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src
+
+RUN cargo build --release
+
+FROM ${BASE_IMAGE}:${BASE_TAG}
+
+ARG OPENSHELL_VERSION
+
+LABEL org.opencontainers.image.title="onboarding-web" \
+      org.opencontainers.image.description="Self-service OpenShell onboarding web app (Option B: token-attach only)" \
+      io.k8s.display-name="onboarding-web" \
+      io.openshift.tags="openshell,onboarding,rust"
+
+RUN microdnf update -y && \
+    microdnf install -y ca-certificates tar gzip shadow-utils && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+RUN curl -fsSL -o /tmp/openshell.tar.gz \
+      "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-x86_64-unknown-linux-musl.tar.gz" && \
+    tar xzf /tmp/openshell.tar.gz -C /usr/local/bin && \
+    rm -f /tmp/openshell.tar.gz && \
+    chmod +x /usr/local/bin/openshell
+
+RUN useradd -r -u 1001 -g 0 -s /sbin/nologin -c "onboarding-web service user" onboardingweb
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/onboarding-web /app/onboarding-web
+
+RUN chown -R 1001:0 /app && \
+    chmod -R g=u /app && \
+    chmod +x /app/onboarding-web
+
+USER 1001
+
+EXPOSE 8080
+
+CMD ["/app/onboarding-web"]

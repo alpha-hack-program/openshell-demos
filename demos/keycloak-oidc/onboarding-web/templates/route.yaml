@@ -1,0 +1,16 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: onboarding-web
+  labels:
+    app.kubernetes.io/name: onboarding-web
+spec:
+  host: {{ required "route.host is required for onboarding-web — the exact HTTPS callback URL must be pre-registered on the openshell-onboarding-web Keycloak client before deploying" .Values.route.host }}
+  to:
+    kind: Service
+    name: onboarding-web
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

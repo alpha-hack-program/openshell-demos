@@ -1,0 +1,33 @@
+name: CI onboarding-web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['util/onboarding-web/**']
+  pull_request:
+    paths: ['util/onboarding-web/**']
+
+defaults:
+  run:
+    working-directory: util/onboarding-web
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl

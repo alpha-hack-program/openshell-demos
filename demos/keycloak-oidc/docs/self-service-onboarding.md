@@ -1,15 +1,28 @@
 # Self-service onboarding — design notes
 
-Status: **DECIDED (for this demo's scale) — Option B, not yet implemented.**
-This captures the architecture discussion and security analysis behind
-replacing the operator-run `onboard` CLI with a self-service flow. At this
-demo's scale (roughly up to ~50 users), Option B below is the agreed
-direction. Option A remains the answer for much larger deployments and is
+Status: **Option B implemented (v1) and verified end to end against a live
+cluster** (OpenShift sandbox, `openshell` CLI 0.0.106). A real test user
+(`dave`, pre-provisioned exactly per steps 3.0/3a-minus-token, with a
+sandbox and `mcp-portfolio` authorization added afterward) logged in
+through a real browser (Playwright-driven), got listed his
+already-provisioned provider, activated it, and a subsequent real MCP call
+from inside his sandbox using the resulting live credential succeeded
+(`HTTP 200`, response confirmed `"called_by": "dave"` with his correct
+composite-expanded roles). The service, its Helm chart, and the Keycloak
+client are at [`util/onboarding-web/`](../../../util/onboarding-web/README.md)
+and [`demos/keycloak-oidc/onboarding-web/`](../onboarding-web/). Scope
+confirmed during implementation and narrower than earlier drafts of this
+doc described: the backend never runs `workspace create`, `provider
+create`, `provider profile import`, or `sandbox create` — only `provider
+list` (discovery) and `provider refresh configure`/`refresh rotate` (the
+actual attach), against a provider/workspace/sandbox admin already fully
+provisioned. See [How it actually works (v1)](#how-it-actually-works-v1)
+below. One real bug was found and fixed by this live test — see
+[Open questions](#open-questions) for the public-vs-confidential-client
+finding. Option A remains the answer for much larger deployments and is
 detailed separately in
 [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md),
-since it depends on an upstream limitation that isn't resolved yet — see
-[Open questions](#open-questions). No implementation has started on either
-path.
+since it depends on an upstream limitation that isn't resolved.
 
 ## Table of contents
 
@@ -20,6 +33,7 @@ path.
 - [A concrete gap in the existing code](#a-concrete-gap-in-the-existing-code)
 - [Architecture options considered](#architecture-options-considered)
 - [Recommendation](#recommendation)
+- [How it actually works (v1)](#how-it-actually-works-v1)
 - [Open questions](#open-questions)
 - [References](#references)
 
@@ -224,6 +238,51 @@ see
 [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md)
 for what it would take to get there.
 
+## How it actually works (v1)
+
+The scope narrowed once actually implementing Option B, in a direction
+worth calling out explicitly since the "Architecture options considered"
+section above still describes the original, broader framing: **`onboard`'s
+provisioning sequence (`workspace create`, `provider profile import`,
+`provider create`, plus the sandbox/MCP-config/policy/agent-harness work
+in steps 3.0/3a/4/5) is not something `onboarding-web` reimplements at
+all.** Admin already runs all of it, out of band, ending with a fully live
+sandbox — including the agent harness (Claude Code, for now — an admin
+provisioning choice, not something the web app or the user selects).
+`onboarding-web`'s entire runtime job is:
+
+1. User logs in via Keycloak as themselves (`GET /login` → `GET /callback`,
+   with `state` + PKCE, unlike `onboard`'s loopback-only flow).
+2. The backend lists the provider(s) already provisioned in that user's
+   workspace (`openshell provider list --workspace <username>`, using its
+   own admin credential) and shows them for selection — handles an admin
+   having provisioned more than one provider for the same user, and
+   auto-selects when there's just one.
+3. For whichever the user picks, the backend runs `provider refresh
+   configure` + `provider refresh rotate` — the only write operations it
+   ever performs.
+
+No `workspace create`, `provider create`, `provider profile import`, or
+`sandbox create` ever happens in this service. If a user's workspace or
+provider doesn't exist yet, they get a "contact an admin" page — that
+failure *is* the allowlist Option B relies on.
+
+One more consequence worth recording: since a provider is a
+workspace-scoped credential resource (not a per-sandbox one), a single
+activation per provider — typically once per user — covers every sandbox
+that references it, past and future. Users do not re-onboard per sandbox.
+
+See [`util/onboarding-web/README.md`](../../../util/onboarding-web/README.md)
+for the service itself and
+[`demos/keycloak-oidc/onboarding-web/`](../onboarding-web/) for the Helm
+chart, including the `openshell-onboarding-web` Keycloak client this
+required (public, PKCE-required, its own exact redirect URI — not a reuse
+of `openshell-cli`, since refresh tokens are Keycloak-client-bound; also
+confirmed **not** confidential — live testing found Providers v2's own
+refresh grant, which supplies only `client_id` with no secret, gets a 401
+from a confidential client) and the `openshell-onboarding-svc` dedicated
+identity backing the service's own standing admin credential.
+
 ## Open questions
 
 - **Partially resolved, still [VERIFY] against upstream.** Per the demo
@@ -239,21 +298,57 @@ for what it would take to get there.
   service account — see
   [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md)
   for what that implies.
-- Where exactly does the workspace-naming convention (today: named after
-  `USER_ID`) get validated against the authenticated subject in option B,
-  to prevent one user's login from being able to target another user's
-  workspace name via a crafted request?
-- Does this replace `onboard`, or does `onboard` remain the CLI/scripting
-  path with the web app as the recommended interactive path — mirroring how
-  `docs/manual-onboarding.md` today documents the manual equivalent of
-  `onboard`?
+- **Resolved by implementation.** Workspace = the `preferred_username`
+  claim decoded directly from the access token `onboarding-web` itself
+  obtained from Keycloak during the user's own login — not a
+  client-supplied field, so a user cannot target another user's workspace
+  name via a crafted request. See `util/onboarding-web/src/main.rs`'s
+  `callback` handler.
+- **Resolved.** `onboard` remains the CLI/scripting path (and is still
+  what `onboarding-web`'s own admin-credential bootstrap conceptually
+  mirrors — see
+  [`scripts/10-bootstrap-onboarding-web-admin.sh`](../scripts/10-bootstrap-onboarding-web-admin.sh)).
+  `onboarding-web` is the recommended interactive path for end users going
+  forward.
 - Who owns the pre-provisioning step in option B day-to-day — does it stay
   a raw `openshell workspace create`/`member add` pair (as today), or does
   it move into a slightly friendlier admin tool without changing who's
   allowed to trigger it?
+- **Resolved, confirmed live.** `openshell provider list --workspace <ws>
+  --output json` returns a JSON array of objects with a `name` field,
+  matching `util/onboarding-web/src/main.rs`'s `ProviderListEntry` exactly.
+  The plain-text fallback path is untested but shouldn't be needed.
+- **Resolved, confirmed live — the actual reason this took two build/test
+  cycles.** `openshell-onboarding-web` must be a **public** client, not
+  confidential as originally designed: Providers v2's refresh grant (run
+  by the gateway, supplying only `client_id` — no secret) got a 401 from
+  Keycloak's token endpoint with a confidential client. Fixed by flipping
+  `publicClient: true` in `realm-export.json` and dropping
+  `ONBOARDING_WEB_CLIENT_SECRET` from the app entirely; PKCE covers the
+  authorization-code exchange's security instead. See
+  `util/onboarding-web/README.md`'s "Why public, not confidential" note.
+- **Still open, not exercised in the first live test.** Whether a sandbox
+  created while its provider was still `pending` picks up a
+  newly-rotated credential live, or needs a restart/re-exec — the first
+  live test onboarded a bare provider (no sandbox attached) end to end
+  successfully (`dave`/`user-dave` on sandbox5237), confirmed independently
+  via `openshell provider refresh rotate` from a separate admin session,
+  but didn't attach a sandbox to it. Check this next.
+- **[VERIFY], new from implementation.** Whether this realm's offline
+  refresh tokens actually never rotate on use (assumed from
+  `revokeRefreshToken` being unset in `realm-export.json`, which is
+  Keycloak's non-rotating default) — if wrong, `onboarding-web`'s own
+  mounted admin-session Secret goes stale on the pod's next restart, since
+  a Secret-backed volume doesn't write refreshed tokens back to the Secret
+  object (see `demos/keycloak-oidc/onboarding-web/templates/deployment.yaml`'s
+  comment on this).
 
 ## References
 
+- [`util/onboarding-web/README.md`](../../../util/onboarding-web/README.md) —
+  the implemented v1 service.
+- [`demos/keycloak-oidc/onboarding-web/`](../onboarding-web/) — the Helm
+  chart deploying it.
 - [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md) —
   what Option A would need in order to be defensible past this demo's
   current scale, and the known blocker standing in its way today.

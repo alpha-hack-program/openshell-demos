@@ -185,13 +185,14 @@ and constraints that aren't obvious from the code alone:
   lifecycle findings, and open items. Lives under `demos/keycloak-oidc/`
   because the demo extends that stack.
 - **[Self-service onboarding design notes](demos/keycloak-oidc/docs/self-service-onboarding.md)** —
-  **DECIDED (for this demo's scale), not yet implemented.** Explores
-  replacing the operator-run `onboard` CLI with a self-service web app.
-  Covers why every provisioning call requires Platform Admin today, a
-  security-first analysis (authentication vs. authorization to provision,
-  JML/approval patterns, standing-credential risk), architecture options,
-  and the decision: Option B (token-attach only; workspace provisioning
-  stays admin-run) for now. See
+  **Option B implemented (v1) as `util/onboarding-web/` +
+  `demos/keycloak-oidc/onboarding-web/`, verified end to end against a live
+  cluster.** Replaces the operator-run `onboard` CLI's token-attach step
+  with a self-service web app: admin still fully pre-provisions the
+  workspace/provider/sandbox/MCP-config/agent-harness out of band (steps
+  3.0/3a/4/5), and the web app only lets the user log in and run `provider
+  refresh configure`/`refresh rotate` against what's already there — never
+  `workspace create`/`provider create`/`sandbox create`. See
   [Self-service onboarding at scale — Option A](demos/keycloak-oidc/docs/self-service-onboarding-option-a-at-scale.md)
   for the full-self-service alternative reserved for much larger user
   counts, and the known upstream blocker standing in its way.
