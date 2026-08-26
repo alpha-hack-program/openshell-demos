@@ -1,9 +1,15 @@
 # Self-service onboarding — design notes
 
-Status: **DRAFT — brainstorm only.** No implementation has started. This
-captures the architecture discussion and security analysis behind a
-possible self-service replacement for the `onboard` CLI tool, and ends with
-a recommendation, not a decision. Revisit before building anything.
+Status: **DECIDED (for this demo's scale) — Option B, not yet implemented.**
+This captures the architecture discussion and security analysis behind
+replacing the operator-run `onboard` CLI with a self-service flow. At this
+demo's scale (roughly up to ~50 users), Option B below is the agreed
+direction. Option A remains the answer for much larger deployments and is
+detailed separately in
+[Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md),
+since it depends on an upstream limitation that isn't resolved yet — see
+[Open questions](#open-questions). No implementation has started on either
+path.
 
 ## Table of contents
 
@@ -193,11 +199,12 @@ the admin's click is performed.
 
 ## Recommendation
 
-**Option B, hardened with PKCE + `state` and structured audit logging, is
-the security-first default** — it already matches how enterprises structure
-this: provisioning is a distinct, governed act; self-service only automates
-the credential-acquisition dance for identities already decided to be
-onboarded.
+**Decision: Option B, hardened with PKCE + `state` and structured audit
+logging, for this demo's current scale (roughly up to ~50 users).** It
+already matches how enterprises structure this: provisioning is a
+distinct, governed act; self-service only automates the
+credential-acquisition dance for identities already decided to be
+onboarded. It also sidesteps a real blocker described below.
 
 A worthwhile stretch beyond B, if the demo later wants to show the
 JML/approval pattern explicitly without collapsing authn into authz: a
@@ -206,18 +213,32 @@ small queue), where approval — not login — is what triggers the
 still-admin-gated workspace provisioning automatically. This preserves a
 real decision point while giving users a self-service front door.
 
-Options A and C are not recommended as-is for this demo's persona (a bank);
-they would need the eligibility group to be fed by a governed upstream
-process to be defensible, which is out of scope for a single-cluster demo.
+Options A and C are not recommended as-is for this demo's persona (a bank)
+or its current scale; they would need the eligibility group to be fed by a
+governed upstream process to be defensible, which is out of scope for a
+single-cluster demo. They also currently run into the service-account
+limitation in [Open questions](#open-questions) below. Past the point
+where admin-run pre-provisioning becomes the bottleneck (larger user
+counts, higher onboarding cadence), Option A is the direction to revisit —
+see
+[Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md)
+for what it would take to get there.
 
 ## Open questions
 
-- **[VERIFY]** Does the gateway/CLI accept a client-credentials-flow
-  (service-account) Keycloak token for gRPC admin auth, or does the admin
-  role claim require a real user-flow token? This determines whether the
-  backend's own credential can be a non-human service account or must be a
-  password-holding human identity file, which has different operational
-  and security implications.
+- **Partially resolved, still [VERIFY] against upstream.** Per the demo
+  owner, OpenShell reportedly has a known limitation where a Keycloak
+  service-account (client-credentials grant) token cannot carry the
+  `openshell-admin` claim needed for gateway admin operations — i.e. there
+  is currently no clean non-human path to a Platform Admin-equivalent
+  credential. This is relayed from memory, not yet confirmed against the
+  actual OpenShell issue tracker or docs — treat as **[VERIFY]** before
+  relying on it operationally. It's also the reason Option A is deferred
+  rather than pursued now: its standing backend credential would have to
+  be a long-lived, human-admin-flavored token rather than a lightweight
+  service account — see
+  [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md)
+  for what that implies.
 - Where exactly does the workspace-naming convention (today: named after
   `USER_ID`) get validated against the authenticated subject in option B,
   to prevent one user's login from being able to target another user's
@@ -233,6 +254,9 @@ process to be defensible, which is out of scope for a single-cluster demo.
 
 ## References
 
+- [Self-service onboarding at scale — Option A](self-service-onboarding-option-a-at-scale.md) —
+  what Option A would need in order to be defensible past this demo's
+  current scale, and the known blocker standing in its way today.
 - [`util/onboard/README.md`](../../../util/onboard/README.md) — the CLI tool
   this design would give a self-service front end to.
 - [`docs/manual-onboarding.md`](manual-onboarding.md) — command-by-command
