@@ -1626,18 +1626,24 @@ scripting this. The outputs shown below are just examples — expect
 different wording, and occasionally a different tool sequence, when you
 run these yourself.
 
-> **Seed data is date-fixed, not relative to "now."** The meetings seeded in
-> `mcp-servers/templates/schema-init-configmap.yaml` use fixed timestamps
-> (e.g. Bob's `mtg-001` with Clara Fontán is `2026-08-24T10:00:00Z`).
-> `get_upcoming_meetings` correctly filters to the future, so which meeting
-> (if any) actually comes back depends entirely on when you run this relative
-> to those hardcoded dates — e.g. once past `2026-08-24T10:00Z`, Bob's only
-> upcoming meeting is `mtg-002` (Grupo Delta Textil), not the earlier Clara
-> Fontán meeting. Phrase prompts as "what's my next meeting" rather than
-> naming a specific client, and expect the agent to correctly report "no
-> such meeting found" if the seed date has passed — that's the tool working
-> correctly, not
-> a bug. See [Open risks](#f-open-risks).
+> **Seed meetings self-heal daily, so which meeting comes back can still
+> vary.** The meetings seeded in `mcp-servers/templates/schema-init-configmap.yaml`
+> use fixed timestamps (e.g. Bob's `mtg-001` with Clara Fontán was originally
+> `2026-08-24T10:00:00Z`) — but `0003_meetings_refresh.sql`, run both by
+> `schema-init-job.yaml` (on every `helm install`/`upgrade`) and by the
+> `mcp-servers-meetings-refresh` `CronJob` (daily at 00:00 UTC), rolls each
+> banker's stalest meeting forward to tomorrow (same time-of-day, same
+> client, same notes) whenever they have none left in the future. So
+> `get_upcoming_meetings` should essentially never come back empty in normal
+> operation — but *which* of a banker's meetings is the upcoming one still
+> depends on when you run this relative to the last refresh (e.g. Bob cycles
+> between `mtg-001`/Clara Fontán and `mtg-002`/Grupo Delta Textil one at a
+> time, never both). Phrase prompts as "what's my next meeting" rather than
+> naming a specific client for that reason. If you do ever see "no such
+> meeting found," that means both the daily cron and the last `helm
+> upgrade` are stale — check `oc get cronjob mcp-servers-meetings-refresh`
+> and trigger it manually with `oc create job --from=cronjob/mcp-servers-meetings-refresh
+> manual-refresh-$(date +%s)`. See [Open risks](#f-open-risks).
 
 #### Scene 1 — Bob preps for a meeting
 

@@ -167,4 +167,35 @@ data:
       ('mtg-003','alice','cli-004','2026-08-24T09:00:00Z',NULL),
       ('mtg-004','charlie','cli-005','2026-08-26T11:00:00Z','Annual KYC review follow-up — confirm source-of-funds documentation before renewing PEP monitoring.')
       ON CONFLICT (id) DO NOTHING;
+  0003_meetings_refresh.sql: |
+    -- Keeps `get_upcoming_meetings` non-empty indefinitely without ever
+    -- fabricating new data: for each banker with zero meetings still in
+    -- the future, roll their single stalest meeting forward to tomorrow,
+    -- at the same time-of-day it originally had. This recycles the
+    -- hand-authored client/notes content from 0002_meetings_seed.sql
+    -- (Clara Fontán, the port-tariff note, etc.) instead of generating
+    -- generic placeholder meetings, so the Scene walkthroughs in the
+    -- README stay narratively consistent no matter how long ago the demo
+    -- was deployed. Run by both schema-init-job.yaml (so a fresh `helm
+    -- upgrade` fixes staleness immediately) and meetings-refresh-cronjob.yaml
+    -- (so it also self-heals daily between deploys, at 00:00 UTC).
+    -- No-op for any banker who already has an upcoming meeting.
+    WITH stale_bankers AS (
+      SELECT b.id AS banker_id
+      FROM bankers b
+      WHERE NOT EXISTS (
+        SELECT 1 FROM meetings m WHERE m.banker_id = b.id AND m.datetime > NOW()
+      )
+    ),
+    next_meeting AS (
+      SELECT DISTINCT ON (m.banker_id)
+        m.id, m.banker_id, m.datetime::time AS old_time
+      FROM meetings m
+      JOIN stale_bankers sb ON sb.banker_id = m.banker_id
+      ORDER BY m.banker_id, m.datetime ASC
+    )
+    UPDATE meetings
+    SET datetime = (CURRENT_DATE + INTERVAL '1 day') + next_meeting.old_time
+    FROM next_meeting
+    WHERE meetings.id = next_meeting.id;
 {{- end }}

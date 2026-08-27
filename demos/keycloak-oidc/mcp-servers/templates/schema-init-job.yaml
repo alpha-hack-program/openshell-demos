@@ -66,6 +66,8 @@ spec:
               psql -v ON_ERROR_STOP=1 -f /sql/0001_init.sql
               echo "Applying seed from /sql/0002_meetings_seed.sql..."
               psql -v ON_ERROR_STOP=1 -f /sql/0002_meetings_seed.sql
+              echo "Refreshing any stale meetings from /sql/0003_meetings_refresh.sql..."
+              psql -v ON_ERROR_STOP=1 -f /sql/0003_meetings_refresh.sql
               echo "Schema and seed data applied."
           volumeMounts:
             - name: sql
