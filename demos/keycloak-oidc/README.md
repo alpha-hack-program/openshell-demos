@@ -23,6 +23,7 @@
   - [5. Run the demo](#5-run-the-demo)
     - [Write each banker's MCP server config once](#write-each-bankers-mcp-server-config-once)
     - [Provision the Claude Code harness](#provision-the-claude-code-harness)
+    - [Log in as each banker (one-time per terminal, before Scene 1)](#log-in-as-each-banker-one-time-per-terminal-before-scene-1)
     - [Explore interactively](#explore-interactively)
     - [Scene 1 — Bob preps for a meeting](#scene-1--bob-preps-for-a-meeting)
     - [Scene 2 — Bob resolves his biggest client](#scene-2--bob-resolves-his-biggest-client)
@@ -187,9 +188,15 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
 Make sure you run `gateway add` in each terminal, logging in as that
 terminal's own persona (Terminal A as admin, B as alice, C as bob, D as
-charlie — each triggers its own Keycloak login). **Before running anything
-in a given terminal, confirm it's authenticated as the identity you think
-it is** — every command block in [step 5](#5-run-the-demo) starts with this
+charlie — each triggers its own Keycloak login) — for admin this is
+[step 2b](#2b-register-the-gateway-with-the-cli); for alice/bob/charlie
+it's [Log in as each banker](#log-in-as-each-banker-one-time-per-terminal-before-scene-1),
+run once per terminal before that banker's first scene. Skipping this and
+only exporting `XDG_CONFIG_HOME`/`XDG_STATE_HOME` points the CLI at a
+fresh, empty config directory — every command then fails with `No active
+gateway` until the login above actually runs. **Before running anything in
+a given terminal, confirm it's authenticated as the identity you think it
+is** — every command block in [step 5](#5-run-the-demo) starts with this
 check for exactly that reason:
 
 ```bash
@@ -1448,6 +1455,64 @@ done
 openshell policy update "demo-alice" \
   --add-endpoint "mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
   --binary /usr/local/bin/claude --workspace "alice" --wait
+```
+
+#### Log in as each banker (one-time per terminal, before Scene 1)
+
+The scenes below assume Terminals B/C/D are already authenticated as
+alice/bob/charlie respectively — the `openshell whoami` check at the top of
+each scene only *verifies* that, it doesn't *establish* it. If you skip
+this and jump straight to a scene, `openshell whoami` (and everything after
+it) fails with `No active gateway`, because `XDG_CONFIG_HOME`/
+`XDG_STATE_HOME` alone just point the CLI at a fresh, empty config
+directory — the actual login still has to run once per persona, per
+terminal, the same way [step 2b](#2b-register-the-gateway-with-the-cli) did
+for admin.
+
+Run this once in each banker's terminal, right before that banker's first
+scene — e.g. in Terminal C before [Scene 1](#scene-1--bob-preps-for-a-meeting),
+setting `USER_ID` to that terminal's persona (`alice`, `bob`, or `charlie`;
+the demo realm's password equals the username for all three — see
+`keycloak/realm-export.json`). It opens a browser and redirects to
+Keycloak — log in as `USER_ID`, not admin and not another banker:
+
+```bash
+# Terminal C — bob (same pattern for Terminal B/alice, Terminal D/charlie —
+# just change USER_ID and the XDG paths to match that terminal)
+USER_ID="bob"
+export XDG_CONFIG_HOME="/tmp/oc-${USER_ID}/config" XDG_STATE_HOME="/tmp/oc-${USER_ID}/state"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+source .env
+source ../../.env
+
+GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
+MTLS_DIR="$XDG_CONFIG_HOME/openshell/gateways/$GATEWAY_NAME/mtls"
+mkdir -p "$MTLS_DIR"
+
+# Same mTLS client material as every other identity on this gateway (it's
+# tied to the gateway, not the user — OIDC is what distinguishes personas)
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
+oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
+  -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+
+ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
+if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
+  echo | openssl s_client -connect "${ROUTE_HOST}:443" -servername "${ROUTE_HOST}" -showcerts 2>/dev/null \
+    | awk '/-----BEGIN CERTIFICATE-----/{n++} n>=2' >> "$MTLS_DIR/ca.crt"
+fi
+
+openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
+openshell gateway add "https://${ROUTE_HOST}:443" \
+  --name "$GATEWAY_NAME" \
+  --oidc-issuer "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  --oidc-client-id "$KEYCLOAK_CLIENT_ID_CLI" \
+  --oidc-scopes "openid offline_access"
+
+openshell whoami   # confirm: Name: bob — not admin, not another banker
 ```
 
 Each scene below is a full, self-contained command: which terminal to run it
