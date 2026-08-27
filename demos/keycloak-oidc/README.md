@@ -827,6 +827,52 @@ Verify the Route was created:
 oc -n "$OPENSHELL_NAMESPACE" get route openshell
 ```
 
+**[VERIFY]** The `Certificate` resource name below
+(`openshell-server-external`) is confirmed against a live cluster running
+chart version `${OPENSHELL_CHART_VERSION}` from this guide's step 2a — but
+the wait sequence itself hasn't been tested end-to-end from a truly fresh
+`helm install` racing a real ACME issuance; it was reconstructed after
+diagnosing the failure on an already-stale cert. Re-verify on a clean
+install before trusting this fully.
+
+**If you're using the Let's Encrypt path** (`LETSENCRYPT_CLUSTER_ISSUER`
+set), wait for the ACME certificate to actually finish issuing before
+moving on to step 2b. `helm upgrade --install` returning success only means
+the `Certificate` object was *created*, not that cert-manager has finished
+the ACME challenge and rotated the Route onto the real Let's
+Encrypt-signed cert — the statefulset rollout above doesn't wait on this
+either, since it's a separate resource with no dependency the chart
+declares. If step 2b's mTLS extraction runs while the Route is still
+serving the chart's own self-signed cert (issuance can take a few
+minutes), the Let's Encrypt chain it appends to `ca.crt` ends up empty,
+and every later CLI command against this gateway fails with `invalid peer
+certificate: UnknownIssuer` once the cert *does* rotate — a failure mode
+that's easy to hit and confusing to diagnose after the fact, since
+`gateway add`/`whoami` may keep working for a while on the stale cert
+before it flips:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" wait --for=condition=Ready \
+  certificate/openshell-server-external --timeout=300s
+```
+
+`Certificate: Ready` only confirms cert-manager finished the ACME
+challenge and wrote the cert into its Secret — it doesn't guarantee the
+pod behind the passthrough Route has already reloaded onto it (that's a
+separate propagation step with no condition to wait on). Confirm the Route
+is actually serving the Let's Encrypt cert before moving on:
+
+```bash
+ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
+for i in $(seq 1 30); do
+  ISSUER=$(echo | openssl s_client -connect "${ROUTE_HOST}:443" \
+    -servername "${ROUTE_HOST}" 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
+  echo "$ISSUER" | grep -q "Let's Encrypt" && { echo "Route is serving the Let's Encrypt cert."; break; }
+  echo "Still on the old cert ($ISSUER) — waiting..."
+  sleep 10
+done
+```
+
 #### 2b. Register the gateway with the CLI
 
 **This is where Terminal A — admin is established.** Every `openshell`
