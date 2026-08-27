@@ -1481,6 +1481,34 @@ a different Keycloak identity. That's exactly why it has to be repeated
 per terminal: the registration is local, per-`XDG_CONFIG_HOME` state, not
 something the cluster or the gateway itself is aware of.
 
+**Why this copies files instead of re-running `oc get secret`.** The block
+below gets the mTLS client material (`ca.crt`/`tls.crt`/`tls.key`) by
+copying it from admin's already-populated directory rather than querying
+the cluster again. This isn't just a shortcut — it's closer to correct:
+- The three files are **identical for every identity** on this gateway
+  (they authenticate the *connection*, not the *user* — OIDC is what
+  distinguishes alice/bob/charlie/admin). There's nothing user-specific to
+  fetch per banker.
+- The `openshell` CLI has no built-in way to fetch this material itself —
+  `gateway add --help` says mTLS certs "must already exist in the gateway
+  config directory" before it runs; something else has to put them there
+  first. In this guide, that something is admin's `oc get secret` call
+  back in step 2b.
+- Requiring each banker's own terminal to run `oc get secret` would mean
+  giving every banker Kubernetes RBAC read access to a Secret in the
+  OpenShell namespace — a real bank would never grant a relationship
+  manager that. It only reads as reasonable here because one operator
+  (you) holds every identity's credentials for demo purposes.
+- **In a real rollout, distributing this material would be a separate,
+  automated step outside the OpenShell CLI entirely** — e.g. pushed via
+  MDM/config management to each banker's machine, downloaded through an
+  authenticated portal (a natural extension of
+  [`onboarding-web`](#step-3b--self-service-alternative-onboarding-web),
+  which already handles each banker's *OIDC* side of onboarding but not
+  yet this mTLS bundle), or baked into a provisioned client image. Copying
+  from admin's directory here is a stand-in for that pipeline, not the
+  pipeline itself.
+
 Run this once in each banker's terminal, right before that banker's first
 scene — e.g. in Terminal B before [Scene 6](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)
 (Alice's first scene), or Terminal C before
@@ -1499,6 +1527,8 @@ USER_ID="alice"
 ```
 
 ```bash
+cd demos/keycloak-oidc   # .env below is relative to this directory — skip if you're already here
+
 export XDG_CONFIG_HOME="/tmp/oc-${USER_ID}/config" XDG_STATE_HOME="/tmp/oc-${USER_ID}/state"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
@@ -1509,20 +1539,19 @@ GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
 MTLS_DIR="$XDG_CONFIG_HOME/openshell/gateways/$GATEWAY_NAME/mtls"
 mkdir -p "$MTLS_DIR"
 
-# Same mTLS client material as every other identity on this gateway (it's
-# tied to the gateway, not the user — OIDC is what distinguishes personas)
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.ca\.crt}'  | base64 -d > "$MTLS_DIR/ca.crt"
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
-oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
-  -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+# Copy the mTLS client material admin already extracted in step 2b, instead
+# of re-running `oc get secret` from this terminal. See the note above for
+# why this is deliberate, not just a shortcut. Set ADMIN_XDG_CONFIG_HOME to
+# match whatever Terminal A actually used — $HOME/.config if admin never
+# overrode XDG_CONFIG_HOME, or /tmp/oc-admin/config if it followed the
+# four-terminal convention above.
+ADMIN_CONFIG_HOME="${ADMIN_XDG_CONFIG_HOME:-$HOME/.config}"
+cp "$ADMIN_CONFIG_HOME/openshell/gateways/$GATEWAY_NAME/mtls/"{ca.crt,tls.crt,tls.key} "$MTLS_DIR/"
+# Admin's ca.crt (step 2b) already has the Let's Encrypt issuing chain
+# appended if LETSENCRYPT_CLUSTER_ISSUER was used — don't append it again
+# here, or duplicate PEM blocks will confuse some TLS stacks.
 
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
-if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
-  echo | openssl s_client -connect "${ROUTE_HOST}:443" -servername "${ROUTE_HOST}" -showcerts 2>/dev/null \
-    | awk '/-----BEGIN CERTIFICATE-----/{n++} n>=2' >> "$MTLS_DIR/ca.crt"
-fi
 
 openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
 openshell gateway add "https://${ROUTE_HOST}:443" \
