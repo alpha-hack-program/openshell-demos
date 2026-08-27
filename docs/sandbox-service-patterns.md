@@ -101,6 +101,21 @@ openshell sandbox exec -n my-sandbox -- \
 openshell service expose my-sandbox 8080
 ```
 
+**A `sandbox exec` run immediately after `sandbox upload` can silently
+no-op** (observed live, 2026-08-27, against demos/keycloak-oidc): the
+`chmod`/subsequent command reports success (exit 0) but doesn't actually
+take effect, apparently because the exec channel isn't fully warmed up
+right after the preceding upload completes. Neither `sandbox upload` nor
+`sandbox exec` has a `--wait`/readiness flag to fix this at the source
+(checked `--help` for both, neither has one). Two ways to work around it:
+- Split upload and exec into two separate command invocations with some
+  real time between them (a few seconds of normal script/human pacing is
+  enough) rather than chaining them back-to-back in one snippet.
+- If you must chain them programmatically, verify the exec's effect
+  actually happened (e.g. `grep` for expected file content, or re-check
+  the condition the exec was supposed to establish) and retry once if not
+  — don't trust the exit code alone.
+
 No Containerfile, no registry credentials, no image build. Best for:
 - Ad-hoc testing and demos
 - Rapid iteration (upload a new binary, restart)
