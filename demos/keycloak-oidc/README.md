@@ -1469,17 +1469,36 @@ directory — the actual login still has to run once per persona, per
 terminal, the same way [step 2b](#2b-register-the-gateway-with-the-cli) did
 for admin.
 
+**`gateway add` is purely local — it doesn't deploy anything.** It writes
+CLI-side config (mTLS material, OIDC tokens, gateway metadata) under
+whichever `XDG_CONFIG_HOME`/`XDG_STATE_HOME` the current terminal points
+at; it does not create a new gateway, namespace, or Deployment on the
+cluster. There's still only the **one** OpenShell gateway admin deployed
+with `helm upgrade --install` back in [step 2a](#2a-helm-install) —
+every terminal (admin, alice, bob, charlie) is just a separate local
+registration of *how to talk to* that same gateway, each authenticating as
+a different Keycloak identity. That's exactly why it has to be repeated
+per terminal: the registration is local, per-`XDG_CONFIG_HOME` state, not
+something the cluster or the gateway itself is aware of.
+
 Run this once in each banker's terminal, right before that banker's first
-scene — e.g. in Terminal C before [Scene 1](#scene-1--bob-preps-for-a-meeting),
-setting `USER_ID` to that terminal's persona (`alice`, `bob`, or `charlie`;
-the demo realm's password equals the username for all three — see
-`keycloak/realm-export.json`). It opens a browser and redirects to
-Keycloak — log in as `USER_ID`, not admin and not another banker:
+scene — e.g. in Terminal B before [Scene 6](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)
+(Alice's first scene), or Terminal C before
+[Scene 1](#scene-1--bob-preps-for-a-meeting) (Bob's). It opens a browser
+and redirects to Keycloak — log in as `USER_ID`, not admin and not another
+banker. The demo realm's password equals the username for all three (see
+`keycloak/realm-export.json`).
+
+**The only line that changes per terminal** is `USER_ID` — set it once,
+then run the rest of the block unchanged:
 
 ```bash
-# Terminal C — bob (same pattern for Terminal B/alice, Terminal D/charlie —
-# just change USER_ID and the XDG paths to match that terminal)
-USER_ID="bob"
+# Terminal B — alice (same block for Terminal C/bob, Terminal D/charlie —
+# only this line changes)
+USER_ID="alice"
+```
+
+```bash
 export XDG_CONFIG_HOME="/tmp/oc-${USER_ID}/config" XDG_STATE_HOME="/tmp/oc-${USER_ID}/state"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
@@ -1512,7 +1531,7 @@ openshell gateway add "https://${ROUTE_HOST}:443" \
   --oidc-client-id "$KEYCLOAK_CLIENT_ID_CLI" \
   --oidc-scopes "openid offline_access"
 
-openshell whoami   # confirm: Name: bob — not admin, not another banker
+openshell whoami   # confirm: Name matches $USER_ID — not admin, not another banker
 ```
 
 Each scene below is a full, self-contained command: which terminal to run it
