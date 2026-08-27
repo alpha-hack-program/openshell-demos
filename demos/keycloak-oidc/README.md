@@ -18,6 +18,7 @@
   - [1. Deploy Keycloak](#1-deploy-keycloak)
   - [2. Create the namespace, grant SCCs, and install OpenShell with OIDC](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc)
   - [3. Onboard a banker](#3-onboard-a-banker)
+    - [Useful commands: verify all bankers are onboarded](#useful-commands-verify-all-bankers-are-onboarded)
   - [4. Deploy MCP servers](#4-deploy-mcp-servers)
   - [5. Run the demo](#5-run-the-demo)
     - [Write each banker's MCP server config once](#write-each-bankers-mcp-server-config-once)
@@ -1010,7 +1011,7 @@ whichever is newer):
 ```bash
 # Linux (x86_64) — macOS (Apple Silicon): swap the asset for onboard-macos-aarch64
 curl -fsSL -o onboard \
-  https://github.com/alpha-hack-program/openshell-demos/releases/download/onboard-v0.1.2/onboard-linux-x86_64
+  https://github.com/alpha-hack-program/openshell-demos/releases/download/onboard-v0.1.3/onboard-linux-x86_64
 chmod +x onboard
 sudo install onboard /usr/local/bin/
 ```
@@ -1149,6 +1150,35 @@ the service itself. **Verified end to end against a live cluster**: a
 test user logged in via a real browser, activated his pre-provisioned
 provider, and a real MCP call from inside his sandbox using the resulting
 credential succeeded.
+
+#### Useful commands: verify all bankers are onboarded
+
+Regardless of which onboarding path was used per banker (`onboard` in step
+3a, `onboarding-web` in step 3b, or the manual steps in
+[`docs/manual-onboarding.md`](docs/manual-onboarding.md)), admin can check
+onboarding state from Terminal A without needing any banker's own session:
+
+```bash
+# Terminal A — admin
+# One-shot view of every provider across every workspace — confirms each
+# banker's provider landed in their own workspace (not 'default' or
+# someone else's), and that credential keys exist.
+openshell provider list --all-workspaces
+```
+
+```bash
+# Terminal A — admin
+# Per-banker refresh health — confirms the credential is actually
+# refreshing (STATUS: refreshed, LAST_ERROR: -), not just present. This is
+# the one that actually proves a banker's login (self-service or
+# admin-run) succeeded, since `provider list`/`provider get` never expose
+# whether a credential's value is still the `pending` placeholder or a
+# real refresh token.
+for USER_ID in alice bob charlie; do
+  openshell provider refresh status "user-${USER_ID}" \
+    --credential-key USER_ACCESS_TOKEN --workspace "${USER_ID}"
+done
+```
 
 ### 4. Deploy MCP servers
 
