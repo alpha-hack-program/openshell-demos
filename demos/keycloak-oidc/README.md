@@ -1329,7 +1329,17 @@ done
 authorized for. The provider profile already contributes the MCP server
 endpoints to the sandbox's network policy (endpoint binding), but does not
 grant binary-level permissions — those are deployment-specific and applied
-per-sandbox:
+per-sandbox. **All three bankers get the same four servers** —
+`mcp-portfolio`, `mcp-crm-calendar`, `mcp-market-news`, `mcp-kyc-compliance`
+— since all three hold the shared `banker` Keycloak role those servers gate
+on (see the [step 4](#4-deploy-mcp-servers) table). The loop below grants
+exactly those four to alice, bob, and charlie alike. **Alice alone gets a
+fifth**, `mcp-compatibility`, in the separate command right after the
+loop — her one extra permission, gated by the `compatibility-user` role
+(via the `compatibility-users` Keycloak group) that only she holds. Bob and
+charlie never get that endpoint added to their sandbox's policy at all —
+it's not that they're denied a permission they were also granted, they
+simply never receive the grant in the first place:
 
 ```bash
 # Terminal A — admin
@@ -1391,37 +1401,76 @@ exec` in that same sandbox sees the same file, because `/sandbox` persists
 across separate `exec` calls, and the resolve placeholder's random suffix
 stays stable for the sandbox's lifetime.
 
-**Use `printf`, not a heredoc.** A `cat > file <<EOF ... EOF` heredoc nested
-inside `sandbox exec ... -- bash -c '...'` reliably hangs — the layered
-quoting confuses where the heredoc terminator actually is. `printf` with a
-format string sidesteps the problem entirely.
+**Build the file locally, upload it, then substitute the token in-place —
+don't construct the JSON inside `sandbox exec` at all.** Three approaches
+were tried and rejected before landing on this one:
+- A `printf` format string run inside `sandbox exec ... -- bash -c '...'`
+  works but is fragile — one missed `%s`/argument pair and the JSON
+  silently comes out malformed, and a `cat > file <<EOF ... EOF` heredoc in
+  that same nested position reliably hangs (the layered quoting confuses
+  where the heredoc terminator actually is).
+- Capturing `$USER_ACCESS_TOKEN`'s value out of the sandbox first (e.g.
+  `TOKEN=$(openshell sandbox exec ... -- printenv USER_ACCESS_TOKEN)`) to
+  build the file locally, then `--upload`ing it, seems cleaner — but that
+  capture step was observed to silently return **empty** on a cold
+  connection during testing, producing a config file with a blank Bearer
+  header and no error. Don't rely on relaying this value out of the
+  sandbox and back in.
+
+Instead: build the file locally with a literal `__USER_ACCESS_TOKEN__`
+placeholder (a completely ordinary heredoc — no nesting, no hang, since it
+runs in this shell, not inside `sandbox exec`), upload it with `openshell
+sandbox upload` (which creates `/sandbox/.claude/` automatically), then run
+one `sed` substitution *inside* the sandbox so `$USER_ACCESS_TOKEN` is read
+from its own environment and never has to leave it.
+
+**The `sandbox exec` right after a `sandbox upload` can occasionally be a
+no-op on a cold connection** — observed live during testing: the `sed`
+command itself reports success (exit 0) but the file is left unchanged,
+apparently because the exec channel wasn't fully warmed up yet immediately
+after the preceding upload. The helper below checks for the placeholder
+afterward and retries once if it's still there, rather than trusting the
+first attempt's exit code blindly:
+
+```bash
+substitute_token() {
+  local sandbox_name="$1" workspace="$2"
+  openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- bash -c \
+    'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
+  if openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- \
+      grep -q __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json; then
+    echo "First substitution attempt didn't take for ${sandbox_name}, retrying..."
+    openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- bash -c \
+      'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
+  fi
+}
+```
 
 **Bob and Charlie get the same four servers, so one loop covers both. Alice
 gets a fifth (`compatibility`, her extra permission) — a separate, complete
-command, not a hand-edit of the loop's `printf`.** Editing a format string
-by hand to add a server is exactly the kind of error-prone step this file
-exists to avoid — one missed `%s`/argument pair and the JSON silently comes
-out malformed:
+block, not a hand-edit of the loop's JSON:**
 
 ```bash
 # Terminal A — admin, right after "Create a sandbox for each banker" above
 source .env
 for USER_ID in bob charlie; do
-  openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
-mkdir -p /sandbox/.claude
-printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
-  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
-  > /sandbox/.claude/mcp-servers.json
-'
+  CONFIG_FILE=$(mktemp --suffix=.json)
+  cat > "$CONFIG_FILE" <<EOF
+{"mcpServers":{"portfolio":{"type":"http","url":"http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"crm-calendar":{"type":"http","url":"http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"market-news":{"type":"http","url":"http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"kyc-compliance":{"type":"http","url":"http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}}}
+EOF
+  openshell sandbox upload "demo-${USER_ID}" "$CONFIG_FILE" /sandbox/.claude/mcp-servers.json --workspace "${USER_ID}"
+  rm -f "$CONFIG_FILE"
+  substitute_token "demo-${USER_ID}" "${USER_ID}"
 done
 
 # Alice — five servers, the extra "compatibility" entry already included below
-openshell sandbox exec -n demo-alice --workspace alice --env "NS=$OPENSHELL_NAMESPACE" -- bash -c '
-mkdir -p /sandbox/.claude
-printf "{\"mcpServers\":{\"portfolio\":{\"type\":\"http\",\"url\":\"http://mcp-portfolio.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"crm-calendar\":{\"type\":\"http\",\"url\":\"http://mcp-crm-calendar.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"market-news\":{\"type\":\"http\",\"url\":\"http://mcp-market-news.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"kyc-compliance\":{\"type\":\"http\",\"url\":\"http://mcp-kyc-compliance.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}},\"compatibility\":{\"type\":\"http\",\"url\":\"http://mcp-compatibility.%s.svc.cluster.local:8000/mcp\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}" \
-  "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" "$NS" "$USER_ACCESS_TOKEN" \
-  > /sandbox/.claude/mcp-servers.json
-'
+CONFIG_FILE=$(mktemp --suffix=.json)
+cat > "$CONFIG_FILE" <<EOF
+{"mcpServers":{"portfolio":{"type":"http","url":"http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"crm-calendar":{"type":"http","url":"http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"market-news":{"type":"http","url":"http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"kyc-compliance":{"type":"http","url":"http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}},"compatibility":{"type":"http","url":"http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}}}
+EOF
+openshell sandbox upload demo-alice "$CONFIG_FILE" /sandbox/.claude/mcp-servers.json --workspace alice
+rm -f "$CONFIG_FILE"
+substitute_token demo-alice alice
 ```
 
 From here on, every scene's command is just `--mcp-config
