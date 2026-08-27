@@ -1424,27 +1424,17 @@ sandbox upload` (which creates `/sandbox/.claude/` automatically), then run
 one `sed` substitution *inside* the sandbox so `$USER_ACCESS_TOKEN` is read
 from its own environment and never has to leave it.
 
-**The `sandbox exec` right after a `sandbox upload` can occasionally be a
-no-op on a cold connection** — observed live during testing: the `sed`
-command itself reports success (exit 0) but the file is left unchanged,
-apparently because the exec channel wasn't fully warmed up yet immediately
-after the preceding upload. The helper below checks for the placeholder
-afterward and retries once if it's still there, rather than trusting the
-first attempt's exit code blindly:
-
-```bash
-substitute_token() {
-  local sandbox_name="$1" workspace="$2"
-  openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- bash -c \
-    'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
-  if openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- \
-      grep -q __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json; then
-    echo "First substitution attempt didn't take for ${sandbox_name}, retrying..."
-    openshell sandbox exec -n "$sandbox_name" --workspace "$workspace" -- bash -c \
-      'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
-  fi
-}
-```
+**A `sandbox exec` run immediately after a `sandbox upload` can occasionally
+be a no-op on a cold connection** — observed live during testing: the `sed`
+command itself reported success (exit 0) but the file was left unchanged,
+apparently because the exec channel wasn't fully warmed up yet right after
+the preceding upload. Neither `sandbox upload` nor `sandbox exec` has a
+`--wait`/readiness flag to fix this at the source, so the two steps below
+are deliberately split into separate command blocks — upload everyone
+first, *then* substitute everyone's token in a second block. The reading
+pause between them (and looping over all three bankers before circling
+back) gives the connection time to settle, which is simpler than adding
+retry logic to work around a race in a single combined script.
 
 **Bob and Charlie get the same four servers, so one loop covers both. Alice
 gets a fifth (`compatibility`, her extra permission) — a separate, complete
@@ -1460,7 +1450,6 @@ for USER_ID in bob charlie; do
 EOF
   openshell sandbox upload "demo-${USER_ID}" "$CONFIG_FILE" /sandbox/.claude/mcp-servers.json --workspace "${USER_ID}"
   rm -f "$CONFIG_FILE"
-  substitute_token "demo-${USER_ID}" "${USER_ID}"
 done
 
 # Alice — five servers, the extra "compatibility" entry already included below
@@ -1470,7 +1459,28 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 openshell sandbox upload demo-alice "$CONFIG_FILE" /sandbox/.claude/mcp-servers.json --workspace alice
 rm -f "$CONFIG_FILE"
-substitute_token demo-alice alice
+```
+
+Now substitute the real token into all four uploaded files. By the time you
+run this block, every upload above has had time to settle:
+
+```bash
+# Terminal A — admin
+for USER_ID in alice bob charlie; do
+  openshell sandbox exec -n "demo-${USER_ID}" --workspace "${USER_ID}" -- bash -c \
+    'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
+done
+```
+
+If a scene later fails oddly (e.g. `401`/`403` from an MCP server that
+should be authorized), check whether the substitution actually happened
+before looking anywhere else:
+
+```bash
+openshell sandbox exec -n demo-bob --workspace bob -- \
+  grep -o __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json
+# No output = substituted correctly. Any output = re-run the sed command
+# above for that banker.
 ```
 
 From here on, every scene's command is just `--mcp-config
