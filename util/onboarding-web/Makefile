@@ -1,8 +1,6 @@
 .DEFAULT_GOAL := help
 
 BIN          := onboarding-web
-MUSL_TARGET  := x86_64-unknown-linux-musl
-MUSL_BIN     := target/$(MUSL_TARGET)/release/$(BIN)
 
 IMAGE_REGISTRY ?= quay.io/atarazana
 # Same version cargo-release would bump to and tag as onboarding-web-v<version>
@@ -21,7 +19,7 @@ else
 PODMAN := podman
 endif
 
-.PHONY: help build release musl install run watch \
+.PHONY: help build release install run watch \
         fmt fmt-check clippy check ci \
         clean doc \
         image-build image-push \
@@ -36,9 +34,6 @@ build: ## Debug build
 
 release: ## Release build (native target)
 	cargo build --release
-
-musl: ## Build a static musl binary — the artifact baked into the Containerfile
-	cargo build --release --target $(MUSL_TARGET)
 
 install: release ## Build release and install to ~/bin
 	install -d $(HOME)/bin
@@ -78,8 +73,8 @@ image-push: image-build ## Build and push the container image (override registry
 ## --- Release management with cargo-release ---
 ## Bumps Cargo.toml version, runs `make ci` as a gate (see release.toml),
 ## commits, tags onboarding-web-v<version>, and pushes. Never publishes to
-## crates.io. GitHub Actions then builds the musl binary and the container
-## image (see .github/workflows/release-onboarding-web.yml).
+## crates.io. GitHub Actions then builds the linux-gnu release binary and
+## the container image (see .github/workflows/release-onboarding-web.yml).
 
 release-patch: ## Bump patch version (x.y.Z+1), tag, and push
 	@echo "Creating patch release (x.y.Z+1)..."

@@ -22,12 +22,17 @@ jobs:
           components: clippy, rustfmt
       - run: make check
 
+  # Native build only — onboarding-web only ever ships as a container built
+  # from a glibc base (see Containerfile) plus a linux-gnu release binary
+  # (release-onboarding-web.yml's `release` job), never a static musl
+  # binary. A prior musl cross-compile here failed: ring's build script
+  # needs an x86_64-linux-musl-gcc cross-compiler that ubuntu-latest
+  # doesn't have installed, and nothing in this project consumes a musl
+  # artifact anyway.
   build:
     needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - run: cargo build --release
