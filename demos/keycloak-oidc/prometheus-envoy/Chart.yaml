@@ -1,0 +1,24 @@
+apiVersion: v2
+name: prometheus-envoy
+description: >-
+  Envoy reverse proxy that lets a client which can't set a custom HTTP Host
+  header (e.g. a Prometheus ServiceMonitor on a cluster whose
+  prometheus-operator predates the `endpoints[].headers` field, or EvalHub's
+  `garak` provider) reach an `openshell service expose`d sandbox service.
+  `service expose` routes purely by HTTP Host header (multiple sandboxes
+  share one gateway Route/hostname) — this chart's Envoy extracts a routing
+  key from the request path (`/route/<host-key>/...`), rewrites the upstream
+  `:authority`/Host to it, and forwards to the OpenShell gateway over TLS, so
+  the caller only needs a real, DNS-resolvable Service/Route with the key
+  baked into the path. Identical to `garak-envoy` (same root cause, same
+  fix) — kept as a separate chart so each demo/spike can depend on the name
+  that matches its own purpose. See
+  demos/keycloak-oidc/docs/evalhub-redteam.md ("CONFIRMED BROKEN" note) for
+  the full root-cause writeup, and
+  demos/keycloak-oidc/docs/prometheus-metrics-spike.md for the
+  Prometheus-scraping use case. This chart, and the workaround it
+  implements, is this demo's own design — not provided by upstream
+  OpenShell, EvalHub, or Prometheus.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

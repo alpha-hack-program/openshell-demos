@@ -1,0 +1,39 @@
+image:
+  repository: docker.io/envoyproxy/envoy
+  tag: "v1.31-latest"   # [VERIFY] pin an exact patch version before real use
+
+# The OpenShell gateway's in-cluster address. Defaults to
+# openshell.<release-namespace>.svc.cluster.local:8080 (the gateway's own
+# port — same one the external Route forwards to). Override gateway.host if
+# the gateway lives in a different namespace than this chart is installed
+# into.
+gateway:
+  host: ""   # empty = openshell.<release-namespace>.svc.cluster.local
+  port: 8080
+
+# Envoy's TLS connection to the gateway skips chain validation — same
+# reason every curl call in this demo uses -k (the gateway's cert isn't in
+# Envoy's default trust store). Fine for evaluation, never for production.
+insecureSkipVerifyGateway: true
+
+route:
+  # Leave empty to let OpenShift generate <name>-<namespace>.<apps-domain>
+  host: ""
+
+# Prometheus scrape targets reached through this proxy. Disabled by default —
+# only relevant to demos/spikes that actually expose a metrics endpoint from
+# a sandbox (see demos/keycloak-oidc/docs/prometheus-metrics-spike.md).
+#
+# Adding/removing a sandbox here and re-running `helm upgrade` is the whole
+# workflow — no per-sandbox Kubernetes object to hand-write. Each target
+# becomes its own ServiceMonitor endpoint (its own `job` label, so metrics
+# from different sandboxes never collide even though they're all physically
+# scraped through the same Envoy pod), plus a `sandbox` label for easy
+# querying since the raw `instance` label is the Envoy pod, not the sandbox.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  # - name: metrics-spike                                  # -> `sandbox` label value
+  #   hostKey: spike--metrics-spike.openshell.localhost     # Host-header key from `openshell service expose`
+  #   path: /metrics                                        # path on the exporter itself (default: /metrics)
+  targets: []
