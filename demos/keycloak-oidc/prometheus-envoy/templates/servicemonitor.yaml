@@ -1,0 +1,26 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: prometheus-envoy
+  labels:
+    app.kubernetes.io/name: prometheus-envoy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-envoy
+  endpoints:
+  {{- range .Values.serviceMonitor.targets }}
+  - port: http
+    scheme: http
+    path: "/route/{{ .hostKey }}{{ .path | default "/metrics" }}"
+    interval: {{ $.Values.serviceMonitor.interval | default "30s" | quote }}
+    # Static target-level label so samples from different sandboxes stay
+    # distinguishable at query time — the target's own `instance`/`pod`
+    # labels are the shared Envoy pod, not the sandbox, for every entry
+    # in this list.
+    relabelings:
+    - targetLabel: sandbox
+      replacement: {{ .name | quote }}
+  {{- end }}
+{{- end }}

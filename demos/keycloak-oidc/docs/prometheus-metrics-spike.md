@@ -1,11 +1,12 @@
 # Spike: scraping a sandbox metrics endpoint with Prometheus
 
-Status: **Spike, validated end-to-end on a live cluster (2026-08-28,
-OpenShell 0.0.106, OpenShift 4.21.18 / Kubernetes 1.34.8,
-prometheus-operator 3.7.3). Not merged — see recommendation at the end.**
-All cluster state created for this spike (sandbox, workspace, exposed
-service, ServiceMonitor, `garak-envoy` Helm release) was torn down after
-validation; nothing was left running.
+Status: **Experimental / proof-of-concept — not a settled, production-ready
+pattern.** Validated end-to-end on a live cluster (2026-08-28, OpenShell
+0.0.106, OpenShift 4.21.18 / Kubernetes 1.34.8, prometheus-operator 3.7.3).
+Not merged — see recommendation at the end. All cluster state created for
+this spike (sandbox, workspace, exposed service, ServiceMonitor, both the
+`garak-envoy` and `prometheus-envoy` Helm releases) was torn down after
+each validation pass; nothing was left running.
 
 ## Question
 
@@ -70,27 +71,63 @@ and the same fix applies unchanged.
 
 ## Working ServiceMonitor config
 
+`demos/keycloak-oidc/prometheus-envoy/templates/servicemonitor.yaml` now
+generates this automatically from `values.yaml` (see below) — this is the
+raw shape it produces for reference/hand-rolled use:
+
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: metrics-spike
+  name: prometheus-envoy
   namespace: keycloak-oidc-demo
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: garak-envoy   # or prometheus-envoy, see below
+      app.kubernetes.io/name: prometheus-envoy
   endpoints:
   - port: http
     path: /route/<workspace>--<sandbox-name>.openshell.localhost/metrics
     scheme: http
     interval: 30s
+    relabelings:
+    - targetLabel: sandbox
+      replacement: <sandbox-name>
 ```
 
-Note: after `oc apply`, the new scrape job took roughly 30-60s to actually
-appear in Prometheus's `/api/v1/status/config` and start showing as an
-active target — don't conclude a ServiceMonitor was rejected just because
-it's missing from the target list seconds after creation.
+**Multiple sandboxes, at will:** `values.yaml` takes a `serviceMonitor.targets`
+list (`name`, `hostKey`, optional `path`) — the chart renders one
+ServiceMonitor with one `endpoints[]` entry per target, so adding/removing a
+sandbox from monitoring is a `helm upgrade` with an updated values list, no
+per-sandbox Kubernetes object to hand-write:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  targets:
+    - name: metrics-spike
+      hostKey: spike--metrics-spike.openshell.localhost
+```
+
+Every target physically scrapes through the *same* Envoy pod/port, so
+Prometheus's own `instance`/`pod`/`service` target labels are identical
+across all of them — each `endpoints[]` entry still gets its own `job`
+label (`serviceMonitor/<ns>/prometheus-envoy/<index>`, which alone prevents
+metric collisions), and the chart additionally injects an explicit
+`sandbox="<name>"` label per target via `relabelings` for readable
+querying. **Confirmed live** with two example targets rendered
+(`helm template`) and one deployed end-to-end
+(`spike_metric_value{sandbox="metrics-spike"}` queryable via Prometheus's
+own API) — see [Annex: chart-driven re-verification](#annex-chart-driven-re-verification-2026-08-28)
+below.
+
+**Timing note:** after `oc apply`/`helm upgrade`, a new ServiceMonitor took
+anywhere from ~30s to ~2-3 minutes to actually appear in Prometheus's
+`/api/v1/status/config` and start showing as an active target across the
+two validation passes in this spike — don't conclude a ServiceMonitor was
+rejected just because it's missing from the target list shortly after
+creation; check `oc logs deployment/prometheus-operator` for actual errors
+before assuming failure.
 
 ## `garak-envoy` vs `prometheus-envoy`
 
@@ -104,6 +141,34 @@ If both ever ship for real, consider consolidating into one
 generically-named chart (e.g. `host-rewrite-envoy`) parameterized by
 release name, rather than maintaining two identical copies.
 
+## Annex: chart-driven re-verification (2026-08-28)
+
+Follow-up pass after the initial spike, to confirm the ServiceMonitor is
+actually shipped in the chart (not just a hand-written `oc apply` manifest)
+and that multiple sandboxes don't collide:
+
+1. Recreated the `spike` workspace/`metrics-spike` sandbox, re-uploaded the
+   exporter + sample file, re-exposed the service — identical to the first
+   pass.
+2. `helm upgrade --install prometheus-envoy demos/keycloak-oidc/prometheus-envoy
+   -n keycloak-oidc-demo -f <values with serviceMonitor.enabled=true and one target>`.
+3. Confirmed the rendered `ServiceMonitor/prometheus-envoy` object matched
+   the hand-written version exactly (same path, plus the `relabelings`
+   block), and — after the timing delay noted above — that the target
+   showed `health: up` with `labels.sandbox: metrics-spike` in Prometheus's
+   own `/api/v1/targets`.
+4. Queried `spike_metric_value` via Prometheus's `/api/v1/query`: returned
+   `{"sandbox":"metrics-spike", ...} = 42` — the chart-driven path produces
+   the identical, queryable result as the original hand-rolled manifest.
+5. `helm template` with two example targets (different `hostKey`/`path`,
+   one with a custom `path`) rendered two independent `endpoints[]` blocks
+   with distinct `sandbox` labels, confirming the multi-target case is
+   structurally correct (not independently deployed/scraped live — only
+   the single-target case was live-verified end-to-end).
+6. Full cleanup: `helm uninstall prometheus-envoy`, exposed service,
+   sandbox, and `spike` workspace all deleted; confirmed no leftover
+   `oc get sandbox,route,svc,servicemonitor,deployment` matches afterward.
+
 ## Open items / not tested
 
 - Only tested against `openshift-user-workload-monitoring`'s Prometheus.
@@ -113,8 +178,10 @@ release name, rather than maintaining two identical copies.
 - `PodMonitor` wasn't checked for a `headers` field — `ServiceMonitor` was
   the only CRD inspected, since the exporter is fronted by a Service either
   way (`garak-envoy`'s own Service).
-- No load/scale testing — this is a single-target scrape, not evaluated for
-  many sandboxes each needing their own scrape target regularly.
+- No load/scale testing — only one target was ever scraped live at once;
+  the multi-target case was confirmed by `helm template` rendering only
+  (see Annex above), not by actually running two sandboxes' scrapes
+  concurrently through the same Envoy pod.
 - The `garak-envoy`/`prometheus-envoy` image tag (`envoyproxy/envoy:v1.31-latest`)
   is still marked `[VERIFY]` in `values.yaml` — inherited from the original
   chart, not re-verified in this spike.
@@ -126,7 +193,11 @@ that decision:
 
 - The mechanism works and was validated live, reusing an already-shipped,
   already-validated component (`garak-envoy`'s Host-rewrite pattern) rather
-  than inventing something new — low incremental risk.
+  than inventing something new — low incremental risk. It's also now
+  chart-driven (values-list of sandboxes, not a hand-written manifest per
+  target), so it's genuinely usable for more than one sandbox without
+  further engineering — though only the single-target case was exercised
+  against a live scrape (see Open items).
 - It only becomes useful if there's an actual demo/use case that needs
   Prometheus scraping a sandbox-hosted metric (e.g. a future agent
   observability demo). Nothing in this repo currently consumes it.
