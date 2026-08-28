@@ -1,0 +1,12 @@
+# Bakes session-auditor into the stock Claude Code sandbox image at build
+# time. This is load-bearing, not a convenience: /usr (and therefore
+# /usr/local/bin) is read_only under OpenShell's default filesystem_policy,
+# enforced via Landlock — confirmed live that neither `sandbox exec` nor
+# even `sandbox upload` can write there once the sandbox exists. Baking the
+# binary in here, before the sandbox is ever created, is the only way to
+# get a copy of it into a path nothing inside a running sandbox can replace.
+# See demos/keycloak-oidc/docs/prometheus-metrics-spike.md.
+FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36
+
+# Copied here before build — see .gitignore in this directory.
+COPY --chmod=755 session-auditor /usr/local/bin/session-auditor

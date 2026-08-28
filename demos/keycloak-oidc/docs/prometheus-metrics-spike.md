@@ -8,6 +8,11 @@ this spike (sandbox, workspace, exposed service, ServiceMonitor, both the
 `garak-envoy` and `prometheus-envoy` Helm releases) was torn down after
 each validation pass; nothing was left running.
 
+**Follow-up spike:** [session-auditor-spike.md](session-auditor-spike.md)
+builds on this to answer a harder question — can the metric itself be
+trusted, i.e. protected from tampering by the sandbox's own user, not just
+reachable by Prometheus.
+
 ## Question
 
 Can Prometheus scrape a metrics endpoint exposed from an OpenShell sandbox
