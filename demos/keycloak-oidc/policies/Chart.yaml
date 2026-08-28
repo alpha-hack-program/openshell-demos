@@ -1,0 +1,9 @@
+apiVersion: v2
+name: banker-policy
+description: >-
+  Composes an OpenShell sandbox policy document (for `openshell policy set`)
+  from reusable network-policy fragments, selected by agent-harness recipe
+  and a list of MCP server names. Rendered locally with `helm template` —
+  never installed to a cluster, has no Kubernetes resources.
+type: application
+version: 0.1.0

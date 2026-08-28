@@ -1365,6 +1365,15 @@ walkthrough in [Annex B](#b-raw-mcp-protocol-calls-curl-for-scriptingci).
 a real agentic harness making its own multi-hop tool-call decisions, not a
 scripted sequence of JSON-RPC bodies — covered next.
 
+This is the first place this guide touches a sandbox policy. If the
+`--add-endpoint`/`--binary` shape above isn't self-explanatory, see
+[`docs/policy-anatomy.md`](docs/policy-anatomy.md) for what a policy
+document actually contains, how `policy update`/`policy set`/`policy get`
+differ, and a worked example of granting a one-off host (a weather API)
+both the quick way and the full-document way. [Provision the Claude Code
+harness](#provision-the-claude-code-harness) below builds on the
+full-document approach.
+
 #### Write each banker's MCP server config once
 
 Every scene below needs to hand `claude --mcp-config` a JSON blob listing
@@ -1545,22 +1554,44 @@ for USER_ID in alice bob charlie; do
 done
 rm -f "$TMPFILE"
 
+POLICY_TMPFILE=$(mktemp --suffix=.yaml)
 for USER_ID in alice bob charlie; do
-  openshell policy update "demo-${USER_ID}" \
-    --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
-    --binary /usr/local/bin/claude --workspace "${USER_ID}" --wait
-  for SERVER_NAME in mcp-portfolio mcp-crm-calendar mcp-market-news mcp-kyc-compliance; do
-    openshell policy update "demo-${USER_ID}" \
-      --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-      --binary /usr/local/bin/claude --workspace "${USER_ID}" --wait
-  done
+  if [ "${USER_ID}" = "alice" ]; then
+    MCP_SERVERS='{mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility}'
+  else
+    MCP_SERVERS='{mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance}'
+  fi
+  helm template "demo-${USER_ID}-policy" policies \
+    --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
+    --set llmHost="${LLM_HOST}" \
+    --set recipe=claude-code \
+    --set "mcpServers=${MCP_SERVERS}" \
+    > "${POLICY_TMPFILE}"
+  openshell policy set "demo-${USER_ID}" --policy "${POLICY_TMPFILE}" \
+    --workspace "${USER_ID}" --wait
 done
-
-# Alice's extra permission
-openshell policy update "demo-alice" \
-  --add-endpoint "mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-  --binary /usr/local/bin/claude --workspace "alice" --wait
+rm -f "${POLICY_TMPFILE}"
 ```
+
+This renders each banker's full policy document from the
+[`policies/`](policies/) Helm chart instead of merging endpoints in one
+`policy update` call at a time, then applies it with `openshell policy
+set`, which **replaces the sandbox's whole policy** rather than merging
+into it. That's only safe because the rendered document already includes
+everything this sandbox needs — see
+[`docs/policy-anatomy.md`](docs/policy-anatomy.md) for the full
+merge-vs-replace explanation and the chart's `values.yaml` for what each
+`--set` controls. Alice's extra `mcp-compatibility` grant is just one more
+name in her `mcpServers` list, not a separate command.
+
+> **This chart is a demo convenience, not a policy-management best
+> practice.** It exists to make one README block readable instead of a
+> dozen near-identical `policy update` calls; it isn't schema-validated
+> against OpenShell's actual policy format beyond whatever `policy set`
+> itself rejects at apply time, and Helm is being used here purely as a
+> local text-templating engine — nothing here is installed to the
+> cluster. See [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for the
+> caveats in full.
 
 #### Log in as each banker (one-time per terminal, before Scene 1)
 
@@ -2626,12 +2657,34 @@ QUESTION="Who is my biggest client by assets under management?"
 
    rm -f "$CODEX_CONFIG"
 
-   openshell policy update "codex-${USER_ID}" \
-     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-     --binary /usr/local/bin/codex \
-     --workspace "${USER_ID}" \
-     --wait
+   POLICY_TMPFILE=$(mktemp --suffix=.yaml)
+   helm template "codex-${USER_ID}-policy" policies \
+     --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
+     --set llmHost=inference.local \
+     --set recipe=codex \
+     --set "mcpServers={${SERVER_NAME}}" \
+     > "${POLICY_TMPFILE}"
+   openshell policy set "codex-${USER_ID}" --policy "${POLICY_TMPFILE}" \
+     --workspace "${USER_ID}" --wait
+   rm -f "${POLICY_TMPFILE}"
    ```
+
+   Same [`policies/`](policies/) chart as the Claude Code harness, with
+   `recipe=codex` — see
+   [Provision the Claude Code harness](#provision-the-claude-code-harness)
+   for what `policy set` replaces and why that's safe here, and
+   [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for the full
+   explanation. `llmHost` is `inference.local`, not
+   `$OPENAI_BASE_URL`'s host — Codex never talks to the real LLM endpoint
+   directly, only through OpenShell's privacy router (see the note at the
+   top of this recipe). Confirmed live end to end: after this `policy set`,
+   the provider-composed `_provider_byo_codex` and `_provider_user_bob`
+   groups (added by `--provider byo-codex`/`--provider user-bob` at sandbox
+   creation) were still present — `policy set` only replaces the base
+   policy document, not provider-contributed grants — and `codex exec`
+   against `codex-bob` correctly called `mcp-portfolio`'s
+   `get_top_client_by_aum` tool through `inference.local` and returned a
+   real answer.
 
    > The `--upload` flag takes `<LOCAL_PATH>:<SANDBOX_PATH>` — specify the
    > full file path on both sides (uploading a directory nests it as a
@@ -3205,24 +3258,42 @@ exact patch release before relying on this beyond a demo.
   short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
   — not real FATF/MiFID II/AML text, and not something to demo as if it
   were. See that server's own README disclaimer.
-- **TODO: consolidate the per-server `policy update` loops in
-  [step 5](#5-run-the-demo)'s setup.** `openshell policy update` accepts
-  multiple `--add-endpoint`/`--binary` flags in a single call — tested
-  against a throwaway sandbox: two endpoints plus two binaries in one call
-  produced a single policy version, with both binaries correctly attached
-  to both endpoints. That means each banker's `for SERVER_NAME in
-  mcp-portfolio mcp-crm-calendar ...` loop (one `policy update` call per
-  server, both in the curl-permissions block and in
-  [Provision the Claude Code harness](#provision-the-claude-code-harness))
-  could likely become a single call per banker per stage instead. Not yet
-  done — needs re-verifying the resulting merged policy and
-  `08-verify-isolation.sh` before rolling it into the guide. (Note:
-  `openshell policy set --policy file.yaml`, which takes a complete policy
-  document, is **not** a safe alternative for this — also tested against a
-  throwaway sandbox, and it fully replaces the policy, wiping the built-in
-  bundled rule catalog — `claude_code`, `codex`, `copilot`, `github`,
-  `pypi`, `vscode`, etc. — that `policy update --add-endpoint` merges on
-  top of automatically.)
+- **RESOLVED: the per-server `policy update` loops in
+  [Provision the Claude Code harness](#provision-the-claude-code-harness)
+  and the Codex recipe in
+  [Annex A](#codex--byo-llm--mcp-tool) now use `openshell policy set` with a
+  document rendered from the [`policies/`](policies/) Helm chart, instead
+  of one `policy update --add-endpoint`/`--binary` call per MCP server.**
+  Earlier revisions of this note warned that `policy set` was unsafe
+  because it fully replaces the policy document, wiping the built-in
+  bundle catalog (`claude_code`, `codex`, `copilot`, `github`, `pypi`,
+  `vscode`, etc.) that `policy update --add-endpoint` merges on top of
+  automatically. That's still true, but two more things confirmed live
+  changed the calculus:
+  1. **Provider-composed grants survive `policy set` intact.** Attaching a
+     provider (`sandbox provider attach`, or `--provider` at `sandbox
+     create`) adds a `_provider_<name>` group to the *effective* policy
+     that isn't part of the base document `policy set` replaces — verified
+     by attaching a real `byo-claude`-style provider, running `policy set`
+     with a document that didn't mention its host at all, and confirming
+     the provider's group (including its own binary/endpoint grants, if
+     the profile declares any — `byo-codex`'s profile does, `byo-claude`'s
+     doesn't) was still there afterward.
+  2. **A hand-composed document only needs to cover what the guide
+     actually grants explicitly** — the built-in bundles this demo's
+     sandboxes never use (`codex`/`claude_code`'s counterpart, `copilot`,
+     `cursor`, `vscode`, `opencode`, `pypi`, `github_rest_api`,
+     `github_ssh_over_https`) are dropped on purpose, which is a tighter
+     policy for a KYC/compliance demo, not a gap.
+  Confirmed end to end for both recipes: the Claude harness's chart-set
+  policy carries all four/five MCP groups correctly (Alice's extra
+  `mcp-compatibility` verified against a throwaway sandbox); the Codex
+  recipe's chart-set policy was applied to a real `codex-bob` sandbox and a
+  real `codex exec` query correctly called `mcp-portfolio`'s
+  `get_top_client_by_aum` tool through `inference.local` and returned a
+  real answer. See [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for
+  the full writeup, including the explicit caveat that this composition
+  approach is a demo convenience, not a policy-management best practice.
 - **Workspace scoping is manual and easy to get wrong.** Every command that
   touches a user's provider, sandbox, or policy needs an explicit
   `--workspace` flag pointed at that user's own workspace — there's no

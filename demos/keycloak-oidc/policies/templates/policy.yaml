@@ -1,0 +1,123 @@
+{{- if not .Values.openshellNamespace }}
+{{- fail "openshellNamespace is required, e.g. --set openshellNamespace=keycloak-oidc-demo" }}
+{{- end }}
+{{- if not .Values.llmHost }}
+{{- fail "llmHost is required, e.g. --set llmHost=api.deepseek.com" }}
+{{- end }}
+{{- if not (has .Values.recipe (list "claude-code" "codex")) }}
+{{- fail (printf "recipe must be claude-code or codex, got %q" .Values.recipe) }}
+{{- end }}
+## Rendered by `helm template` from demos/keycloak-oidc/policies — do not
+## hand-edit the output. Apply with:
+##   openshell policy set <sandbox> --policy <this-file> --workspace <ws> --wait
+## `policy set` REPLACES the whole sandbox policy, so this document carries
+## everything the sandbox needs: filesystem/landlock/process copied from a
+## fresh sandbox's built-in defaults, the {{ .Values.recipe }} agent-harness
+## bundle, the BYO LLM host, and one group per MCP server below. Built-in
+## bundles this sandbox doesn't use (codex/claude-code's counterpart,
+## copilot, cursor, vscode, opencode, pypi, github_rest_api,
+## github_ssh_over_https) are deliberately left out.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_group: sandbox
+  run_as_user: sandbox
+
+network_policies:
+{{- if eq .Values.recipe "claude-code" }}
+  claude_code:
+    name: claude-code
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/node
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        access: full
+        enforcement: enforce
+        tls: terminate
+      - host: statsig.anthropic.com
+        port: 443
+      - host: sentry.io
+        port: 443
+      - host: raw.githubusercontent.com
+        port: 443
+      - host: platform.claude.com
+        port: 443
+
+  allow_llm_host:
+    name: allow_llm_host
+    binaries:
+      - path: /usr/bin/curl
+      - path: /usr/local/bin/claude
+    endpoints:
+      - host: {{ .Values.llmHost | quote }}
+        port: 443
+        protocol: rest
+        access: read-write
+        enforcement: enforce
+{{- else }}
+  codex:
+    name: codex
+    binaries:
+      - path: /usr/bin/codex
+      - path: /usr/bin/node
+      - path: /usr/lib/node_modules/@openai/**
+    endpoints:
+      - host: api.openai.com
+        port: 443
+      - host: auth.openai.com
+        port: 443
+      - host: chatgpt.com
+        port: 443
+
+  allow_llm_host:
+    name: allow_llm_host
+    binaries:
+      - path: /usr/bin/curl
+      - path: /usr/local/bin/codex
+    endpoints:
+      - host: {{ .Values.llmHost | quote }}
+        port: 443
+        protocol: rest
+        access: read-write
+        enforcement: enforce
+{{- end }}
+{{- $recipe := .Values.recipe }}
+{{- $namespace := .Values.openshellNamespace }}
+{{- range .Values.mcpServers }}
+  allow_{{ . | replace "-" "_" }}:
+    name: allow_{{ . | replace "-" "_" }}
+    binaries:
+      - path: /usr/bin/curl
+      {{- if eq $recipe "claude-code" }}
+      - path: /usr/local/bin/claude
+      {{- else }}
+      - path: /usr/local/bin/codex
+      {{- end }}
+    endpoints:
+      - host: {{ printf "%s.%s.svc.cluster.local" . $namespace | quote }}
+        port: 8000
+        protocol: rest
+        access: read-write
+        enforcement: enforce
+{{- end }}

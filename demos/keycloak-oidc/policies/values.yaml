@@ -1,0 +1,31 @@
+# Rendered with `helm template <release-name> policies --set ...`, never
+# `helm install` — there is no in-cluster release, this chart only produces
+# a policy YAML/JSON file for `openshell policy set --policy <file>`.
+#
+# All four values below are required; the template fails fast (via `fail`)
+# if any is left at its empty default. Pass them with --set, e.g.:
+#
+#   helm template demo-alice policies \
+#     --set openshellNamespace=keycloak-oidc-demo \
+#     --set llmHost=api.deepseek.com \
+#     --set recipe=claude-code \
+#     --set 'mcpServers={mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility}'
+#
+# llmModel is deliberately not a value here: the model name never appears
+# in a network policy (no host/port/binary rule depends on it) — it's
+# config passed to the agent via --env at exec time, not a policy grant.
+
+# In-cluster hostname suffix for MCP servers:
+# <mcpServer>.<openshellNamespace>.svc.cluster.local
+openshellNamespace: ""
+
+# Hostname only (no scheme, no path) of the BYO LLM endpoint, e.g. api.deepseek.com
+llmHost: ""
+
+# Which built-in agent-harness bundle + binary to grant: claude-code | codex
+recipe: claude-code
+
+# MCP server short names this sandbox may reach. Each becomes its own
+# network_policies group, e.g. mcp-portfolio -> allow_mcp_portfolio,
+# granting <name>.<openshellNamespace>.svc.cluster.local:8000.
+mcpServers: []
