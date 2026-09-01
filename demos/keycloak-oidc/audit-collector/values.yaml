@@ -1,0 +1,6 @@
+# Whether to render a ServiceMonitor alongside the collector, so
+# openshift-user-workload-monitoring scrapes its Prometheus exporter.
+# Disable if you'd rather wire scraping up yourself.
+serviceMonitor:
+  enabled: true
+  interval: 15s

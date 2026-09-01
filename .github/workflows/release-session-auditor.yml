@@ -1,0 +1,119 @@
+name: Release session-auditor
+
+on:
+  push:
+    tags: ['session-auditor-v*']
+
+env:
+  REGISTRY: ghcr.io
+
+defaults:
+  run:
+    working-directory: util/session-auditor
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v5
+        with:
+          name: session-auditor-linux-x86_64-musl
+          path: util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor
+
+  # Bakes the musl binary into each agent's sandbox base image and pushes
+  # to GHCR. This is load-bearing, not a convenience: /usr/local/bin is
+  # read_only under OpenShell's default filesystem_policy (Landlock), and
+  # neither `sandbox exec` nor `sandbox upload` can write there once a
+  # sandbox exists — baking the binary in here, before the sandbox is
+  # created, is the only way to get a copy of it into a path nothing
+  # inside a running sandbox can replace. See
+  # demos/keycloak-oidc/docs/prometheus-scraping.md.
+  #
+  # Each image gets three tags: the exact tag of the *base* image it's
+  # built from (extracted from the Containerfile's own FROM line, so a
+  # base-image bump is visible rather than silently going stale), `latest`,
+  # and this crate's own release tag (github.ref_name) for release history.
+  image:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: session-auditor-linux-x86_64-musl
+          path: util/session-auditor/target/x86_64-unknown-linux-musl/release
+      - run: chmod +x util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push claude-audit
+        run: |
+          cp util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor \
+            demos/keycloak-oidc/images/claude-audit/session-auditor
+          BASE_TAG=$(grep '^FROM' demos/keycloak-oidc/images/claude-audit/Containerfile | sed 's/.*://')
+          docker build \
+            -t "$REGISTRY/${{ github.repository }}/claude-audit:$BASE_TAG" \
+            -t "$REGISTRY/${{ github.repository }}/claude-audit:latest" \
+            -t "$REGISTRY/${{ github.repository }}/claude-audit:${{ github.ref_name }}" \
+            -f demos/keycloak-oidc/images/claude-audit/Containerfile \
+            demos/keycloak-oidc/images/claude-audit/
+          docker push "$REGISTRY/${{ github.repository }}/claude-audit:$BASE_TAG"
+          docker push "$REGISTRY/${{ github.repository }}/claude-audit:latest"
+          docker push "$REGISTRY/${{ github.repository }}/claude-audit:${{ github.ref_name }}"
+      - name: Build and push codex-audit
+        run: |
+          cp util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor \
+            demos/keycloak-oidc/images/codex-audit/session-auditor
+          BASE_TAG=$(grep '^FROM' demos/keycloak-oidc/images/codex-audit/Containerfile | sed 's/.*://')
+          docker build \
+            -t "$REGISTRY/${{ github.repository }}/codex-audit:$BASE_TAG" \
+            -t "$REGISTRY/${{ github.repository }}/codex-audit:latest" \
+            -t "$REGISTRY/${{ github.repository }}/codex-audit:${{ github.ref_name }}" \
+            -f demos/keycloak-oidc/images/codex-audit/Containerfile \
+            demos/keycloak-oidc/images/codex-audit/
+          docker push "$REGISTRY/${{ github.repository }}/codex-audit:$BASE_TAG"
+          docker push "$REGISTRY/${{ github.repository }}/codex-audit:latest"
+          docker push "$REGISTRY/${{ github.repository }}/codex-audit:${{ github.ref_name }}"
+
+  release:
+    needs: [build, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: session-auditor-linux-x86_64-musl
+          path: .
+      - run: |
+          mv session-auditor session-auditor-linux-x86_64-musl
+          chmod +x session-auditor-linux-x86_64-musl
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: session-auditor-linux-x86_64-musl

@@ -1,0 +1,28 @@
+# Bakes session-auditor into the stock Codex sandbox image at build time.
+# Same rationale as claude-audit/Containerfile: /usr/local/bin is
+# read_only under OpenShell's default filesystem_policy, so this is the
+# only way to place a binary nothing inside a running sandbox can replace.
+# See demos/keycloak-oidc/docs/prometheus-scraping.md.
+FROM quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012
+
+# Copied here before build — see .gitignore in this directory.
+COPY --chmod=755 session-auditor /usr/local/bin/session-auditor
+
+# Registers session-auditor as a Codex Stop hook the sandbox's own user
+# cannot disable or replace. /etc/codex is read_only under OpenShell's
+# default filesystem_policy, same protection as /usr/local/bin above.
+# `allow_managed_hooks_only = true` skips hooks from user/project/session/
+# plugin sources but still loads managed ones from this file — confirmed
+# live (codex-cli 0.146.0) that this fires the same as Claude Code's
+# managed-settings.json equivalent. Note: Codex's docs recommend, but do
+# not enforce, that managed hook commands live under `managed_dir` — using
+# /usr/local/bin (where the binary already needs to be for the Landlock
+# protection above) worked fine in live testing despite this file also
+# living outside a dedicated /enterprise/hooks-style directory.
+# See demos/keycloak-oidc/docs/prometheus-scraping.md.
+COPY requirements.toml /etc/codex/requirements.toml
+
+# Deliberately no CMD/ENTRYPOINT — same reasoning as claude-audit's
+# Containerfile: OpenShell's supervisor always replaces the image's own
+# USER/ENTRYPOINT/CMD, and session-auditor is invoked by Codex itself via
+# the Stop hook above, not as a long-running server.

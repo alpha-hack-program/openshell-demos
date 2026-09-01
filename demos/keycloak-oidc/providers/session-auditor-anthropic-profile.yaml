@@ -1,0 +1,67 @@
+id: session-auditor-anthropic
+display_name: Session Auditor (Anthropic-compatible classification backend)
+description: Credentials and config for the session-auditor Stop-hook when its classification call targets an Anthropic-Messages-API-compatible backend — plus the OTLP push target. Scoped entirely to the session-auditor binary, never to claude/codex, so the sandbox owner can't reach the OTLP collector or the LLM host by impersonating the auditor with a plain curl. See session-auditor-openai-profile.yaml for the OpenAI-Chat-Completions-compatible variant — same purpose, different wire format, mirroring this demo's own byo-claude/byo-codex split.
+category: inference
+inference_capable: false
+
+credentials:
+  - name: api_key
+    description: LLM API key for the classification call, injected as AUDITOR_ANTHROPIC_API_KEY
+    env_vars: [AUDITOR_ANTHROPIC_API_KEY]
+    required: true
+    auth_style: header
+    header_name: x-api-key
+
+# Deliberately AUDITOR_-prefixed, not ANTHROPIC_API_KEY/BASE_URL/MODEL —
+# confirmed live that attaching this provider alongside a Claude Code LLM
+# provider (e.g. deepseek-claude) to the same sandbox fails with "credential
+# env key 'ANTHROPIC_API_KEY' is provided by both provider 'session-auditor'
+# and provider 'deepseek-claude'; use provider-specific env names" if both
+# declare the same credential env var. Distinct names also mean the
+# classification call can legitimately use a different backend/model than
+# the agent's own conversation, which the shared-name version accidentally
+# prevented anyway.
+#
+# NOTE: config values do not currently auto-inject as environment
+# variables on this OpenShell version — confirmed live, cross-checked
+# against this demo's own pre-existing deepseek-claude provider, which
+# shows the identical behavior despite declaring config the same way.
+# Kept here for self-documentation only; base_url/model must still be
+# passed via `--env` when starting the agent (see
+# demos/keycloak-oidc/docs/prometheus-scraping.md). OTLP_ENDPOINT is no
+# longer a config value at all — it's compiled into the binary
+# (util/session-auditor/otlp-endpoint.txt), never read from the
+# environment.
+config:
+  - name: base_url
+    description: "Anthropic-compatible base URL for the classification call (e.g. https://api.deepseek.com/anthropic). Defaults to https://api.anthropic.com if unset."
+    env_vars: [AUDITOR_LLM_BASE_URL]
+    required: false
+  - name: model
+    description: Model for the classification call
+    env_vars: [AUDITOR_ANTHROPIC_MODEL]
+    required: false
+  - name: api_style
+    description: "Fixed at 'anthropic' for this profile — set AUDITOR_API_STYLE=anthropic (or leave unset, it's the binary's default) if starting the agent with an explicit --env."
+    env_vars: [AUDITOR_API_STYLE]
+    required: false
+
+endpoints:
+  - host: "api.deepseek.com"
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  # Matches the short, in-namespace DNS name compiled into
+  # session-auditor's binary (util/session-auditor/otlp-endpoint.txt) —
+  # keep these in sync; the demos/keycloak-oidc/audit-collector chart's
+  # release name is fixed to "audit" so the Service is always named
+  # exactly this.
+  - host: "audit-collector"
+    port: 4318
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+
+binaries:
+  - /usr/local/bin/session-auditor

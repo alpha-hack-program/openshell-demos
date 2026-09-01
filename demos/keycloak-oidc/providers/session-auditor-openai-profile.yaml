@@ -1,0 +1,53 @@
+id: session-auditor-openai
+display_name: Session Auditor (OpenAI-compatible classification backend)
+description: Credentials and config for the session-auditor Stop-hook when its classification call targets an OpenAI-Chat-Completions-API-compatible backend — plus the OTLP push target. Scoped entirely to the session-auditor binary, never to claude/codex, so the sandbox owner can't reach the OTLP collector or the LLM host by impersonating the auditor with a plain curl. See session-auditor-anthropic-profile.yaml for the Anthropic-Messages-API-compatible variant (today's default) — same purpose, different wire format, mirroring this demo's own byo-claude/byo-codex split (different credential env name/auth style per API, not per agent).
+category: inference
+inference_capable: false
+
+credentials:
+  - name: api_key
+    description: LLM API key for the classification call, injected as AUDITOR_OPENAI_API_KEY
+    env_vars: [AUDITOR_OPENAI_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+
+# NOTE: config values do not currently auto-inject as environment
+# variables on this OpenShell version — confirmed live for the sibling
+# session-auditor-anthropic-profile.yaml, same underlying mechanism here.
+# Kept here for self-documentation only; base_url/model/api_style must
+# still be passed via `--env` when starting the agent (see
+# demos/keycloak-oidc/docs/prometheus-scraping.md).
+config:
+  - name: base_url
+    description: "OpenAI-compatible base URL for the classification call (e.g. https://api.deepseek.com). Defaults to https://api.openai.com if unset."
+    env_vars: [AUDITOR_LLM_BASE_URL]
+    required: false
+  - name: model
+    description: Model for the classification call
+    env_vars: [AUDITOR_OPENAI_MODEL]
+    required: false
+  - name: api_style
+    description: "Must be set to 'openai' — session-auditor's default is 'anthropic', so this profile alone does not switch the wire format; pass --env AUDITOR_API_STYLE=openai explicitly when starting the agent."
+    env_vars: [AUDITOR_API_STYLE]
+    required: false
+
+endpoints:
+  - host: "api.deepseek.com"
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  # Matches the short, in-namespace DNS name compiled into
+  # session-auditor's binary (util/session-auditor/otlp-endpoint.txt) —
+  # keep these in sync; the demos/keycloak-oidc/audit-collector chart's
+  # release name is fixed to "audit" so the Service is always named
+  # exactly this.
+  - host: "audit-collector"
+    port: 4318
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+
+binaries:
+  - /usr/local/bin/session-auditor

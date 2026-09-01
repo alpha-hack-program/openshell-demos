@@ -1,0 +1,17 @@
+apiVersion: v2
+name: audit-collector
+description: >-
+  A dedicated OpenTelemetryCollector instance that receives OTLP pushes
+  from session-auditor (see util/session-auditor and
+  demos/keycloak-oidc/docs/prometheus-scraping.md) and re-exposes them for
+  Prometheus to scrape via its own exporter + ServiceMonitor. Requires the
+  Red Hat build of OpenTelemetry Operator to already be installed on the
+  cluster — this chart only creates an instance, not the operator/CRDs.
+  The release name is fixed to `audit` (see values.yaml) so the resulting
+  Service DNS name (`audit-collector`) matches the short, in-namespace
+  hostname baked into session-auditor's binary at compile time
+  (util/session-auditor/otlp-endpoint.txt) — don't rename the release
+  without also rebuilding session-auditor's images.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

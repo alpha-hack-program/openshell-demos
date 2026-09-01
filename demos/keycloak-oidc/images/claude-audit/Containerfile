@@ -1,0 +1,29 @@
+# Bakes session-auditor into the stock Claude Code sandbox image at build
+# time. This is load-bearing, not a convenience: /usr (and therefore
+# /usr/local/bin) is read_only under OpenShell's default filesystem_policy,
+# enforced via Landlock — neither `sandbox exec` nor even `sandbox upload`
+# can write there once the sandbox exists. Baking the binary in here,
+# before the sandbox is ever created, is the only way to get a copy of it
+# into a path nothing inside a running sandbox can replace.
+# See demos/keycloak-oidc/docs/prometheus-scraping.md.
+FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36
+
+# Copied here before build — see .gitignore in this directory.
+COPY --chmod=755 session-auditor /usr/local/bin/session-auditor
+
+# Registers session-auditor as a Claude Code Stop hook that the sandbox's
+# own user cannot disable or replace: /etc is read_only under OpenShell's
+# default filesystem_policy (same protection as /usr/local/bin above), and
+# `allowManagedHooksOnly`/`disableAllHooks: false` here are Claude Code's
+# own managed-settings mechanism — confirmed live that `disableAllHooks`
+# is not among the small set of keys a lower-precedence
+# (user/project/--settings) value can override. See
+# demos/keycloak-oidc/docs/prometheus-scraping.md.
+COPY managed-settings.json /etc/claude-code/managed-settings.json
+
+# Deliberately no CMD/ENTRYPOINT: OpenShell's supervisor always replaces
+# an image's own USER/ENTRYPOINT/CMD with its own root supervisor at
+# sandbox startup regardless of what's declared here — a baked-in start
+# command would just be silently ignored. session-auditor is invoked by
+# Claude Code itself, once per turn, via the Stop hook above — it is not a
+# long-running server and doesn't need a startup command at all.

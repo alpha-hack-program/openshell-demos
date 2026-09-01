@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "session-auditor-v{{version}}"
+pre-release-commit-message = "release(session-auditor): {{version}}"
+tag-message = "session-auditor v{{version}}"
+pre-release-hook = ["make", "ci"]

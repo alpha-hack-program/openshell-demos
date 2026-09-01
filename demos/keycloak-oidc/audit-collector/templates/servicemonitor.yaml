@@ -1,0 +1,20 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: audit-collector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/managed-by: opentelemetry-operator
+      app.kubernetes.io/instance: {{ .Release.Namespace }}.audit
+      # Without this, the selector also matches the Operator-generated
+      # "-headless" and "-monitoring" Services for the same collector,
+      # producing duplicate scrape targets for the same pod — confirmed
+      # live. This label is what the Operator uses to tell them apart.
+      operator.opentelemetry.io/collector-service-type: base
+  endpoints:
+  - port: prometheus
+    scheme: http
+    interval: {{ .Values.serviceMonitor.interval | default "15s" | quote }}
+{{- end }}

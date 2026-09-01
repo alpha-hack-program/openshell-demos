@@ -1,0 +1,28 @@
+# metadata.name is deliberately fixed to "audit", not templated on
+# .Release.Name — the OpenTelemetry Operator names the generated Service
+# "<name>-collector", and that exact string ("audit-collector") is
+# compiled into session-auditor's binary as its OTLP push target (see
+# util/session-auditor/otlp-endpoint.txt). Renaming this release would
+# silently break that without a matching binary rebuild.
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: audit
+spec:
+  mode: deployment
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          exporters: [prometheus]
