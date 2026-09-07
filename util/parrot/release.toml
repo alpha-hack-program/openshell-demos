@@ -1,0 +1,8 @@
+publish = false
+push = true
+tag = true
+consolidate-commits = true
+pre-release-commit-message = "release: {{version}}"
+tag-name = "parrot-v{{version}}"
+tag-message = "parrot-v{{version}}"
+pre-release-hook = ["make", "-C", "..", "ci"]
