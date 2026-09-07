@@ -1,0 +1,34 @@
+# Layers the openshell CLI onto the official OpenClaw image so OpenClaw's
+# OpenShell plugin (plugins.entries.openshell.config.command) has a binary
+# to shell out to. OpenClaw itself never runs inside an OpenShell sandbox —
+# it's the other way around: this pod's `openshell` CLI, using alice's own
+# pre-provisioned session (see ../../scripts/12-bootstrap-openclaw-alice-session.sh),
+# drives sandbox lifecycle and executes agent commands over SSH into her
+# `demo-alice` sandbox. See docs/sandbox-service-patterns.md for the general
+# custom-image convention this follows.
+#
+# Before building, put a musl static Linux x86_64 `openshell` binary in this
+# directory (e.g. extracted from the openshell-musl release tarball at
+# https://github.com/NVIDIA/OpenShell/releases — see demos/base/README.md's
+# "Installing the CLI" section for the release asset naming convention).
+# The vendor's `-slim` base may not match the glibc the CLI was built
+# against, so a statically-linked binary avoids a `GLIBC_x.xx not found`
+# failure at runtime.
+#
+# [VERIFY] pin an exact OpenClaw release tag once this has been built and
+# tested against a live cluster — 2026.7.1-2-slim was the latest confirmed
+# via docs.openclaw.ai at the time this was written.
+FROM ghcr.io/openclaw/openclaw:2026.7.1-2-slim
+
+COPY openshell /usr/local/bin/openshell
+
+# plugins.entries.openshell is a separate, official-but-external ClawHub
+# plugin, not bundled with core OpenClaw. Confirmed live: leaving it
+# uninstalled makes OpenClaw's own startup "doctor" try to self-heal by
+# installing it against the running pod's read-only-ish, Secret-mounted
+# openclaw.json — which then fails with "Refusing to start the gateway
+# because the final config read became invalid." Installing it at build
+# time avoids that runtime self-heal path entirely. Runs as the image's
+# default `node` user (uid=1000) since that's whose $HOME/.openclaw the
+# plugin installs into.
+RUN openclaw plugins install @openclaw/openshell-sandbox

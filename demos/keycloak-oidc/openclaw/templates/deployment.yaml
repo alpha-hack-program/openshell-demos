@@ -1,0 +1,146 @@
+# This pod holds alice's own OpenShell CLI session — mounted read-only, it
+# is her actual credential to run `sandbox exec` against demo-alice.
+# initContainer/tarball-unpack shape is identical to
+# ../onboarding-web/templates/deployment.yaml for the same reason: a
+# Secret's data keys are flat, so the multi-file XDG config/state tree
+# produced by ../scripts/12-bootstrap-openclaw-alice-session.sh ships as a
+# single tarball and is unpacked into a real directory tree here.
+#
+# OpenClaw itself never runs inside an OpenShell sandbox — this container
+# runs the OpenClaw Gateway directly, and its OpenShell plugin shells out
+# to the `openshell` CLI baked into the image
+# (../images/openclaw-openshell/Containerfile) to reach the gateway and
+# SSH into alice's sandbox. See ../README.md for the full architecture
+# note and the community/non-production caveats that apply to this whole
+# chart.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+spec:
+  # OpenClaw is a single-instance application upstream (no documented
+  # horizontal scaling) — do not raise replicas or add a second release
+  # pointed at the same session without also giving it its own banker
+  # session and Route.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openclaw
+    spec:
+      # Unlike ../../helm/values.yaml (which NULLs runAsUser to let
+      # OpenShift assign an arbitrary UID), ghcr.io/openclaw/openclaw hard-
+      # codes /home/node/.openclaw to 0700, owned by uid=1000/gid=1000 —
+      # confirmed by inspecting the image directly. Any other UID gets
+      # "permission denied" reading openclaw.json, so this pod must run as
+      # UID 1000 specifically, which requires the `anyuid` SCC on the
+      # openclaw ServiceAccount (see ../../scripts/13-deploy-openclaw.sh).
+      securityContext:
+        runAsUser: 1000
+      serviceAccountName: openclaw
+      volumes:
+        - name: alice-session-secret
+          secret:
+            secretName: {{ .Values.aliceSessionSecretName }}
+        - name: alice-session
+          emptyDir: {}
+        - name: openclaw-config
+          secret:
+            secretName: openclaw-config
+      initContainers:
+        - name: unpack-alice-session
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c", "tar xzf /secret/*-session.tar.gz -C /session"]
+          volumeMounts:
+            - name: alice-session-secret
+              mountPath: /secret
+              readOnly: true
+            - name: alice-session
+              mountPath: /session
+      containers:
+        - name: openclaw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 18789
+          env:
+            # This repo's own confirmed-live mechanism for giving a process
+            # its own isolated openshell CLI identity — see
+            # feedback_xdg-multi-identity-isolation / README's "How to
+            # follow this guide" section. Upstream OpenClaw docs don't
+            # document this env var themselves; it works because the
+            # openshell CLI honors it directly.
+            - name: XDG_CONFIG_HOME
+              value: /session/config
+            - name: XDG_STATE_HOME
+              value: /session/state
+            # The installed openshell-sandbox plugin version rejects a
+            # "workspace" key in plugins.entries.openshell.config (see
+            # ../templates/secret-openclaw-config.yaml) — this ambient env
+            # var is the plugin/CLI's actual workspace-selection mechanism
+            # for this version, confirmed live.
+            - name: OPENSHELL_WORKSPACE
+              value: {{ .Values.openshell.workspace | quote }}
+            # Deliberately no OPENCLAW_GATEWAY_TOKEN env var — the docs
+            # for gateway.auth.mode: "trusted-proxy" state a configured
+            # shared token and trusted-proxy auth are mutually exclusive
+            # (confirmed live: setting both blocks gateway startup with
+            # "gateway: Invalid input"). See
+            # ../templates/secret-openclaw-config.yaml for the auth config.
+            # The provider API key is likewise NOT injected as an env var —
+            # same file's header comment explains why the config-file path
+            # (models.providers.anthropic) is the reliable one instead.
+          volumeMounts:
+            - name: alice-session
+              mountPath: /session
+            - name: openclaw-config
+              mountPath: /home/node/.openclaw/openclaw.json
+              subPath: openclaw.json
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        # Trusted-proxy SSO sidecar — OpenClaw has no native OIDC for its
+        # own chat UI, see ../README.md.
+        - name: oauth2-proxy
+          image: "{{ .Values.oauthProxy.image.repository }}:{{ .Values.oauthProxy.image.tag }}"
+          args:
+            - --http-address=0.0.0.0:4180
+            - --upstream=http://127.0.0.1:18789
+            - --provider=oidc
+            - --oidc-issuer-url=https://{{ required "keycloak.host is required" .Values.keycloak.host }}/realms/{{ .Values.keycloak.realm }}
+            - --client-id={{ .Values.oauthProxy.clientId }}
+            - --redirect-url=https://{{ required "route.host is required" .Values.route.host }}/oauth2/callback
+            - --email-domain=*
+            - --set-xauthrequest=true
+            - --pass-user-headers=true
+            - --cookie-secure=true
+            # oauth2-proxy's default identity claim is "email" (confirmed
+            # live: its access log and the X-Forwarded-User header both
+            # showed "alice@meridian.demo.local", which openclaw.json's
+            # gateway.auth.trustedProxy.allowUsers (bare "alice", matching
+            # this demo's convention everywhere else) rejected with
+            # reason=trusted_proxy_user_not_allowed). Use preferred_username
+            # instead so X-Forwarded-User carries "alice".
+            - --user-id-claim=preferred_username
+          ports:
+            - name: proxy
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oauthProxy.clientSecretName }}
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oauthProxy.clientSecretName }}
+                  key: cookie-secret

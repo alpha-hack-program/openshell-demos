@@ -71,6 +71,16 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "openshell-openclaw-proxy",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "<openclaw-proxy-client-secret>",
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["<openclaw-base-url>/oauth2/callback"]
     }
   ],
   "users": [

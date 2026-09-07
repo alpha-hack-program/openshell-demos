@@ -1,0 +1,16 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+spec:
+  host: {{ required "route.host is required for openclaw — the exact HTTPS callback URL must be pre-registered on the openshell-openclaw-proxy Keycloak client before deploying" .Values.route.host }}
+  to:
+    kind: Service
+    name: openclaw
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

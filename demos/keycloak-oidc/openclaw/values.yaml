@@ -1,0 +1,94 @@
+image:
+  # Built from ../images/openclaw-openshell/Containerfile — the official
+  # OpenClaw image plus the openshell CLI. Push it somewhere reachable from
+  # your cluster before setting repository/tag here.
+  repository: quay.io/atarazana/openclaw-openshell
+  tag: "2026.7.1-2-slim-openshell1"
+  # Always, not IfNotPresent: this image is rebuilt under the same tag as
+  # it evolves (confirmed live — a rebuild under an unchanged tag left a
+  # stale cached image on the node with IfNotPresent, silently masking a
+  # fix). Pin a version-specific tag instead of Always once this stabilizes.
+  pullPolicy: Always
+
+# Required — the exact HTTPS host this app is reachable at. Must exactly
+# match the redirectUris registered on the openshell-openclaw-proxy
+# Keycloak client (../keycloak/realm-export.json, rendered by
+# ../scripts/01-deploy-keycloak.sh). By convention:
+# openclaw-<namespace>.<apps-domain> — ../scripts/13-deploy-openclaw.sh
+# derives this same default automatically.
+route:
+  host: ""
+
+# The OpenShell gateway's own external Route host (openshell-<namespace>.
+# <apps-domain>) — this is what plugins.entries.openshell.config.
+# gatewayEndpoint points the openshell CLI at, same host every `gateway
+# add` call in this demo uses.
+gatewayRouteHost: ""
+
+openshell:
+  # Matches GATEWAY_NAME used throughout this demo's README/scripts.
+  gatewayName: openshift
+  # Which banker's pre-provisioned session this instance runs as — see
+  # ../scripts/12-bootstrap-openclaw-alice-session.sh. v1 of this demo only
+  # covers "alice"; repeating for another banker means a second Helm
+  # release with workspace/aliceSessionSecretName/route.host all changed
+  # together (see ../README.md's OpenClaw section).
+  workspace: alice
+  command: /usr/local/bin/openshell
+
+# Name of the Secret produced by
+# ../scripts/12-bootstrap-openclaw-alice-session.sh — contains
+# alice-session.tar.gz, alice's own standing `openshell` CLI session. An
+# initContainer unpacks it into an emptyDir before the app starts, same
+# pattern as ../onboarding-web's admin session.
+aliceSessionSecretName: openclaw-alice-session
+
+keycloak:
+  host: "" # e.g. keycloak.apps.<cluster-domain>
+  realm: openshell
+
+# Trusted-proxy sidecar providing Keycloak SSO for OpenClaw's own chat UI
+# (OpenClaw has no native OIDC — docs.openclaw.ai/gateway/trusted-proxy-auth
+# is the documented supported pattern as of this writing). Runs as a
+# second container in the same pod, in front of OpenClaw's port 18789.
+oauthProxy:
+  image:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: "v7.6.0" # [VERIFY] pin an exact patch version before real use
+  clientId: openshell-openclaw-proxy
+  # Name of the out-of-band Secret (keys: client-secret, cookie-secret) —
+  # printed by ../scripts/01-deploy-keycloak.sh after rendering the realm
+  # JSON. Never committed.
+  clientSecretName: openclaw-oauth2-proxy-secrets
+  # [VERIFY] the exact header oauth2-proxy needs to emit and the exact
+  # config key OpenClaw's trusted-proxy plugin expects for its allowlist —
+  # docs.openclaw.ai/gateway/trusted-proxy-auth describes the shape
+  # (proxy forwards an identity header, OpenClaw checks it against
+  # allowUsers) but the precise header name/config keys weren't fully
+  # confirmed against a live OpenClaw config schema before this was
+  # written. allowedUser below is rendered into openclaw.json's
+  # gateway.auth.trustedProxy.allowUsers. No OPENCLAW_GATEWAY_TOKEN is set
+  # anywhere in this chart — confirmed live that a configured shared token
+  # and gateway.auth.mode: "trusted-proxy" are mutually exclusive.
+  allowedUser: alice
+
+# Out-of-band Secret (kubectl/oc create secret, never committed) holding,
+# as a source of truth, the LLM provider API key.
+# ../scripts/13-deploy-openclaw.sh reads the API key straight out of this
+# Secret and passes it to `helm --set-string llm.apiKey=...` so it lands in
+# ../templates/secret-openclaw-config.yaml's rendered openclaw.json
+# (models.providers.anthropic) — confirmed the more reliable path than the
+# ANTHROPIC_API_KEY env var, which has known gateway-version-dependent
+# bugs (openclaw/openclaw#56679). llm.apiKey/llm.baseUrl are intentionally
+# left empty here — always pass them via --set-string, never commit a
+# real value.
+llm:
+  secretName: openclaw-secrets
+  apiKey: ""
+  # Set to this demo's BYO-LLM Anthropic-compatible endpoint (.env's
+  # ANTHROPIC_BASE_URL) to route through DeepSeek/whatever instead of the
+  # real api.anthropic.com. Leave empty to use a real Anthropic key
+  # against the real API.
+  baseUrl: ""
+
+resources: {}

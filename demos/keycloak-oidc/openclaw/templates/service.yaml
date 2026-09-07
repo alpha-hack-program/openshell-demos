@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+spec:
+  selector:
+    app.kubernetes.io/name: openclaw
+  ports:
+    # Fronts the oauth2-proxy sidecar's port, not OpenClaw's 18789 directly
+    # — every external request must pass through Keycloak SSO first.
+    - name: http
+      port: 8080
+      targetPort: proxy
