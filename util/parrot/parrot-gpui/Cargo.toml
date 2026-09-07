@@ -1,0 +1,9 @@
+[package]
+name = "parrot-gpui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+parrot-core = { path = "../parrot-core" }
+gpui = "0.2"

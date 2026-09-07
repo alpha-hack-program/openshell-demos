@@ -1,0 +1,64 @@
+name: Release parrot
+
+on:
+  push:
+    tags: ['parrot-v*']
+
+defaults:
+  run:
+    working-directory: util/parrot
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: make check
+
+  build:
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: parrot-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: parrot-macos-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # Only parrot-tui (the `parrot` bin) — parrot-gpui is a stub not
+      # shipped yet, and needs system X11 dev headers on Linux to link.
+      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.artifact }}
+          path: util/parrot/target/${{ matrix.target }}/release/parrot
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+      - run: |
+          mv artifacts/parrot-linux-x86_64/parrot parrot-linux-x86_64
+          mv artifacts/parrot-macos-aarch64/parrot parrot-macos-aarch64
+          chmod +x parrot-linux-x86_64 parrot-macos-aarch64
+        working-directory: .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            parrot-linux-x86_64
+            parrot-macos-aarch64

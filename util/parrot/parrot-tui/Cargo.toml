@@ -1,0 +1,19 @@
+[package]
+name = "parrot-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "parrot"
+path = "src/main.rs"
+
+[dependencies]
+parrot-core = { path = "../parrot-core" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+ratatui = "0.29"
+crossterm = "0.28"
+figlet-rs = "0.1"
