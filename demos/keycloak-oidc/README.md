@@ -827,13 +827,14 @@ Verify the Route was created:
 oc -n "$OPENSHELL_NAMESPACE" get route openshell
 ```
 
-**[VERIFY]** The `Certificate` resource name below
-(`openshell-server-external`) is confirmed against a live cluster running
-chart version `${OPENSHELL_CHART_VERSION}` from this guide's step 2a — but
-the wait sequence itself hasn't been tested end-to-end from a truly fresh
-`helm install` racing a real ACME issuance; it was reconstructed after
-diagnosing the failure on an already-stale cert. Re-verify on a clean
-install before trusting this fully.
+**Confirmed** on a truly fresh cluster/`helm install` racing a real ACME
+issuance (Let's Encrypt production issuer, chart version
+`${OPENSHELL_CHART_VERSION}`): the `Certificate` resource name below
+(`openshell-server-external`) is correct, and the whole wait sequence
+(`oc wait --for=condition=Ready certificate/...` followed by the
+`openssl s_client` issuer-polling loop) completed cleanly end to end — the
+condition went `Ready` and the Route was already serving the Let's
+Encrypt-signed cert on the very first poll, no propagation delay observed.
 
 **If you're using the Let's Encrypt path** (`LETSENCRYPT_CLUSTER_ISSUER`
 set), wait for the ACME certificate to actually finish issuing before
@@ -1088,13 +1089,19 @@ Set the banker to onboard — change this to switch bankers:
 USER_ID="alice"
 ```
 
-Run `onboard` for `alice`. `--keycloak-host` is passed explicitly because
-`onboard` is a separate binary that reads it from its own process
-environment (via clap's `env = "KEYCLOAK_HOST"`), not from this shell's
-variables — `source .env` alone doesn't export it:
+Run `onboard` for `alice`. `--keycloak-host` and `--namespace` are both
+passed explicitly because `onboard` is a separate binary that reads them
+from its own process environment (via clap's `env = "KEYCLOAK_HOST"` /
+`env = "OPENSHELL_NAMESPACE"`), not from this shell's variables — `source
+.env` alone doesn't export either one (confirmed live: omitting
+`--namespace` silently imports a provider profile with every endpoint host
+still containing the literal `<openshell-namespace>` placeholder — no
+error, just a `[onboard] WARNING: profile still contains
+<openshell-namespace>` on stderr that's easy to miss, and a policy/endpoint
+setup two steps later that silently can't resolve those hosts):
 
 ```bash
-onboard -u "$USER_ID" --keycloak-host "$KEYCLOAK_HOST" \
+onboard -u "$USER_ID" --keycloak-host "$KEYCLOAK_HOST" --namespace "$OPENSHELL_NAMESPACE" \
   --profile providers/user-refresh-profile.yaml
 ```
 
@@ -1108,8 +1115,10 @@ again.
 > The profile at `providers/user-refresh-profile.yaml` contains two
 > placeholders (`<keycloak-host>` and `<openshell-namespace>`) — `onboard`
 > substitutes both before importing, reading the namespace from
-> `--namespace` or the `OPENSHELL_NAMESPACE` env var (already set by
-> `source .env` above). Running it unmodified against this demo's `.env`
+> `--namespace` (passed explicitly above — don't rely on the
+> `OPENSHELL_NAMESPACE` env var alone, see the note above) or the
+> `OPENSHELL_NAMESPACE` env var if you've separately exported it (e.g. `set
+> -a; source .env; set +a`). Running it unmodified against this demo's `.env`
 > produces a correctly-substituted profile with real endpoint hosts, not
 > literal placeholder text.
 
@@ -1279,6 +1288,26 @@ source .env
 This deploys all five servers into `$OPENSHELL_NAMESPACE` as two-container
 pods (Envoy + the app), each with its own ServiceAccount, plus the shared
 Postgres and the shared embeddings `InferenceService`.
+
+**On a truly fresh cluster, this script can abort partway with `error:
+deployment "mcp-market-news" exceeded its progress deadline`** (confirmed
+live) — `mcp-market-news`'s init container and `mcp-kyc-compliance` both
+call the embeddings `InferenceService` on first start, and if that
+service's own pod is still loading the model (its first cold start can
+take several minutes), their first few connection attempts fail with
+`Connection refused` and CrashLoopBackOff until Kubernetes' restart backoff
+happens to land after the embeddings pod is ready. The script's `set -e` +
+sequential `oc rollout status` calls treat the Deployment controller's own
+`progressDeadlineSeconds` timeout as fatal, even though the pods keep
+retrying and self-heal shortly after (confirmed live: both recovered
+within a couple of minutes with no manual intervention). If you hit this,
+just re-run the rollout-status checks (or the whole script — it's `helm
+upgrade --install`, safe to re-run) after waiting a minute or two:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-market-news
+oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-kyc-compliance
+```
 
 The MCP server roles are already assigned to the demo bankers in the realm
 JSON imported in step 1c: `banker` (and therefore `mcp-portfolio-user`,

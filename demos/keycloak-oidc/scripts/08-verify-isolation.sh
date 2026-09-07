@@ -12,7 +12,7 @@ set -euo pipefail
 #      she reaches mcp-compatibility.
 #   2. Tenant-based (mcp-portfolio's/mcp-kyc-compliance's own
 #      assert_owns_client, JSON-RPC-level error inside an HTTP 200 —
-#      [VERIFY], not confirmed against a live cluster): Bob, probing the
+#      confirmed against a live cluster, 19/19 checks passing): Bob, probing the
 #      isolation boundary while a promotion decision looms, tries
 #      get_positions/get_risk_profile against Alice's and Charlie's
 #      client_ids and should get the same ambiguous "not found for caller"

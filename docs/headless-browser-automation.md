@@ -12,6 +12,48 @@ npm init -y && npm install playwright
 npx playwright install chromium
 ```
 
+**Fedora toolbox / rpm-ostree container gotcha (confirmed live):** Playwright's
+bundled Chromium (`chrome-headless-shell`) fails to launch inside a Fedora
+`toolbox` container with `error while loading shared libraries:
+libatk-1.0.so.0` — `npx playwright install chromium --with-deps` doesn't
+help either, since `--with-deps` shells out to `apt-get`, which doesn't
+exist on Fedora. If you're running this from inside a toolbox and see this
+error, don't chase down individual `dnf install` packages for the missing
+libs — use the host's own browser instead, since toolbox containers share
+the host's Flatpak apps via `flatpak-spawn`:
+
+```bash
+# Check the host has a Chromium/Chrome flatpak (confirmed: org.chromium.Chromium works)
+flatpak-spawn --host flatpak list | grep -i chrom
+
+# Launch it headless on the host with a remote-debugging port
+flatpak-spawn --host flatpak run --command=chromium org.chromium.Chromium \
+  --headless=new --remote-debugging-port=9333 \
+  --remote-debugging-address=0.0.0.0 --no-first-run \
+  --no-default-browser-check --disable-gpu about:blank &
+
+# Confirm the CDP endpoint is reachable from inside the toolbox
+curl -s http://localhost:9333/json/version
+```
+
+Then drive it from Playwright with `chromium.connectOverCDP('http://localhost:9333')`
+instead of `chromium.launch(...)` — same `page.fill`/`page.click`/
+`page.waitForURL` API from here on. **Always open a fresh
+`browser.newContext()` per login** (don't reuse `browser.contexts()[0]`) —
+the host browser process stays alive across multiple Node script
+invocations, so reusing the default context would let one banker's
+Keycloak SSO session bleed into the next login attempt:
+
+```javascript
+const { chromium } = require('playwright');
+const browser = await chromium.connectOverCDP('http://localhost:9333');
+const context = await browser.newContext();  // never contexts()[0]
+const page = await context.newPage();
+// ... page.goto/fill/click/waitForURL as usual ...
+await page.close();
+await context.close();  // browser.close() here would kill the shared host browser
+```
+
 ## Keycloak demo credentials
 
 Demo user credentials (usernames, passwords, role assignments) are defined
