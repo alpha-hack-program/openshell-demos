@@ -404,7 +404,7 @@ GARAK_ENVOY_HOST=$(oc get route garak-envoy -n "$OPENSHELL_NAMESPACE" -o jsonpat
 ```
 
 **1. Create the `byo-claude` provider** (skip if you already created it for
-the "Claude Code + BYO LLM + MCP tool" recipe in the main README):
+the main README's "Provision the Claude Code harness" step):
 
 ```bash
 TMPFILE=$(mktemp --suffix=.yaml)

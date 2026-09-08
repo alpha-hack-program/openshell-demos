@@ -43,7 +43,6 @@
 - [Annexes](#annexes)
   - [A. Alternate test clients](#a-alternate-test-clients)
     - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
-    - [Claude Code + BYO LLM + MCP tool](#claude-code--byo-llm--mcp-tool)
     - [Using parrot instead of raw CLI invocations](#using-parrot-instead-of-raw-cli-invocations)
   - [B. Raw MCP protocol calls (curl, for scripting/CI)](#b-raw-mcp-protocol-calls-curl-for-scriptingci)
   - [C. Configuration reference](#c-configuration-reference)
@@ -1618,16 +1617,28 @@ question is actually expected to touch.
 
 #### Provision the Claude Code harness
 
-Claude Code is pre-installed in the base sandbox image. This reuses the same
-`byo-claude` provider pattern from [Annex A](#claude-code--byo-llm--mcp-tool),
-but attaches it to each banker's **existing** `claude-<id>` sandbox (the one
-already carrying their real `user-<id>` credential) instead of a separate
-sandbox, and grants network access to every MCP server that banker's scenes
-touch, not just one.
+Claude Code is pre-installed in the base sandbox image. It attaches a
+`byo-claude` provider to each banker's **existing** `claude-<id>` sandbox
+(the one already carrying their real `user-<id>` credential) instead of a
+separate sandbox, and grants network access to every MCP server that
+banker's scenes touch, not just one.
+
+> **Requires an Anthropic Messages API endpoint.** Claude Code uses the
+> Anthropic Messages API format, not OpenAI. This only works if your LLM
+> provider exposes an Anthropic-compatible endpoint (e.g. DeepSeek's
+> `https://api.deepseek.com/anthropic`, or a LiteLLM proxy configured with
+> an `/anthropic` route). Standard OpenAI-compatible endpoints (vLLM,
+> OpenAI, etc.) will **not** work — see the Codex recipe in
+> [Annex A](#codex--byo-llm--mcp-tool) for an OpenAI-compatible alternative.
+>
+> **DeepSeek note:** the Anthropic-compatible endpoint uses a different
+> base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
+> (`https://api.deepseek.com`). Both use model name `deepseek-v4-flash`
+> (or `deepseek-v4-pro`) and the same API key. See `.env.example` for the
+> correct values.
 
 **Prerequisites** — set `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and
-`ANTHROPIC_MODEL` in your `.env` (see [Annex A](#claude-code--byo-llm--mcp-tool)
-for the DeepSeek Anthropic-compatible-endpoint caveat).
+`ANTHROPIC_MODEL` in your `.env`.
 
 **Who runs this.** `provider profile import` and `provider create` fall
 under "manage providers, provider profiles" in the
@@ -2741,9 +2752,9 @@ single check a clever enough prompt could talk its way around.
       `sandbox exec` into their own sandbox, is denied exec'ing into
       another's, and is denied creating a provider/updating a policy even
       in their own workspace
-- [x] Claude Code variant (the recommended [step 5](#5-run-the-demo) path,
-      not just [Annex A](#a-alternate-test-clients)) — every scene verified
-      end to end: multi-hop tool calls across 2-3 MCP servers per turn,
+- [x] Claude Code variant ([step 5](#5-run-the-demo)'s recommended path) —
+      every scene verified end to end: multi-hop tool calls across 2-3 MCP
+      servers per turn,
       correct handling when seed-data dates have lapsed, tenant-ownership
       denial reproduced through an explicit tool-call request, correct
       handling of false-authority framing and fabrication requests, PEP/EDD
@@ -2757,10 +2768,6 @@ single check a clever enough prompt could talk its way around.
       table's listing of "use provider attachments" as a Workspace User
       grant (not a Workspace Admin one, unlike `provider create`/`policy
       update`)
-- [x] Annex A's **Claude Code + BYO LLM + MCP tool** recipe verified for
-      both bankers it covers: Bob's `mcp-portfolio` question ("biggest
-      client by AUM") and Alice's `mcp-compatibility` question (Lysmark tax
-      calculation), both matching the raw curl results
 - [x] Annex A's Codex + BYO LLM + MCP tool recipe — confirmed live
       2026-09-08 for both bob (`get_top_client_by_aum`) and alice
       (`mcp-compatibility` tax calculation), real tool calls through
@@ -2971,135 +2978,6 @@ banker/server combination automatically:
 
 Expected output — see [step 5](#5-run-the-demo) for the full annotated
 listing (19 passed, 0 failed).
-
-#### Claude Code + BYO LLM + MCP tool
-
-> **Requires an Anthropic Messages API endpoint.** Claude Code uses the
-> Anthropic Messages API format, not OpenAI. This recipe only works if your
-> LLM provider exposes an Anthropic-compatible endpoint (e.g.
-> DeepSeek's `https://api.deepseek.com/anthropic`, or a LiteLLM proxy
-> configured with an `/anthropic` route). Standard OpenAI-compatible
-> endpoints (vLLM, OpenAI, etc.) will **not** work — use the Codex recipe
-> above instead.
->
-> **DeepSeek note:** the Anthropic-compatible endpoint uses a different
-> base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
-> (`https://api.deepseek.com`). Both use model name `deepseek-v4-flash`
-> (or `deepseek-v4-pro`) and the same API key. See `.env.example` for the
-> correct values.
-
-Claude Code (pre-installed in the base sandbox image) calling
-`mcp-portfolio`'s tool (`get_top_client_by_aum`) via an Anthropic-compatible
-LLM endpoint.
-
-**Prerequisites** beyond Part I, steps 1-5 — set `ANTHROPIC_API_KEY`,
-`ANTHROPIC_BASE_URL`, and `ANTHROPIC_MODEL` in your `.env` (see
-`.env.example`), then, from admin's terminal (provider/policy management
-stays admin-only regardless of workspace — see
-[How to follow this guide](#how-to-follow-this-guide)):
-
-```bash
-source .env
-USER_ID="bob"
-SERVER_NAME="mcp-portfolio"
-QUESTION="Who is my biggest client by assets under management?"
-LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
-```
-
-1. Import the Claude Code provider profile and create the provider.
-
-   The profile ([`providers/byo-claude-profile.yaml`](providers/byo-claude-profile.yaml))
-   tells OpenShell to inject your LLM API key into the sandbox as
-   `ANTHROPIC_API_KEY` — the environment variable Claude Code expects.
-   It also includes an endpoint binding for `<llm-host>` (your LLM
-   provider's hostname), which must be substituted before import — in
-   0.0.106, the proxy only injects credentials for matching endpoints.
-   Base URL and model name are passed via `--env` at exec time (step 3),
-   since OpenShell only injects **credentials**, not config values.
-
-   Substitute the LLM host placeholder, import, and create the provider:
-
-   ```bash
-   TMPFILE=$(mktemp --suffix=.yaml)
-   sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
-   openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
-   rm -f "$TMPFILE"
-
-   openshell provider create --name byo-claude --type byo-claude \
-     --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-     --workspace "${USER_ID}"
-   ```
-
-   Like `inference.local` in the Codex recipe, this provider is
-   workspace-scoped — repeating this recipe for alice means repeating this
-   import/create step inside `alice`'s own workspace too.
-
-2. Attach the provider and grant network access. `policy update` is
-   Workspace-Admin-only — admin's terminal, no ambiguity. `sandbox provider
-   attach` is genuinely self-service instead — see
-   [Provision the Claude Code harness](#provision-the-claude-code-harness).
-   Shown here from admin's terminal for simplicity (Platform Admin bypasses
-   every workspace check regardless):
-
-   ```bash
-   openshell sandbox provider attach "claude-${USER_ID}" byo-claude --workspace "${USER_ID}"
-   openshell policy update "claude-${USER_ID}" \
-     --add-endpoint "${LLM_HOST}:443:read-write:rest:enforce" \
-     --binary /usr/local/bin/claude \
-     --add-endpoint "${SERVER_NAME}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
-     --binary /usr/local/bin/claude \
-     --workspace "${USER_ID}" \
-     --wait
-   ```
-
-3. Run the test — from admin's terminal, or from this user's own CLI
-   session scoped to their workspace (either works). The provider injects
-   `ANTHROPIC_API_KEY` automatically; base URL and model overrides are
-   non-secret config, so they're passed via `--env` instead. This is the
-   same `claude-${USER_ID}` sandbox [step 5](#5-run-the-demo) already wrote
-   `/sandbox/.claude/mcp-servers.json` into (see
-   [Write each banker's MCP server config once](#write-each-bankers-mcp-server-config-once))
-   — no need to reconstruct the MCP config here:
-
-   ```bash
-   openshell sandbox exec -n "claude-${USER_ID}" --workspace "${USER_ID}" \
-     --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
-     --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
-     --env "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_MODEL" \
-     --env "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_MODEL" \
-     --env "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_MODEL" \
-     -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config \
-        -p "$QUESTION" \
-        --permission-mode bypassPermissions \
-        --output-format text
-   ```
-
-   **Example output:**
-
-   > Your biggest client by assets under management is **Clara Fontán**
-   > (client ID `cli-001`), with **$38,750** in AUM.
-
-   Matches the raw curl result from [step 5](#5-run-the-demo).
-
-**Now repeat with alice.** Alice is the only banker authorized for
-`mcp-compatibility` (the Compatibility Engine — tax calculation). Set the
-variables and run steps 2-3 again:
-
-```bash
-USER_ID="alice"
-SERVER_NAME="mcp-compatibility"
-QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
-```
-
-**Example output:**
-
-> Your tax liability for an income of **90,000** is **17,340.00**
-> (1,000.00 + 16,000.00 subtotal, +340.00 surcharge).
-
-Matches the raw curl result, confirming Alice's one extra permission works
-end to end through Claude Code too — the same JWT-carrying mechanism as
-Bob's `mcp-portfolio` call above, just gated by `compatibility-user`
-instead of `banker`.
 
 #### Using parrot instead of raw CLI invocations
 
@@ -3447,8 +3325,8 @@ Results: 19 passed, 0 failed
 ```
 
 > For alternate ways to exercise this same RBAC boundary through a real
-> coding agent (Codex or Claude Code) instead of raw `curl`, see
-> [Annex A](#a-alternate-test-clients).
+> coding agent instead of raw `curl`, see [step 5](#5-run-the-demo) (Claude
+> Code, the primary recipe) or [Annex A](#a-alternate-test-clients) (Codex).
 
 ### C. Configuration reference
 
