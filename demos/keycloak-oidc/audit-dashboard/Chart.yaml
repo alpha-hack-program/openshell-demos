@@ -1,0 +1,11 @@
+apiVersion: v2
+name: audit-dashboard
+description: >-
+  Live users -> sandbox -> MCP server risk/heartbeat graph, sourced entirely
+  from Prometheus (session-auditor's metrics via
+  openshift-user-workload-monitoring's Thanos-querier) — see
+  util/audit-dashboard and demos/keycloak-oidc/docs/prometheus-scraping.md.
+  Deploys the dashboard for Scene 7 ("Watching the audit trail live").
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

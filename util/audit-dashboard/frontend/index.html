@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenShell audit trail</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0b0f14;
+    color: #e6edf3;
+    margin: 0;
+  }
+  #app { padding: 24px 32px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.subtitle { color: #8b949e; font-size: 13px; margin-top: 0; }
+  svg { width: 100%; height: auto; display: block; }
+  text { font-family: inherit; }
+  .legend { display: flex; gap: 20px; font-size: 12px; color: #8b949e; margin-bottom: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .tooltip {
+    position: fixed;
+    left: 32px;
+    bottom: 24px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 320px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/bundle.js"></script>
+</body>
+</html>

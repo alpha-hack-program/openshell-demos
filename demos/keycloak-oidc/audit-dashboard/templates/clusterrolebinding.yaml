@@ -1,0 +1,30 @@
+# [VERIFY] Genuinely new to this repo — no prior confirmed pattern for a
+# workload calling openshift-user-workload-monitoring's Thanos-querier
+# in-cluster (the only existing precedent, in ../audit-collector/README.md,
+# is an admin's `oc exec` straight into the Prometheus pod). This binds the
+# dashboard's own ServiceAccount to the built-in `cluster-monitoring-view`
+# ClusterRole, which OpenShift's monitoring stack ships by default —
+# confirm both the ClusterRole's existence and that Thanos-querier actually
+# honors it for this namespace's metrics against a live cluster before
+# trusting this.
+#
+# A ClusterRoleBinding (not a namespaced RoleBinding) because
+# `cluster-monitoring-view` is a ClusterRole and Thanos-querier's own RBAC
+# check is cluster-scoped, even though the queries this SA issues are
+# themselves namespace-filtered (see values.yaml's namespace-scoped
+# `namespace="..."` label matcher, enforced app-side in
+# util/audit-dashboard's own PromQL, not by this binding).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audit-dashboard-{{ .Release.Namespace }}-monitoring-view
+  labels:
+    app.kubernetes.io/name: audit-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view
+subjects:
+  - kind: ServiceAccount
+    name: audit-dashboard
+    namespace: {{ .Release.Namespace }}

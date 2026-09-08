@@ -1,0 +1,7 @@
+publish = false
+push = true
+tag = true
+tag-name = "audit-dashboard-v{{version}}"
+pre-release-commit-message = "release(audit-dashboard): {{version}}"
+tag-message = "audit-dashboard v{{version}}"
+pre-release-hook = ["make", "ci"]

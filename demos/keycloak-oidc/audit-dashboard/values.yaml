@@ -1,0 +1,24 @@
+image:
+  repository: quay.io/atarazana/audit-dashboard
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+# Optional — leave empty to let OpenShift auto-generate a hostname (this
+# app has no OAuth callback to pre-register anywhere, unlike
+# onboarding-web, so there's no fixed-URL requirement forcing an explicit
+# value).
+route:
+  host: ""
+
+# Thanos-querier is the tenancy-aware front door for
+# openshift-user-workload-monitoring — it enforces namespace-scoped RBAC
+# via this chart's own ServiceAccount (see templates/clusterrolebinding.yaml)
+# rather than trusting the query's own namespace label alone. [VERIFY] this
+# default host/port against your cluster.
+prometheus:
+  thanosQuerierUrl: https://thanos-querier.openshift-monitoring.svc:9091
+
+refreshIntervalSecs: 5
+heartbeatStaleSecs: 90
+
+resources: {}

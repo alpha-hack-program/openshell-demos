@@ -1,0 +1,26 @@
+# route.host is optional (unlike onboarding-web's) — this app has no OAuth
+# redirect URI to pre-register anywhere, so an OpenShift-auto-generated
+# hostname is fine; only set values.route.host if you need a stable one.
+#
+# NOTE: unauthenticated by design in this v1 — anyone who can reach this
+# Route can see every audited sandbox's risk/heartbeat state in this
+# namespace. Fine for a demo audience; do not reuse as-is for anything
+# beyond that without adding auth in front of it.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: audit-dashboard
+  labels:
+    app.kubernetes.io/name: audit-dashboard
+spec:
+  {{- with .Values.route.host }}
+  host: {{ . }}
+  {{- end }}
+  to:
+    kind: Service
+    name: audit-dashboard
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -1,0 +1,41 @@
+# No init container, no mounted Secret, unlike onboarding-web — this
+# service never calls the openshell CLI or holds any credential at all;
+# its only authority is the ClusterRoleBinding granting its own
+# ServiceAccount read access to Thanos-querier (see
+# clusterrolebinding.yaml), and Kubernetes projects that SA's token into
+# the pod automatically.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-dashboard
+  labels:
+    app.kubernetes.io/name: audit-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: audit-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: audit-dashboard
+    spec:
+      serviceAccountName: audit-dashboard
+      containers:
+        - name: audit-dashboard
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OPENSHELL_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: THANOS_QUERIER_URL
+              value: {{ .Values.prometheus.thanosQuerierUrl | quote }}
+            - name: REFRESH_INTERVAL_SECS
+              value: {{ .Values.refreshIntervalSecs | quote }}
+            - name: HEARTBEAT_STALE_SECS
+              value: {{ .Values.heartbeatStaleSecs | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
