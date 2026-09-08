@@ -211,23 +211,25 @@ network policy automatically, no separate `policy update` call needed.
 
 ```bash
 openshell sandbox create --name my-sandbox \
-  --from ghcr.io/alpha-hack-program/openshell-demos/claude-audit:latest \
+  --from quay.io/atarazana/claude-audit:latest \
   --provider session-auditor-anthropic --workspace <ws> -- true
 ```
 
-CI publishes to `ghcr.io/alpha-hack-program/openshell-demos/claude-audit`
-and `.../codex-audit` (see `.github/workflows/release-session-auditor.yml`),
-each tagged with `latest`, the exact tag of the *base* image it's built
-from, and this release's own `session-auditor-v<version>` tag — **not**
-`quay.io/atarazana/...`, despite an earlier draft of this doc saying so.
-**`[VERIFY]` package visibility before relying on this**: confirmed live
-(2026-09-08) that an anonymous pull against `ghcr.io/.../claude-audit`
-returns `403` — packages published via the default `GITHUB_TOKEN` in
-Actions are private by default, regardless of the repo's own visibility,
-unless someone with `packages` admin access on the org flips the
-package's own visibility to public (Package settings → Change visibility)
-or an image-pull `Secret` for GHCR is configured in the target namespace.
-Neither has been done yet as of this release.
+`quay.io/atarazana` is this repo's registry for every deployable image
+(same as `onboarding-web`, `mcp-portfolio`, etc.) — published via `make
+image-claude image-codex push-claude push-codex` (or plain `make push` for
+both) from this directory, tagged with the exact tag of the *base* image
+each is built from plus `latest`. This is a separate, manual step from
+cutting a `session-auditor-v<version>` release: `cargo release` bumps the
+crate version, tags, and pushes git history; it does **not** publish these
+sandbox images anywhere — that only happens when someone (or CI) actually
+runs the `push-*` targets against `quay.io/atarazana`. (GitHub Actions'
+own `.github/workflows/release-session-auditor.yml`, triggered by the
+release tag, separately publishes the *same* two images to
+`ghcr.io/alpha-hack-program/openshell-demos/` — useful for that release's
+own audit trail, but not what any chart/script in this repo actually
+references; treat `quay.io/atarazana` as the one real answer to "where do
+I get this image.")
 
 That's it — no `sandbox exec`, no `nohup`, no `service expose`. The agent
 calls `session-auditor` itself via all three hooks. `SessionStart` and
