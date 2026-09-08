@@ -18,3 +18,7 @@ endpoints:
     protocol: rest
     access: read-write
     enforcement: enforce
+
+binaries:
+  - /usr/local/bin/claude
+  - /usr/bin/curl

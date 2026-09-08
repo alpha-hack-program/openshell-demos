@@ -88,15 +88,21 @@ separate layer contributed by attached providers.
 - Whether a provider-composed group actually grants binary-scoped access,
   or only exists so OpenShell knows where to inject a credential, depends
   on whether that provider's **profile** declares a `binaries:` list.
-  `providers/byo-codex-profile.yaml` does (`/usr/bin/codex`,
-  `/usr/local/bin/codex`), so `_provider_byo_codex` is fully
-  self-sufficient — confirmed live, Codex could reach `inference.local`
-  through that group alone. `providers/byo-claude-profile.yaml` doesn't
-  declare any binaries, so its endpoint is available for credential
-  matching but the actual authorization to reach it still needs an
-  explicit group with `binaries:` — either from `policy update
-  --add-endpoint --binary` or, as this demo now does, from a hand-composed
-  document applied with `policy set`.
+  Both `providers/byo-codex-profile.yaml` (`/usr/bin/codex`,
+  `/usr/local/bin/codex`, `/usr/bin/curl`) and
+  `providers/byo-claude-profile.yaml` (`/usr/local/bin/claude`,
+  `/usr/bin/curl`) declare one, so `_provider_byo_codex`/`_provider_byo_claude`
+  are each fully self-sufficient for their own LLM-host endpoint —
+  confirmed live against `codex-bob`/`claude-bob` (a real agent turn
+  reaching the LLM and calling an MCP tool through each, respectively)
+  with no `allow_llm_host` group present in the applied policy at all.
+  That's why [`policies/templates/policy.yaml`](../policies/templates/policy.yaml)
+  no longer has an `allow_llm_host` group for either recipe — the
+  provider-composed layer already covers it. A provider profile with no
+  `binaries:` list still works for credential matching, but the actual
+  authorization to reach its endpoint would then need an explicit group
+  with `binaries:` — either from `policy update --add-endpoint --binary`
+  or a hand-composed document applied with `policy set`.
 
 `policy get -o json` (no `--base`/`--full`) shows neither layer, just
 version/hash metadata — use `--full` for the effective policy or `--base`
