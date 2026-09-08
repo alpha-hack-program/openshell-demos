@@ -2833,7 +2833,7 @@ server-side.
 **Prerequisites** beyond Part I, steps 1-5 — set `OPENAI_API_KEY`,
 `OPENAI_BASE_URL`, and `OPENAI_MODEL` in your `.env` (see `.env.example`).
 
-**Provision the sandbox** with
+**Provision the sandboxes** with
 [`scripts/14-provision-codex-sandbox.sh`](scripts/14-provision-codex-sandbox.sh)
 — it wraps the workspace-scoped `inference.local` route (only type
 `openai` providers can drive it — see [Workspace
@@ -2851,16 +2851,10 @@ admin:
 ```bash
 # Terminal A — admin
 source .env
+./scripts/14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
 ./scripts/14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+./scripts/14-provision-codex-sandbox.sh charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
-
-The server list matches exactly what [step 5](#5-run-the-demo) wires into
-the Claude Code harness for bob — **the two sandboxes should be
-equivalent, not a narrower Codex subset**: same four servers, same
-`banker`-role gate, same egress allow-list, just a different agent CLI
-driving them. Pass a comma-separated list (no spaces) — the script accepts
-any subset, but there's no reason to give Codex less than Claude Code gets
-here.
 
 This is the same three-step sequence (inference route → policy profile →
 `policy set`) [step 5](#5-run-the-demo) shows manually for the Claude Code
@@ -2870,21 +2864,7 @@ own comments for exactly what each step does, and
 replaces and why that's safe (same [`policies/`](policies/) chart as the
 Claude Code harness, with `recipe=codex`; `llmHost` is `inference.local`,
 not `$OPENAI_BASE_URL`'s host — Codex never talks to the real LLM endpoint
-directly, only through OpenShell's privacy router). Confirmed live end to
-end: `codex exec` against `codex-bob` correctly called `mcp-portfolio`'s
-`get_top_client_by_aum` tool through `inference.local` and returned a real
-answer. Re-running the script against an already-provisioned sandbox is
-safe — provider/profile/sandbox-create calls tolerate "already exists,"
-and `inference set`/`policy set` just re-apply.
-
-> **Don't include `mcp-compatibility` for anyone but alice** — it's gated
-> by the `compatibility-user` realm role. The `[mcp_servers.*]` config
-> only takes effect at sandbox creation time, so changing the list against
-> an already-provisioned `codex-<user-id>` sandbox means deleting and
-> recreating it, not re-running the script. Use a custom `CODEX_IMAGE=`
-> (env var, see the script) if you need Codex >= 0.146.0 and the chart's
-> default sandbox image ships older — required for `wire_api = "responses"`
-> with namespace tools, per the note above.
+directly, only through OpenShell's privacy router).
 
 **Run the test** — from admin's terminal, or from `bob`'s own CLI session
 scoped to workspace `bob` (either works identically now that bob has
@@ -2892,14 +2872,13 @@ their own workspace — see
 [How to follow this guide](#how-to-follow-this-guide)):
 
 ```bash
+# Terminal C
 source .env
 USER_ID="bob"
 QUESTION="Who is my biggest client by assets under management?"
 
-# The OpenShell sandbox provides the security boundary (network policy,
-# credential isolation, binary permissions). Codex's built-in sandbox
-# is redundant and incompatible with the container environment, so we
-# disable it with --dangerously-bypass-approvals-and-sandbox.
+# Codex's built-in sandbox is redundant and incompatible with the container 
+# environment, so we disable it with --dangerously-bypass-approvals-and-sandbox.
 openshell sandbox exec -n "codex-${USER_ID}" --workspace "${USER_ID}" -- bash -c '
 codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
   "'"${QUESTION}"'"
@@ -2911,6 +2890,8 @@ codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
 
 ```bash
 set -a; source .env; set +a
+USER_ID="bob"
+QUESTION="Who is my biggest client by assets under management?"
 parrot --sandbox "codex-${USER_ID}" --workspace "${USER_ID}" --agent codex \
   --prompt "$QUESTION"
 ```
@@ -2947,27 +2928,15 @@ Codex (in sandbox)
       → Envoy checks JWT + realm role → app
 ```
 
-**Now repeat with alice.** Same four shared servers as bob, plus the fifth
-she alone is authorized for — `mcp-compatibility` (the Compatibility
-Engine — tax calculation), same as her Claude Code harness in
-[step 5](#5-run-the-demo). Provision her sandbox with the script, then run
-the test again with her variables:
+**Now repeat the scenes.**
 
-```bash
-./scripts/14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
-```
+$TODO$
 
 ```bash
 USER_ID="alice"
 QUESTION="I live in Lysmark. What is the tax liability for an income of 90000?"
 ```
 
-Confirm alice's sandbox can reach `mcp-compatibility` (`200`). For the
-reverse — Bob's sandbox getting `403` from `mcp-compatibility` — see
-[Bob probes the boundary](#bob-probes-the-boundary) in step 5; the same
-Envoy check applies whether the request comes from `curl` or from Codex,
-proving per-banker credential isolation works end to end through the
-agentic coding tool too.
 
 Alternatively, run the isolation verification script to test every
 banker/server combination automatically:
