@@ -2,13 +2,8 @@
 set -euo pipefail
 # Provisions a dedicated Claude Code sandbox for one banker, mirroring
 # 14-provision-codex-sandbox.sh's shape: its own sandbox named
-# claude-<user-id> (rather than attaching to the existing demo-<user-id>
-# the way the README's own recipes do — Annex A's "Claude Code + BYO LLM
-# + MCP tool" and "Provision the Claude Code harness" both reuse
-# demo-<id>, since Claude Code is pre-installed in the base sandbox image
-# and demo-<id> already carries the real user-<id> credential). This
-# script deliberately provisions a separate, disposable claude-<id>
-# sandbox instead, for parity with how Codex gets its own.
+# claude-<user-id>. This script deliberately provisions a separate,
+# disposable claude-<id> sandbox instead, for parity with how Codex gets its own.
 #
 # Usage: ./15-provision-claude-sandbox.sh <user-id> <server-name>[,<server-name>...]
 #   e.g. ./15-provision-claude-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
@@ -16,14 +11,10 @@ set -euo pipefail
 #
 # Run as admin — provider and policy management stay Platform-Admin
 # operations regardless of workspace. Assumes <user-id> was already
-# onboarded via 03-onboard-user.sh (their own workspace and a `user-<id>`
-# provider already exist — the latter is attached at sandbox-create time
-# below, exactly like 14 attaches `user-<id>` for Codex). Requires
-# ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, and ANTHROPIC_MODEL set in .env.
+# onboarded. Requires ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, and
+# ANTHROPIC_MODEL set in .env.
 # Idempotent — provider/profile/sandbox create calls tolerate "already
-# exists" (matching 03-onboard-user.sh's own `|| true` convention) so
-# re-running just re-applies the token substitution and policy against
-# what's already there.
+# exists"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."

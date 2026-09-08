@@ -50,7 +50,7 @@ IFS=',' read -ra SERVERS <<< "$SERVER_NAMES"
 # Codex 0.146.0 — override if the chart's default sandbox image ships an
 # older version (see the README's LLM endpoint requirements note: Codex
 # 0.146.0+ only supports wire_api = "responses" with namespace tools).
-CODEX_IMAGE="${CODEX_IMAGE:-quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012}"
+CODEX_IMAGE="${CODEX_IMAGE:-}"
 
 cd "$DEMO_DIR"
 
