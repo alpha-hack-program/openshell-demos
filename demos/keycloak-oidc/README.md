@@ -2638,21 +2638,23 @@ the audited sandbox), then Bob. **Servers this exercises:**
 `mcp-portfolio` — the two prompts below only touch this one; the sandbox
 is wired to the same four servers step 5 already gave Bob, for parity.
 
-> **Optional, and newer tooling than Scenes 1–6.** `session-auditor`
-> itself is validated live end to end (see
-> [`util/session-auditor/README.md`](../../util/session-auditor/README.md)).
-> `CLAUDE_AUDIT_IMAGE`/`CODEX_AUDIT_IMAGE` point at `quay.io/atarazana` —
-> the same registry as every other image in this repo — published via
-> `make image-claude image-codex push-claude push-codex` from
-> `util/session-auditor` (a manual/local step, separate from cutting a
-> `session-auditor-v*` release). What's genuinely unverified is
-> `audit-dashboard`'s RBAC — a `ClusterRoleBinding` granting its own
-> `ServiceAccount` the built-in `cluster-monitoring-view` ClusterRole, so
-> it can query Thanos-querier — which has no prior confirmed pattern
-> anywhere else in this repo. **`[VERIFY]`** on your cluster: an empty
-> graph or pod logs showing a `403` from Thanos-querier point at this RBAC
-> item, not a bug in the scene itself. See
-> [`audit-dashboard/README.md`](audit-dashboard/README.md).
+> **Newer tooling than Scenes 1–6, but confirmed live end to end**
+> (2026-09-08, sandbox268): both `claude-audit`'s classification path and
+> `audit-dashboard`'s Thanos-querier RBAC (a `ClusterRoleBinding` to the
+> built-in `cluster-monitoring-view` ClusterRole) worked exactly as
+> designed on the first real cluster this was run against — see
+> [`util/session-auditor/README.md`](../../util/session-auditor/README.md)
+> and [`audit-dashboard/README.md`](audit-dashboard/README.md) for the two
+> bugs that *did* turn up along the way (a `WORKDIR` permissions issue in
+> `audit-dashboard`'s own Containerfile, and a TLS CA mismatch — not
+> RBAC — when querying Thanos-querier), both fixed. `CLAUDE_AUDIT_IMAGE`/
+> `CODEX_AUDIT_IMAGE` point at `quay.io/atarazana` — the same registry as
+> every other image in this repo — published via `make image-claude
+> image-codex push-claude push-codex` from `util/session-auditor` (a
+> manual/local step, separate from cutting a `session-auditor-v*`
+> release). The Codex path (provisioning, and the `mcp_servers`
+> tool-name heuristic) is still `[VERIFY]` — only the Claude Code path has
+> been run live so far.
 
 Every scene so far has shown the boundary holding from the *server's* side
 — a denial returned to the agent, verified by reading the response. This
@@ -2712,9 +2714,10 @@ openshell sandbox exec -n aud-claude-bob --workspace bob \
 
 **Expected result:** within `refreshIntervalSecs` (default `5s`) of the
 turn finishing, `aud-claude-bob` appears on the dashboard as a green node
-under `bob`, with an edge out to `portfolio` — the MCP server this prompt
-actually touched. `risk_level` is `none` or `self_refused` on hover;
-nothing to flag.
+under `bob`, with edges out to whichever MCP servers this prompt actually
+touched (confirmed live: `portfolio` and `market-news`, since the agent
+pulled both a positions figure and news sentiment to answer). `risk_level`
+is `none` or `self_refused` on hover; nothing to flag.
 
 **Step 4 — force the same overreach [Scene
 4a](#scene-4a--bob-overreaches) already proved the server denies**, this
@@ -2736,18 +2739,19 @@ openshell sandbox exec -n aud-claude-bob --workspace bob \
 denial Scene 4a already showed — nothing about the boundary changes here,
 only its observability. Once `session-auditor`'s `Stop` hook classifies
 the transcript, `aud-claude-bob`'s node shifts from green toward amber on
-the dashboard — `risk_level=blocked_attempt`, `score=2`, shown on hover as
-the "why." A full-red `complied_or_fabricated` verdict would mean the
-agent actually returned out-of-scope data, which this demo's own
-protections are designed to prevent — treat amber as the realistic
-ceiling for this scene, not a shortfall of the classifier.
+the dashboard — confirmed live: `risk_level=blocked_attempt`, `score=2`,
+shown on hover as the "why," within seconds of the turn completing. A
+full-red `complied_or_fabricated` verdict would mean the agent actually
+returned out-of-scope data, which this demo's own protections are
+designed to prevent — treat amber as the realistic ceiling for this
+scene, not a shortfall of the classifier.
 
 Meanwhile any other audited sandbox you provision the same way
 (`./scripts/16-provision-audited-sandbox.sh charlie claude ...`, or
-`... codex ...` — `[VERIFY]` per the note above) stays green and live on
-the same graph, for contrast: the dashboard's whole point is telling "one
-banker had a flagged turn" apart from "everyone's fine" at a glance,
-without reading a single log line.
+`... codex ...` — Codex path still `[VERIFY]`, see the note above) stays
+green and live on the same graph, for contrast: the dashboard's whole
+point is telling "one banker had a flagged turn" apart from "everyone's
+fine" at a glance, without reading a single log line.
 
 #### Demo wrap-up
 

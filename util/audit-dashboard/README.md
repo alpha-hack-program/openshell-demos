@@ -23,14 +23,21 @@ speculatively.
   `onboarding-web`, this service never calls the `openshell` CLI or the
   gateway at all. Its only outbound call is to
   `openshift-user-workload-monitoring`'s Thanos-querier, using this pod's
-  own bound ServiceAccount token for auth and the in-cluster CA bundle for
-  TLS. **`[VERIFY]`** — this repo has no prior confirmed pattern for a
-  workload calling `thanos-querier` over the network (the only existing
-  precedent is an admin's `oc exec` straight into the Prometheus pod, see
-  `demos/keycloak-oidc/audit-collector/README.md`) — confirm the RBAC
+  own bound ServiceAccount token for auth. **Confirmed live** (2026-09-08,
+  sandbox268) — the first workload in this repo to call `thanos-querier`
+  over the network at all (the only prior precedent is an admin's
+  `oc exec` straight into the Prometheus pod, see
+  `demos/keycloak-oidc/audit-collector/README.md`). The RBAC
   (`cluster-monitoring-view` ClusterRole binding, see
   `demos/keycloak-oidc/audit-dashboard/templates/clusterrolebinding.yaml`)
-  and URL against a live cluster before trusting this by default.
+  worked on the first try with no extra grant needed. What actually broke
+  on the first run was TLS, not RBAC: trusting only
+  `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` (the Kubernetes
+  API server's CA) fails verification against Thanos-querier's serving
+  certificate, which OpenShift signs with a separate internal service-ca
+  instead — its bundle is auto-projected into every pod as a sibling
+  `service-ca.crt`, undocumented but present by default. `build_http_client`
+  now trusts both.
 - Every `refreshIntervalSecs` (default `5`), the backend re-runs three
   PromQL queries scoped to its own namespace
   (`agent_session_started`/`agent_turn_heartbeat`/
@@ -67,9 +74,11 @@ speculatively.
   sandbox stays visibly distinct even if its last known risk score was
   low.
 - **Edges to MCP-server nodes** come from the `mcp_servers` attribute on
-  `session_compliance_risk_score` (comma-joined server short-names,
-  confirmed for Claude Code, `[VERIFY]` for Codex — see
-  `util/session-auditor/README.md`'s own note on this). A sandbox that has
+  `session_compliance_risk_score` (comma-joined server short-names).
+  Confirmed live for Claude Code (2026-09-08): a benign "biggest client"
+  turn correctly showed edges to `portfolio`/`market-news`, the two
+  servers actually called. Still `[VERIFY]` for Codex — see
+  `util/session-auditor/README.md`'s own note on this. A sandbox that has
   never completed a `Stop` hook (e.g. no classification credential
   configured) shows no MCP edges yet, even if it's live.
 
@@ -78,7 +87,7 @@ speculatively.
 | Env var | Default | Description |
 |---|---|---|
 | `OPENSHELL_NAMESPACE` | *(required)* | Every PromQL query is scoped to this namespace — the dashboard only ever shows its own demo's sandboxes. |
-| `THANOS_QUERIER_URL` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL. `[VERIFY]` on your cluster. |
+| `THANOS_QUERIER_URL` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
 | `REFRESH_INTERVAL_SECS` | `5` | How often to re-poll and rebuild the graph. |
 | `HEARTBEAT_STALE_SECS` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
 | `PORT` | `8080` | HTTP port the service listens on. |

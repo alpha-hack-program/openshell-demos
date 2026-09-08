@@ -17,15 +17,14 @@ metrics this reads.
 - At least one sandbox provisioned via
   `../scripts/16-provision-audited-sandbox.sh` and pushing metrics, or the
   graph will simply be empty (not an error — see "Verifying it works").
-- **`[VERIFY]`**: the built-in `cluster-monitoring-view` ClusterRole must
-  exist and actually grant Thanos-querier read access for this namespace's
-  metrics — confirm against your cluster
-  (`oc get clusterrole cluster-monitoring-view`) before assuming this
-  chart's `ClusterRoleBinding` is sufficient. This repo has no prior
-  confirmed pattern for a workload calling `thanos-querier` in-cluster —
-  the only existing precedent
-  (`../audit-collector/README.md`) is an admin's `oc exec` straight into
-  the Prometheus pod.
+- The built-in `cluster-monitoring-view` ClusterRole must exist —
+  **confirmed live (2026-09-08, sandbox268)** that binding it to this
+  chart's own `ServiceAccount` is sufficient for Thanos-querier to answer
+  namespace-scoped queries; no additional RBAC needed. This was the first
+  time this repo had a workload call `thanos-querier` in-cluster at all
+  (the only prior precedent, `../audit-collector/README.md`, is an
+  admin's `oc exec` straight into the Prometheus pod) — it works, but the
+  real blocker turned out to be TLS, not RBAC (see below).
 
 ## Install
 
@@ -56,9 +55,12 @@ audited sandbox has pushed a metric yet — provision one via
 wait up to `refreshIntervalSecs` (default `5s`) for the next poll.
 
 If the page itself fails to load, check the pod's own logs
-(`oc logs -n "$OPENSHELL_NAMESPACE" deploy/audit-dashboard`) — a
-`thanos-querier returned 403` there points at the `[VERIFY]` RBAC item
-above, not a bug in the dashboard itself.
+(`oc logs -n "$OPENSHELL_NAMESPACE" deploy/audit-dashboard`). A
+`thanos-querier returned 403` points at the ClusterRoleBinding being
+missing/wrong. A `request to thanos-querier failed: ... certificate`
+error (confirmed live as the actual first-run failure mode, not RBAC)
+means the running image predates the `service-ca.crt` fix — rebuild
+against a current `util/audit-dashboard` checkout and redeploy.
 
 ## Values reference
 
@@ -66,9 +68,16 @@ above, not a bug in the dashboard itself.
 |---|---|---|
 | `image.{repository,tag}` | `quay.io/atarazana/audit-dashboard:0.1.0` | Image to deploy. |
 | `route.host` | `""` | Optional fixed hostname; leave empty for an OpenShift-auto-generated one. |
-| `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL. `[VERIFY]` on your cluster. |
+| `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
 | `refreshIntervalSecs` | `5` | How often the backend re-polls Prometheus. |
 | `heartbeatStaleSecs` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
+
+Confirmed live end to end (2026-09-08, sandbox268): after a benign turn
+in an audited sandbox, its node showed `risk_level: none`; after
+repeating [Scene 4a](../README.md#scene-4a--bob-overreaches)'s forcing
+prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
+(`score: 2`) with `mcp_servers` correctly attributed — visible both via
+`GET /api/graph` and through the real HTTPS Route.
 
 ## Known limitations
 

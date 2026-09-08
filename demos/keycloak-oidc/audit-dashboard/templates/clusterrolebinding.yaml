@@ -1,12 +1,13 @@
-# [VERIFY] Genuinely new to this repo — no prior confirmed pattern for a
-# workload calling openshift-user-workload-monitoring's Thanos-querier
-# in-cluster (the only existing precedent, in ../audit-collector/README.md,
-# is an admin's `oc exec` straight into the Prometheus pod). This binds the
+# Confirmed live (2026-09-08, sandbox268) — the first workload in this
+# repo to call openshift-user-workload-monitoring's Thanos-querier
+# in-cluster (the only prior precedent, ../audit-collector/README.md, is
+# an admin's `oc exec` straight into the Prometheus pod). Binding the
 # dashboard's own ServiceAccount to the built-in `cluster-monitoring-view`
-# ClusterRole, which OpenShift's monitoring stack ships by default —
-# confirm both the ClusterRole's existence and that Thanos-querier actually
-# honors it for this namespace's metrics against a live cluster before
-# trusting this.
+# ClusterRole is sufficient on its own — no extra RoleBinding, annotation,
+# or namespace-scoped grant needed. The actual first-run failure mode
+# wasn't RBAC at all; it was TLS (see util/audit-dashboard/src/main.rs's
+# build_http_client doc comment) — worth knowing before assuming a 403
+# here if something looks broken.
 #
 # A ClusterRoleBinding (not a namespaced RoleBinding) because
 # `cluster-monitoring-view` is a ClusterRole and Thanos-querier's own RBAC
