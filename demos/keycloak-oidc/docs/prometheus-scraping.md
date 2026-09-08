@@ -147,6 +147,8 @@ session-auditor --worker (detached, runs after the hook already returned)
 OpenTelemetryCollector (receivers.otlp → exporters.prometheus :8889)
    ▼
 ServiceMonitor → openshift-user-workload-monitoring Prometheus
+   ▼
+audit-dashboard (Thanos-querier, own ServiceAccount) → live risk/heartbeat graph
 ```
 
 `session-auditor` pushes:
@@ -154,8 +156,22 @@ ServiceMonitor → openshift-user-workload-monitoring Prometheus
 ```
 agent_session_started{session_id="...", agent="claude"|"codex", workspace="...", sandbox="..."}   # gauge, always 1, from SessionStart
 agent_turn_heartbeat{session_id="...", agent="claude"|"codex", workspace="...", sandbox="..."}    # gauge, always 1, from UserPromptSubmit
-session_compliance_risk_score{session_id="...", risk_level="...", workspace="...", sandbox="..."} # gauge, 0-3, from Stop
+session_compliance_risk_score{session_id="...", risk_level="...", workspace="...", sandbox="...", mcp_servers="..."} # gauge, 0-3, from Stop
 ```
+
+`mcp_servers` (added for Scene 7's dashboard,
+[`demos/keycloak-oidc/audit-dashboard/`](../audit-dashboard/)) is a
+comma-joined, deduped list of MCP server short-names touched during the
+turn, parsed from the exact same tool-call names already being flattened
+into the transcript for classification — no second pass over the file, and
+omitted entirely (not pushed as an empty string) when no MCP tool call
+happened. Confirmed for Claude Code (`mcp__<key>__<tool>`, e.g.
+`mcp__portfolio__list_my_clients` — see
+`scripts/15-provision-claude-sandbox.sh`'s own comment); **`[VERIFY]`** for
+Codex, whose real `function_call.name` shape for an actual MCP call has
+never been captured live (see the existing Codex limitation below) — see
+[`util/session-auditor/README.md`](../../../util/session-auditor/README.md#metrics-pushed)
+for the fallback heuristic and how to correct it once confirmed.
 
 `workspace`/`sandbox` are best-effort attribution, not a security
 control — see
@@ -265,4 +281,9 @@ splits out both `workspace` and `sandbox` from the one read, together
   Scene-4-style overreach attempt hasn't been tested live the way Claude
   Code's was with synthetic transcripts earlier; the parser itself was
   validated against a real captured Codex transcript, just not yet a
-  transcript containing a real denial.
+  transcript containing a real denial. The same gap applies to
+  `mcp_servers` attribution above: Codex has never made a real MCP tool
+  call in a captured transcript, so its `function_call.name` shape for one
+  — and therefore whether the `mcp_servers` heuristic is even right — is
+  unconfirmed. Resolve both the same time Scene 7 is first run against a
+  Codex sandbox with a real MCP call.
