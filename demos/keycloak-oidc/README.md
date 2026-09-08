@@ -27,6 +27,7 @@
     - [Write each banker's MCP server config once](#write-each-bankers-mcp-server-config-once)
     - [Provision the Claude Code harness](#provision-the-claude-code-harness)
     - [Log in as each banker (one-time per terminal, before Scene 1)](#log-in-as-each-banker-one-time-per-terminal-before-scene-1)
+    - [Using parrot instead of raw CLI invocations](#using-parrot-instead-of-raw-cli-invocations)
     - [Explore interactively](#explore-interactively)
     - [Scene 1 — Bob preps for a meeting](#scene-1--bob-preps-for-a-meeting)
     - [Scene 2 — Bob resolves his biggest client](#scene-2--bob-resolves-his-biggest-client)
@@ -43,7 +44,6 @@
 - [Annexes](#annexes)
   - [A. Alternate test clients](#a-alternate-test-clients)
     - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
-    - [Using parrot instead of raw CLI invocations](#using-parrot-instead-of-raw-cli-invocations)
   - [B. Raw MCP protocol calls (curl, for scripting/CI)](#b-raw-mcp-protocol-calls-curl-for-scriptingci)
   - [C. Configuration reference](#c-configuration-reference)
   - [D. Secrets and security notes](#d-secrets-and-security-notes)
@@ -1842,35 +1842,78 @@ scripting this. The outputs shown below are just examples — expect
 different wording, and occasionally a different tool sequence, when you
 run these yourself.
 
-**Prefer a friendlier frontend than raw `openshell sandbox exec ...
-claude ...`?** Each scene below has a collapsed "Equivalent via `parrot`"
-block right under its raw command. `parrot` ([`util/parrot/`](../../util/parrot/))
-is an optional companion TUI that collapses the whole invocation into
-`parrot --sandbox <name> --workspace <user> --prompt "<question>"` and
-renders the streaming tool-call sequence live instead of just the final
-text — entirely optional, every scene's raw command works on its own
-without it. See [Using parrot instead of raw CLI
-invocations](#using-parrot-instead-of-raw-cli-invocations) in Annex A for
-install instructions and caveats.
+#### Using parrot instead of raw CLI invocations
 
-> **Seed meetings self-heal daily, so which meeting comes back can still
-> vary.** The meetings seeded in `mcp-servers/templates/schema-init-configmap.yaml`
-> use fixed timestamps (e.g. Bob's `mtg-001` with Clara Fontán was originally
-> `2026-08-24T10:00:00Z`) — but `0003_meetings_refresh.sql`, run both by
-> `schema-init-job.yaml` (on every `helm install`/`upgrade`) and by the
-> `mcp-servers-meetings-refresh` `CronJob` (daily at 00:00 UTC), rolls each
-> banker's stalest meeting forward to tomorrow (same time-of-day, same
-> client, same notes) whenever they have none left in the future. So
-> `get_upcoming_meetings` should essentially never come back empty in normal
-> operation — but *which* of a banker's meetings is the upcoming one still
-> depends on when you run this relative to the last refresh (e.g. Bob cycles
-> between `mtg-001`/Clara Fontán and `mtg-002`/Grupo Delta Textil one at a
-> time, never both). Phrase prompts as "what's my next meeting" rather than
-> naming a specific client for that reason. If you do ever see "no such
-> meeting found," that means both the daily cron and the last `helm
-> upgrade` are stale — check `oc get cronjob mcp-servers-meetings-refresh`
-> and trigger it manually with `oc create job --from=cronjob/mcp-servers-meetings-refresh
-> manual-refresh-$(date +%s)`. See [Open risks](#f-open-risks).
+Prefer a friendlier frontend than raw `openshell sandbox exec ... claude
+...`? [`util/parrot/`](../../util/parrot/) is a small companion TUI that
+turns the long invocation shown in each scene below into a single `parrot
+--sandbox <name> --workspace <user> --prompt "<question>"` call. It's
+entirely optional — every scene below works exactly the same via the raw
+CLI shown inline; parrot is just a friendlier way to drive the same
+sandbox, the same MCP config, the same credential, and it renders the
+streaming tool-call sequence live instead of only the final text. Each
+scene below has a collapsed "Equivalent via `parrot`" block right under
+its raw command.
+
+**Install (pick one, tag `parrot-v0.1.1`):**
+
+```bash
+# Linux (x86_64)
+curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-linux-x86_64 -o parrot
+chmod +x parrot
+
+# macOS (Apple Silicon)
+curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-macos-aarch64 -o parrot
+chmod +x parrot
+
+./parrot --version
+```
+
+Put `parrot` on your `PATH` (or reference its full path) — the snippets in
+each scene below just call `parrot`.
+
+**What it collapses.** For Claude Code, parrot auto-injects `--mcp-config
+/sandbox/.claude/mcp-servers.json`, `--strict-mcp-config`,
+`--permission-mode bypassPermissions`, and `--output-format stream-json
+--verbose` — none of that needs to be typed. It also picks up
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` (or `OPENAI_BASE_URL`/`OPENAI_MODEL`
+for `--agent codex`) from its own process environment, the same variables
+the raw `--env` flags pass explicitly — `set -a; source .env; set +a`
+(not a bare `source .env`, since this repo's `.env` files don't `export`)
+before running it, or parrot prints `no environment variables passed
+through` and the LLM call 403s. Drop `--prompt` entirely for a multi-turn
+interactive session instead of a single question — parrot threads
+`--resume`/`codex exec resume` automatically between turns, so conversation
+memory carries over.
+
+**Caveats, from testing this live against `claude-bob`:**
+
+- **Always pass `--workspace <user>` explicitly.** Workspace
+  auto-detection (skipping `--workspace` when you belong to exactly one
+  workspace) is unreliable in this cluster: parrot's workspace lookup
+  returned all four workspaces (`default, alice, bob, charlie`) for bob's
+  identity, even though `openshell workspace list` correctly shows bob
+  belongs to just `bob`. Omitting `--workspace` fails with `multiple
+  workspaces available`.
+- **parrot always draws its dashboard, even for one-shot `--prompt` runs**
+  (`enable_raw_mode()` isn't conditional on interactive mode) — it needs a
+  real terminal. That's fine for every scene below (they already assume an
+  actual terminal per persona), but it means parrot can't be piped or
+  driven from a fully non-interactive script without a pty.
+- **A one-shot `--prompt` run doesn't auto-exit.** Once the turn completes
+  you'll see `[q] quit` at the bottom of the dashboard — press any key
+  (`q` works) to return to the shell.
+- Codex scenes need the separate `codex-<user>` sandbox from [Codex + BYO
+  LLM + MCP tool](#codex--byo-llm--mcp-tool) in Annex A (pass `--agent
+  codex`), not `claude-<user>` — Claude Code runs directly against the
+  `claude-<user>` sandboxes provisioned above, no extra provisioning
+  needed.
+- **Known flake, not caused by parrot:** Claude Code against `claude-bob`'s
+  BYO-LLM provider occasionally fails or stalls, traced to `dispatching to
+  firstParty model=` (an empty/wrong model dispatch) — intermittent,
+  unresolved upstream, and reproducible with the raw CLI invocation too. If
+  a turn seems to hang well past the usual 30-60s, that's the most likely
+  cause, not a parrot bug — retry.
 
 #### Scene 1 — Bob preps for a meeting
 
@@ -1906,7 +1949,7 @@ openshell sandbox exec -n claude-bob --workspace bob \
 ```
 
 <details>
-<summary>Equivalent via <code>parrot</code> (optional — see <a href="#using-parrot-instead-of-raw-cli-invocations">Annex A</a> for install)</summary>
+<summary>Equivalent via <code>parrot</code> (optional — see <a href="#using-parrot-instead-of-raw-cli-invocations">above</a> for install)</summary>
 
 ```bash
 # Terminal C — bob
@@ -2886,7 +2929,7 @@ codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
 ```
 
 <details>
-<summary>Equivalent via <code>parrot</code> (optional — see <a href="#using-parrot-instead-of-raw-cli-invocations">below</a> for install)</summary>
+<summary>Equivalent via <code>parrot</code> (optional — see <a href="#using-parrot-instead-of-raw-cli-invocations">above</a> for install)</summary>
 
 ```bash
 set -a; source .env; set +a
@@ -3203,77 +3246,6 @@ banker/server combination automatically:
 
 Expected output — see [step 5](#5-run-the-demo) for the full annotated
 listing (19 passed, 0 failed).
-
-#### Using parrot instead of raw CLI invocations
-
-[`util/parrot/`](../../util/parrot/) is a small companion TUI that turns
-the long `openshell sandbox exec ... claude ...` invocation used throughout
-[step 5](#5-run-the-demo) into a single `parrot --sandbox <name> --workspace
-<user> --prompt "<question>"` call. It's entirely optional — every scene
-above works exactly the same via the raw CLI shown inline; parrot is just a
-friendlier way to drive the same sandbox, the same MCP config, the same
-credential, and it renders the streaming tool-call sequence live instead of
-only the final text.
-
-**Install (pick one, tag `parrot-v0.1.1`):**
-
-```bash
-# Linux (x86_64)
-curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-linux-x86_64 -o parrot
-chmod +x parrot
-
-# macOS (Apple Silicon)
-curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-macos-aarch64 -o parrot
-chmod +x parrot
-
-./parrot --version
-```
-
-Put `parrot` on your `PATH` (or reference its full path) — the snippets in
-each scene above just call `parrot`.
-
-**What it collapses.** For Claude Code, parrot auto-injects `--mcp-config
-/sandbox/.claude/mcp-servers.json`, `--strict-mcp-config`,
-`--permission-mode bypassPermissions`, and `--output-format stream-json
---verbose` — none of that needs to be typed. It also picks up
-`ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` (or `OPENAI_BASE_URL`/`OPENAI_MODEL`
-for `--agent codex`) from its own process environment, the same variables
-the raw `--env` flags pass explicitly — `set -a; source .env; set +a`
-(not a bare `source .env`, since this repo's `.env` files don't `export`)
-before running it, or parrot prints `no environment variables passed
-through` and the LLM call 403s. Drop `--prompt` entirely for a multi-turn
-interactive session instead of a single question — parrot threads
-`--resume`/`codex exec resume` automatically between turns, so conversation
-memory carries over.
-
-**Caveats, from testing this live against `claude-bob`:**
-
-- **Always pass `--workspace <user>` explicitly.** Workspace
-  auto-detection (skipping `--workspace` when you belong to exactly one
-  workspace) is unreliable in this cluster: parrot's workspace lookup
-  returned all four workspaces (`default, alice, bob, charlie`) for bob's
-  identity, even though `openshell workspace list` correctly shows bob
-  belongs to just `bob`. Omitting `--workspace` fails with `multiple
-  workspaces available`.
-- **parrot always draws its dashboard, even for one-shot `--prompt` runs**
-  (`enable_raw_mode()` isn't conditional on interactive mode) — it needs a
-  real terminal. That's fine for every scene above (they already assume an
-  actual terminal per persona), but it means parrot can't be piped or
-  driven from a fully non-interactive script without a pty.
-- **A one-shot `--prompt` run doesn't auto-exit.** Once the turn completes
-  you'll see `[q] quit` at the bottom of the dashboard — press any key
-  (`q` works) to return to the shell.
-- Codex scenes need the separate `codex-<user>` sandbox from [Codex + BYO
-  LLM + MCP tool](#codex--byo-llm--mcp-tool) above (pass `--agent codex`),
-  not `claude-<user>` — Claude Code runs directly against the existing
-  `claude-<user>` sandboxes from [step 5](#5-run-the-demo), no extra
-  provisioning needed.
-- **Known flake, not caused by parrot:** Claude Code against `claude-bob`'s
-  BYO-LLM provider occasionally fails or stalls, traced to `dispatching to
-  firstParty model=` (an empty/wrong model dispatch) — intermittent,
-  unresolved upstream, and reproducible with the raw CLI invocation too. If
-  a turn seems to hang well past the usual 30-60s, that's the most likely
-  cause, not a parrot bug — retry.
 
 ### B. Raw MCP protocol calls (curl, for scripting/CI)
 
@@ -3617,16 +3589,29 @@ exact patch release before relying on this beyond a demo.
 
 ### F. Open risks
 
-- **Seed meeting dates are fixed, not relative to "now."** `mtg-001`/`mtg-002`/
-  `mtg-003`/`mtg-004` in `mcp-servers/templates/schema-init-configmap.yaml`
-  use hardcoded absolute timestamps (e.g. `2026-08-24T10:00:00Z`).
-  `get_upcoming_meetings` correctly filters to the future, so as real time
-  passes these seeded meetings silently fall out of "upcoming" one by one.
-  Eventually all four meetings will be in the past and Scene 1's premise
-  (any banker has an "upcoming meeting" at all) stops holding regardless of
-  which banker or client is named. Fix by re-dating the seed data relative
-  to `now()` at schema-init time, or by refreshing the hardcoded dates
-  periodically — neither is done yet.
+- **Seed meeting dates are fixed, not relative to "now" — but they
+  self-heal daily, so which meeting comes back can still vary.**
+  `mtg-001`/`mtg-002`/`mtg-003`/`mtg-004` in
+  `mcp-servers/templates/schema-init-configmap.yaml` use hardcoded absolute
+  timestamps (e.g. Bob's `mtg-001` with Clara Fontán was originally
+  `2026-08-24T10:00:00Z`), and `get_upcoming_meetings` correctly filters to
+  the future, so as real time passes these seeded meetings would silently
+  fall out of "upcoming" one by one. **RESOLVED (mitigated):**
+  `0003_meetings_refresh.sql`, run both by `schema-init-job.yaml` (on every
+  `helm install`/`upgrade`) and by the `mcp-servers-meetings-refresh`
+  `CronJob` (daily at 00:00 UTC), rolls each banker's stalest meeting
+  forward to tomorrow (same time-of-day, same client, same notes) whenever
+  they have none left in the future. So `get_upcoming_meetings` should
+  essentially never come back empty in normal operation — but *which* of a
+  banker's meetings is the upcoming one still depends on when you run this
+  relative to the last refresh (e.g. Bob cycles between `mtg-001`/Clara
+  Fontán and `mtg-002`/Grupo Delta Textil one at a time, never both).
+  Phrase prompts as "what's my next meeting" rather than naming a specific
+  client for that reason. If you do ever see "no such meeting found," that
+  means both the daily cron and the last `helm upgrade` are stale — check
+  `oc get cronjob mcp-servers-meetings-refresh` and trigger it manually with
+  `oc create job --from=cronjob/mcp-servers-meetings-refresh
+  manual-refresh-$(date +%s)`.
 - **This README is a reconstruction, not a transcription** of NVIDIA's own
   examples. Reconcile every command against the real repo before running it.
 - **Provider profile schema** — verified against
