@@ -194,7 +194,7 @@ openshell policy set demo-alice --policy policy.yaml --workspace alice --wait
 agent-harness group and LLM-host binary get rendered; `mcpServers` is a
 plain list, one `allow_<name>` group per entry, each granting
 `<name>.<openshellNamespace>.svc.cluster.local:8000` to both `curl` (for
-[Annex B](../README.md#b-raw-mcp-protocol-calls-curl-for-scriptingci)'s
+[the raw MCP protocol calls doc](raw-mcp-protocol-calls.md)'s
 raw-protocol walkthrough) and the recipe's own binary. `llmModel` is
 deliberately **not** a value here — a network policy only ever gates on
 host/port/binary, and the model name never appears in one; it's config

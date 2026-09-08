@@ -59,8 +59,9 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
 > then-current model rejected the `namespace` tool type Codex uses for MCP
 > (see [Annex B — Troubleshooting](#b-troubleshooting)). **This is
 > model-dependent, not a permanent DeepSeek limitation**: a 2026-09-08
-> finding against `deepseek-v4-flash` (via the main guide's Annex A, not
-> this file's agent-proxy path) got real `namespace`-tool MCP calls working
+> finding against `deepseek-v4-flash` (via the main guide's step 6 —
+> Alternative agents, not this file's agent-proxy path) got real
+> `namespace`-tool MCP calls working
 > — see [Annex G](#g-validated-findings-log). Codex + MCP also works
 > unconditionally against an on-cluster vLLM **≥0.25.0** (upstream; RHOAI
 > 3.4.x ships 0.18.0, which is too old — see

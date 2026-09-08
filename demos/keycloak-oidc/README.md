@@ -39,18 +39,16 @@
     - [Scene 5b — Charlie checks product suitability](#scene-5b--charlie-checks-product-suitability)
     - [Scene 6 — Alice: the boundary from the other side, and the second permission](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)
     - [Demo wrap-up](#demo-wrap-up)
+  - [6. Alternative agents](#6-alternative-agents)
+    - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
   - [Definition of done](#definition-of-done)
 - [Part II — Red-team evaluation (EvalHub + Garak)](#part-ii--red-team-evaluation-evalhub--garak)
 - [Annexes](#annexes)
-  - [A. Alternate test clients](#a-alternate-test-clients)
-    - [Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)
-  - [B. Raw MCP protocol calls (curl, for scripting/CI)](#b-raw-mcp-protocol-calls-curl-for-scriptingci)
-  - [C. Configuration reference](#c-configuration-reference)
-  - [D. Secrets and security notes](#d-secrets-and-security-notes)
-  - [E. Troubleshooting](#e-troubleshooting)
-  - [F. Open risks](#f-open-risks)
-  - [G. References](#g-references)
-  - [H. OpenClaw chat frontend (optional, experimental)](#h-openclaw-chat-frontend-optional-experimental)
+  - [A. Further and experimental testing](#a-further-and-experimental-testing)
+  - [B. Configuration reference](#b-configuration-reference)
+  - [C. Secrets and security notes](#c-secrets-and-security-notes)
+  - [D. Troubleshooting](#d-troubleshooting)
+  - [E. References](#e-references)
 
 ## Overview
 
@@ -1474,8 +1472,8 @@ openshell policy update "claude-alice" \
   --workspace "alice"
 ```
 
-The endpoint/binary grants above cover `curl`, used by the raw-protocol
-walkthrough in [Annex B](#b-raw-mcp-protocol-calls-curl-for-scriptingci).
+The endpoint/binary grants above cover `curl`, used by the [raw-protocol
+walkthrough](docs/raw-mcp-protocol-calls.md) in Annex A.
 **The recommended way to actually run the demo is through Claude Code** —
 a real agentic harness making its own multi-hop tool-call decisions, not a
 scripted sequence of JSON-RPC bodies — covered next.
@@ -1628,8 +1626,9 @@ banker's scenes touch, not just one.
 > provider exposes an Anthropic-compatible endpoint (e.g. DeepSeek's
 > `https://api.deepseek.com/anthropic`, or a LiteLLM proxy configured with
 > an `/anthropic` route). Standard OpenAI-compatible endpoints (vLLM,
-> OpenAI, etc.) will **not** work — see the Codex recipe in
-> [Annex A](#codex--byo-llm--mcp-tool) for an OpenAI-compatible alternative.
+> OpenAI, etc.) will **not** work — see the Codex recipe in [step 6 —
+> Alternative agents](#codex--byo-llm--mcp-tool) for an OpenAI-compatible
+> alternative.
 >
 > **DeepSeek note:** the Anthropic-compatible endpoint uses a different
 > base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
@@ -1904,7 +1903,7 @@ memory carries over.
   you'll see `[q] quit` at the bottom of the dashboard — press any key
   (`q` works) to return to the shell.
 - Codex scenes need the separate `codex-<user>` sandbox from [Codex + BYO
-  LLM + MCP tool](#codex--byo-llm--mcp-tool) in Annex A (pass `--agent
+  LLM + MCP tool](#codex--byo-llm--mcp-tool) in step 6 (pass `--agent
   codex`), not `claude-<user>` — Claude Code runs directly against the
   `claude-<user>` sandboxes provisioned above, no extra provisioning
   needed.
@@ -2230,9 +2229,9 @@ This scene only shows one banker probing one other banker's client. To see
 every banker/server combination denied or allowed correctly in one pass —
 including Bob probing both Alice's and Charlie's clients through two
 different servers — admin can run `./scripts/08-verify-isolation.sh`
-(see [Annex B](#b-raw-mcp-protocol-calls-curl-for-scriptingci)), which
-exercises the same boundary via raw curl instead of an agent, for all 19
-checks at once.
+(see the [raw MCP protocol calls doc](docs/raw-mcp-protocol-calls.md) in
+Annex A), which exercises the same boundary via raw curl instead of an
+agent, for all 19 checks at once.
 
 #### Sandbox network isolation
 
@@ -2441,9 +2440,11 @@ Iris") — `mcp-portfolio`'s `list_my_clients` resolves that to `cli-005`
 the same way Scene 5a did. The **product** genuinely cannot: `mcp-kyc-compliance`
 has no `list_products` tool, so nothing in this banker's toolset can
 resolve "Meridian Balanced Growth Fund" to `prod-002` on its own — that
-mapping only exists in this guide's own reference data (see
-[Open risks](#f-open-risks)). Rather than hand the agent a bare, meaningless
-ID, the prompt gives both the human name and the ID together, the way a
+mapping only exists in `mcp-servers/templates/schema-init-configmap.yaml`'s
+seed data (see the [raw MCP protocol calls
+doc](docs/raw-mcp-protocol-calls.md) in Annex A). Rather than hand the
+agent a bare, meaningless ID, the prompt gives both the human name and the
+ID together, the way a
 banker would actually reference a fund by name while the system underneath
 still keys on a code — closer to how you'd say "AAPL (Apple)" than to
 inventing a fake lookup capability that isn't there.
@@ -2452,7 +2453,8 @@ inventing a fake lookup capability that isn't there.
 given the ID; the agent calls `check_suitability` for both product IDs
 given (not just the first), correctly reporting `prod-002` unsuitable (risk
 mismatch) and `prod-001` suitable — matching the raw curl-verified results
-in [Open risks](#f-open-risks) exactly.
+in the [raw MCP protocol calls doc](docs/raw-mcp-protocol-calls.md)
+exactly.
 
 ```bash
 # Terminal D — charlie
@@ -2498,8 +2500,9 @@ parrot --sandbox claude-charlie --workspace charlie \
 > KYC is completed and the source-of-funds review is done.
 
 The agent resolved "Fundación Iris" to `cli-005` on its own (no ID given
-for the client), matching the raw curl-verified results in
-[Open risks](#f-open-risks) exactly. It also pulled in the pending
+for the client), matching the raw curl-verified results in the [raw MCP
+protocol calls doc](docs/raw-mcp-protocol-calls.md) exactly. It also
+pulled in the pending
 KYC/PEP flag unprompted, correctly treating the suitability pass as
 necessary but not sufficient.
 
@@ -2748,113 +2751,10 @@ the right terminal), and each MCP server's own tenant-ownership check
 bankers legitimately share). Isolation here is defense-in-depth, not a
 single check a clever enough prompt could talk its way around.
 
-### Definition of done
+### 6. Alternative agents
 
-- [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/banker roles
-- [x] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
-- [x] RBAC mode: a user-role token cannot perform admin-only operations —
-      a banker's CLI session (role `openshell-user`, `user`-role member of
-      their own workspace) is denied `provider create`/`policy update` in
-      their own workspace with `"workspace role 'admin' required"`; the
-      `openshell-admin` (Platform Admin) session succeeds at both
-- [x] Each banker isolated to their own OpenShell **workspace**, not just
-      their own provider — workspace membership grants access to *every*
-      sandbox in that workspace, not just the member's own provider-attached
-      one, so each banker needs a dedicated workspace, not a shared one
-      (including `default`). Cross-workspace `sandbox exec` and
-      provider/policy management are both denied
-      (`"not a member of workspace"` / `"workspace role 'admin' required"`).
-      See [Workspace isolation](#workspace-isolation)
-- [x] Providers v2 enabled
-- [x] All three demo bankers onboarded via the `onboard` tool, each with
-      their own provider in their own workspace: the operator's admin
-      session creates the workspace and runs the provider-creation
-      commands, while the OAuth browser login is driven by the banker
-      authenticating as themselves — the operator never sees
-      their password
-- [x] Isolation test passes: `08-verify-isolation.sh` (workspace- and
-      tenant-aware) — 19 passed, 0 failed
-- [x] `mcp-servers` chart deployed with all five servers; a banker holding
-      the required Keycloak role can reach their server, one lacking it
-      cannot — via the Envoy sidecar
-- [x] A banker holding `banker` (and therefore all four data-service
-      roles) does not thereby gain `compatibility-user` — Alice reaches
-      `mcp-compatibility`, Bob and Charlie get 403
-- [x] Tenant isolation inside `mcp-portfolio` and `mcp-kyc-compliance`
-      holds: a call against another banker's `client_id` is denied with
-      the same ambiguous error a nonexistent `client_id` gets (HTTP 200,
-      JSON-RPC error code -32602)
-- [x] `mcp-kyc-compliance`'s `search_regulatory_guidance` returns a real,
-      cited fragment from the fictional corpus, backed by the shared
-      vLLM/KServe embeddings `InferenceService`
-- [x] Workspace-boundary isolation holds under real concurrent CLI
-      sessions, not just admin-run probes: each banker's own `openshell`
-      identity (registered with their own browser login, scoped with
-      `XDG_CONFIG_HOME`/`XDG_STATE_HOME` per
-      [How to follow this guide](#how-to-follow-this-guide)) succeeds on
-      `sandbox exec` into their own sandbox, is denied exec'ing into
-      another's, and is denied creating a provider/updating a policy even
-      in their own workspace
-- [x] Claude Code variant ([step 5](#5-run-the-demo)'s recommended path) —
-      every scene verified end to end: multi-hop tool calls across 2-3 MCP
-      servers per turn,
-      correct handling when seed-data dates have lapsed, tenant-ownership
-      denial reproduced through an explicit tool-call request, correct
-      handling of false-authority framing and fabrication requests, PEP/EDD
-      escalation reasoning citing the regulatory corpus, product
-      suitability checks matching curl-verified results, and Alice's
-      `compatibility-user` permission working end to end. See
-      [Sandbox network isolation](#sandbox-network-isolation) for the
-      network-level boundary.
-- [x] `sandbox provider attach` is genuinely self-service for a Workspace
-      User, matching the [Workspace isolation](#workspace-isolation) RBAC
-      table's listing of "use provider attachments" as a Workspace User
-      grant (not a Workspace Admin one, unlike `provider create`/`policy
-      update`)
-- [x] Annex A's Codex + BYO LLM + MCP tool recipe — confirmed live
-      2026-09-08 for both bob (`get_top_client_by_aum`) and alice
-      (`mcp-compatibility` tax calculation), real tool calls through
-      `inference.local` against the demo's DeepSeek BYO endpoint
-      (`deepseek-v4-flash`), correct answers matching the raw curl results.
-      This is a model-dependent result, not a blanket "DeepSeek now
-      works" — see the updated compatibility matrix in
-      [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md)
-      and the reconciliation note in
-      [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md#g-validated-findings-log).
-      Codex remains available as an alternate agent for exercising the
-      same RBAC boundary, but Claude Code is the preferred recipe
-      throughout this guide.
-
-## Part II — Red-team evaluation (EvalHub + Garak)
-
-Run repeatable, auditable adversarial evaluations against agents running
-inside OpenShell sandboxes — using EvalHub as the orchestrator, Garak as
-the adversarial probe engine, and `agent-proxy` (a small Rust server) to
-bridge Garak's OpenAI-compatible API to the CLI-based agent inside the
-sandbox. The proxy runs **inside** the sandbox, so probes hit the agent in
-the exact same environment a real user would have (network policies,
-binary permissions, MCP RBAC all live, not simulated). This part builds on
-the RBAC infrastructure deployed in [Part I](#part-i--oidc-rbac-demo) — run
-that first.
-
-**Validated end-to-end on a live cluster**: Claude Code + real MCP tool
-calls through agent-proxy, a full EvalHub/Garak benchmark run (via a small
-Envoy proxy that works around an EvalHub/Garak routing limitation), and
-MLflow experiment tracking for the results.
-
-See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for the full
-walkthrough — architecture, prerequisites, step-by-step admin/secops
-instructions for both Claude Code (recommended) and Codex (optional)
-agents, validated findings, and the production role model (representative
-service-account profiles instead of named users).
-
-## Annexes
-
-### A. Alternate test clients
-
-Optional recipes that exercise the same RBAC boundary verified in
-[Part I, step 5](#5-run-the-demo) through a real coding agent instead of
-raw `curl`.
+Optional recipes that exercise the same RBAC boundary verified in [step
+5](#5-run-the-demo) through a real coding agent instead of raw `curl`.
 
 #### Codex + BYO LLM + MCP tool
 
@@ -2873,7 +2773,7 @@ server-side.
 > [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md)
 > for the full compatibility matrix and a test script.
 
-**Prerequisites** beyond Part I, steps 1-5 — set `OPENAI_API_KEY`,
+**Prerequisites** beyond steps 1-5 — set `OPENAI_API_KEY`,
 `OPENAI_BASE_URL`, and `OPENAI_MODEL` in your `.env` (see `.env.example`).
 
 **Provision the sandboxes** with
@@ -3247,285 +3147,128 @@ banker/server combination automatically:
 Expected output — see [step 5](#5-run-the-demo) for the full annotated
 listing (19 passed, 0 failed).
 
-### B. Raw MCP protocol calls (curl, for scripting/CI)
+### Definition of done
 
-The same tool calls exercised by [step 5](#5-run-the-demo)'s scenes,
-issued directly as JSON-RPC over curl — no LLM in the loop. Treat these as
-**preliminary/raw-protocol checks**, not the real demo: they're how you
-validate a server's wire-level behavior quickly and deterministically
-(this is what `08-verify-isolation.sh` below does) before ever pointing an
-agent at it. They're useful for scripting, CI, and fast iteration, since
-nothing here decides *which* tool to call or *in what order* — that's
-hardcoded instead of left to a model.
+- [x] Keycloak realm `openshell` live with CLI and gateway clients, admin/banker roles
+- [x] OIDC overlay applied; `openshell status` shows the CLI authenticated against Keycloak
+- [x] RBAC mode: a user-role token cannot perform admin-only operations —
+      a banker's CLI session (role `openshell-user`, `user`-role member of
+      their own workspace) is denied `provider create`/`policy update` in
+      their own workspace with `"workspace role 'admin' required"`; the
+      `openshell-admin` (Platform Admin) session succeeds at both
+- [x] Each banker isolated to their own OpenShell **workspace**, not just
+      their own provider — workspace membership grants access to *every*
+      sandbox in that workspace, not just the member's own provider-attached
+      one, so each banker needs a dedicated workspace, not a shared one
+      (including `default`). Cross-workspace `sandbox exec` and
+      provider/policy management are both denied
+      (`"not a member of workspace"` / `"workspace role 'admin' required"`).
+      See [Workspace isolation](#workspace-isolation)
+- [x] Providers v2 enabled
+- [x] All three demo bankers onboarded via the `onboard` tool, each with
+      their own provider in their own workspace: the operator's admin
+      session creates the workspace and runs the provider-creation
+      commands, while the OAuth browser login is driven by the banker
+      authenticating as themselves — the operator never sees
+      their password
+- [x] Isolation test passes: `08-verify-isolation.sh` (workspace- and
+      tenant-aware) — 19 passed, 0 failed
+- [x] `mcp-servers` chart deployed with all five servers; a banker holding
+      the required Keycloak role can reach their server, one lacking it
+      cannot — via the Envoy sidecar
+- [x] A banker holding `banker` (and therefore all four data-service
+      roles) does not thereby gain `compatibility-user` — Alice reaches
+      `mcp-compatibility`, Bob and Charlie get 403
+- [x] Tenant isolation inside `mcp-portfolio` and `mcp-kyc-compliance`
+      holds: a call against another banker's `client_id` is denied with
+      the same ambiguous error a nonexistent `client_id` gets (HTTP 200,
+      JSON-RPC error code -32602)
+- [x] `mcp-kyc-compliance`'s `search_regulatory_guidance` returns a real,
+      cited fragment from the fictional corpus, backed by the shared
+      vLLM/KServe embeddings `InferenceService`
+- [x] Workspace-boundary isolation holds under real concurrent CLI
+      sessions, not just admin-run probes: each banker's own `openshell`
+      identity (registered with their own browser login, scoped with
+      `XDG_CONFIG_HOME`/`XDG_STATE_HOME` per
+      [How to follow this guide](#how-to-follow-this-guide)) succeeds on
+      `sandbox exec` into their own sandbox, is denied exec'ing into
+      another's, and is denied creating a provider/updating a policy even
+      in their own workspace
+- [x] Claude Code variant ([step 5](#5-run-the-demo)'s recommended path) —
+      every scene verified end to end: multi-hop tool calls across 2-3 MCP
+      servers per turn,
+      correct handling when seed-data dates have lapsed, tenant-ownership
+      denial reproduced through an explicit tool-call request, correct
+      handling of false-authority framing and fabrication requests, PEP/EDD
+      escalation reasoning citing the regulatory corpus, product
+      suitability checks matching curl-verified results, and Alice's
+      `compatibility-user` permission working end to end. See
+      [Sandbox network isolation](#sandbox-network-isolation) for the
+      network-level boundary.
+- [x] `sandbox provider attach` is genuinely self-service for a Workspace
+      User, matching the [Workspace isolation](#workspace-isolation) RBAC
+      table's listing of "use provider attachments" as a Workspace User
+      grant (not a Workspace Admin one, unlike `provider create`/`policy
+      update`)
+- [x] Step 6's Codex + BYO LLM + MCP tool recipe — confirmed live
+      2026-09-08 for both bob (`get_top_client_by_aum`) and alice
+      (`mcp-compatibility` tax calculation), real tool calls through
+      `inference.local` against the demo's DeepSeek BYO endpoint
+      (`deepseek-v4-flash`), correct answers matching the raw curl results.
+      This is a model-dependent result, not a blanket "DeepSeek now
+      works" — see the updated compatibility matrix in
+      [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md)
+      and the reconciliation note in
+      [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md#g-validated-findings-log).
+      Codex remains available as an alternate agent for exercising the
+      same RBAC boundary, but Claude Code is the preferred recipe
+      throughout this guide.
 
-**The actual demo — the thing to run and to trust as end-to-end
-verification — is [step 5](#5-run-the-demo)'s scenes, driven by a real
-agent** making its own multi-hop tool-calling decisions against these same
-servers: **Claude Code**, the preferred and primary recipe used throughout
-this guide, with **Codex** available as an optional alternate agent (see
-[Annex A](#a-alternate-test-clients)) for exercising the identical RBAC
-boundary through a different agentic harness. A curl call proving a server
-returns the right JSON-RPC error is necessary but not sufficient — it says
-nothing about whether an agent given only a natural-language ask actually
-invokes the right tool, with the right arguments, and reports the result
-(or the denial) faithfully. That agent-level behavior is exactly what
-[step 5](#5-run-the-demo)'s scenes and [Annex A](#a-alternate-test-clients)
-verify, and what curl alone cannot.
+## Part II — Red-team evaluation (EvalHub + Garak)
 
-**Who runs this:** every command block below runs from **Terminal A —
-admin**, using `--workspace <id>` to target each banker's sandbox — the
-same admin-runs-everything-via-`--workspace` convention this guide used
-before [step 5](#5-run-the-demo) introduced per-banker terminals. Running
-these from each banker's own terminal instead (B/C/D, matching the Claude
-Code scenes above) works identically — `sandbox exec` is self-service
-within a banker's own workspace.
+Run repeatable, auditable adversarial evaluations against agents running
+inside OpenShell sandboxes — using EvalHub as the orchestrator, Garak as
+the adversarial probe engine, and `agent-proxy` (a small Rust server) to
+bridge Garak's OpenAI-compatible API to the CLI-based agent inside the
+sandbox. The proxy runs **inside** the sandbox, so probes hit the agent in
+the exact same environment a real user would have (network policies,
+binary permissions, MCP RBAC all live, not simulated). This part builds on
+the RBAC infrastructure deployed in [Part I](#part-i--oidc-rbac-demo) — run
+that first.
 
-#### Alice: the one extra permission
+**Validated end-to-end on a live cluster**: Claude Code + real MCP tool
+calls through agent-proxy, a full EvalHub/Garak benchmark run (via a small
+Envoy proxy that works around an EvalHub/Garak routing limitation), and
+MLflow experiment tracking for the results.
 
-Alice's book is small (just Elena Duarte), but she's the only banker who
-can reach `mcp-compatibility` — the platform has to get this right for a
-low-traffic user with an unusual second permission just as reliably as for
-Bob's much busier book:
+See [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md) for the full
+walkthrough — architecture, prerequisites, step-by-step admin/secops
+instructions for both Claude Code (recommended) and Codex (optional)
+agents, validated findings, and the production role model (representative
+service-account profiles instead of named users).
 
-```bash
-MCP_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
+## Annexes
 
-openshell sandbox exec -n claude-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
+### A. Further and experimental testing
 
-openshell sandbox exec -n claude-alice --workspace alice --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calc_tax\",\"arguments\":{\"income\":\"90000\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 both times — Alice holds compatibility-user via the
-# compatibility-users group; nobody else in this demo does.
-```
+Deeper-dive material that isn't needed to run the core demo — kept out of
+the main guide to keep [step 5](#5-run-the-demo) and [step 6 — Alternative
+agents](#6-alternative-agents) focused on the thing to actually run and
+trust as end-to-end verification.
 
-#### Bob: biggest client, meeting prep, performance diagnosis
+- **[Raw MCP protocol calls (curl, for scripting/CI)](docs/raw-mcp-protocol-calls.md)**
+  — the same tool calls exercised by step 5's scenes, issued directly as
+  JSON-RPC over curl, no LLM in the loop. Preliminary/raw-protocol checks
+  for scripting, CI, and fast wire-level verification before ever pointing
+  an agent at a server — not a substitute for the real, agent-driven demo.
+- **[OpenClaw chat frontend (optional, experimental)](docs/openclaw-chat-frontend.md)**
+  — an alternate, chat-driven frontend wired to reuse this demo's
+  Keycloak/OIDC stack and a banker's existing sandbox, instead of the
+  Claude Code/Codex CLI invocations used throughout the main guide.
+  Third-party, community-maintained, and validated for a single banker
+  only — read the caveats at the top of that doc before deploying.
 
-Bob's book is the largest and most varied — this is where the multi-hop
-work happens. First, who's his biggest client by AUM:
-
-```bash
-MCP_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_top_client_by_aum\",\"arguments\":{}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Clara Fontán (cli-001), highest combined market_value
-# across her positions in Bob's book.
-```
-
-Then meeting prep — resolve the next meeting via `mcp-crm-calendar`, then
-pull that client's notes:
-
-```bash
-CRM_URL="http://mcp-crm-calendar.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${CRM_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_upcoming_meetings\",\"arguments\":{}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Bob's own meetings only (mtg-001 with Clara Fontán,
-# mtg-002 with Grupo Delta Textil), but ONLY whichever of those two still
-# lie in the future relative to when you run this — the seed data uses
-# fixed timestamps (mtg-001 is 2026-08-24T10:00:00Z), not dates relative to
-# "now". Running this after that timestamp returns only mtg-002. See the
-# seed-data note above Scene 1.
-```
-
-Finally, performance diagnosis: Grupo Delta Textil's MTD return (`perf-002`)
-is -3.4% against a +1.5% benchmark — a real underperformance worth
-explaining before the meeting, not after. `get_performance` surfaces the
-number; `get_relevant_news` (filtered by that client's sector) is how the
-agent correlates it with an actual market event instead of guessing:
-
-```bash
-NEWS_URL="http://mcp-market-news.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${NEWS_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_relevant_news\",\"arguments\":{\"tickers\":[],\"sectors\":[\"textile\"]}}}" \
-    "$MCP_URL"'
-# Expected: 200 — public news, no per-client isolation on this server, but
-# still requires mcp-market-news-user (composited into banker).
-```
-
-#### Bob probes the boundary
-
-With a promotion decision looming and his numbers looking thin next to
-Alice's and Charlie's, Bob tries to look at their books. Two different
-mechanisms have to both hold for this to fail safely:
-
-```bash
-# Role-based (Envoy rbac filter) — Bob legitimately lacks compatibility-user
-COMPAT_URL="http://mcp-compatibility.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${COMPAT_URL}" \
-  -- bash -c 'curl -so /dev/null -w "%{http_code}" -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-# Expected: 403 — valid token, but Bob lacks compatibility-user entirely.
-
-# Tenant-based (mcp-portfolio's assert_owns_client) — Bob legitimately
-# holds mcp-portfolio-user, so this reaches the app; the app itself has to
-# refuse. cli-004 is Alice's Elena Duarte. Expected: HTTP 200 with a
-# JSON-RPC-level error (code -32602).
-PORTFOLIO_URL="http://mcp-portfolio.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-openshell sandbox exec -n claude-bob --workspace bob --env "MCP_URL=${PORTFOLIO_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_positions\",\"arguments\":{\"client_id\":\"cli-004\"}}}" \
-    "$MCP_URL"'
-# Expected: the same deliberately-ambiguous "client_id no encontrado para
-# el llamante autenticado" error Bob would get for a client_id that
-# doesn't exist at all — never Elena Duarte's actual positions.
-```
-
-#### Charlie: KYC-aware reasoning
-
-Charlie's one client, Fundación Iris, carries a pending KYC review and a
-PEP flag. Two servers back this up with real data: `mcp-portfolio`'s
-`list_my_clients` surfaces the flags themselves (also requires
-mcp-portfolio-v0.1.4+ — 0.1.3 returns id/name only); `mcp-kyc-compliance`
-is the dedicated tool — it can look up the flags directly
-(`get_risk_profile`) and, more importantly, search the actual regulatory
-text and cite the clause instead of giving a flat yes/no
-(`search_regulatory_guidance`):
-
-```bash
-MCP_URL="http://mcp-kyc-compliance.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-
-openshell sandbox exec -n claude-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}" \
-    "$MCP_URL"'
-
-openshell sandbox exec -n claude-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_risk_profile\",\"arguments\":{\"client_id\":\"cli-005\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — Fundación Iris, kyc_status "pending", pep_flag true.
-
-openshell sandbox exec -n claude-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"search_regulatory_guidance\",\"arguments\":{\"query\":\"What approval is required before a PEP client transaction can proceed?\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — a fragment from the (fictional) corpus's PEP doc: prior
-# compliance-officer approval plus a documented source-of-funds review,
-# with the source document named — Charlie can cite the rule, not just
-# assert an answer.
-
-openshell sandbox exec -n claude-charlie --workspace charlie --env "MCP_URL=${MCP_URL}" \
-  -- bash -c 'curl -sS -X POST \
-    -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"check_suitability\",\"arguments\":{\"client_id\":\"cli-005\",\"product_id\":\"prod-002\"}}}" \
-    "$MCP_URL"'
-# Expected: 200 — potentially_suitable: false. prod-002 ("Meridian Balanced
-# Growth Fund") is rated moderate; Fundación Iris is conservative, so
-# risk_ok is false regardless of sector concentration. Try prod-001
-# ("Meridian Capital Preservation Note", conservative, no sector) instead
-# for a potentially_suitable: true result — see
-# mcp-servers/templates/schema-init-configmap.yaml for the full 6-product
-# catalog and which client/product pairs exercise which branch (risk vs.
-# sector-concentration rejection).
-```
-
-Alternatively, run the isolation verification script to test every
-banker/server combination — including Bob's boundary probe — automatically:
-
-```bash
-./scripts/08-verify-isolation.sh
-```
-
-Expected output:
-
-```
-PASS  alice → mcp-compatibility (calc_tax)  HTTP 200 (expected 200)
-PASS  alice → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  alice → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  alice → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  alice → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  bob → mcp-compatibility  HTTP 403 (expected 403)
-PASS  bob → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  bob → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  bob → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  bob → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  charlie → mcp-compatibility  HTTP 403 (expected 403)
-PASS  charlie → mcp-portfolio (list_my_clients)  HTTP 200 (expected 200)
-PASS  charlie → mcp-crm-calendar (get_upcoming_meetings)  HTTP 200 (expected 200)
-PASS  charlie → mcp-market-news (get_relevant_news)  HTTP 200 (expected 200)
-PASS  charlie → mcp-kyc-compliance (get_risk_profile)  HTTP 200 (expected 200)
-PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
-PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-portfolio.get_positions — denied, no cross-tenant data leaked
-PASS  bob probing cli-004 (Alice's Elena Duarte) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
-PASS  bob probing cli-005 (Charlie's Fundación Iris) via mcp-kyc-compliance.get_risk_profile — denied, no cross-tenant data leaked
-
-Results: 19 passed, 0 failed
-```
-
-> For alternate ways to exercise this same RBAC boundary through a real
-> coding agent instead of raw `curl`, see [step 5](#5-run-the-demo) (Claude
-> Code, the primary recipe) or [Annex A](#a-alternate-test-clients) (Codex).
-
-### C. Configuration reference
+### B. Configuration reference
 
 | Variable | Where used | Notes |
 |---|---|---|
@@ -3538,7 +3281,7 @@ Results: 19 passed, 0 failed
 | `KEYCLOAK_CLIENT_SECRET` | Gateway client secret | Never commit a real value |
 | `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-user.sh` | Short-lived; obtain via your own admin login |
 
-### D. Secrets and security notes
+### C. Secrets and security notes
 
 - The gateway client secret in `keycloak/realm-export.json` is a hardcoded
   demo value (`openshell-gateway-demo-secret`). In production, generate a
@@ -3559,7 +3302,7 @@ Results: 19 passed, 0 failed
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — evaluation-only, never expose to a public network.
 
-### E. Troubleshooting
+### D. Troubleshooting
 
 **Profile `token_url` substitution.** The provider profile
 `providers/user-refresh-profile.yaml` contains `<keycloak-host>` as a
@@ -3587,99 +3330,7 @@ not for production.
 **Envoy image tag.** `envoyproxy/envoy:v1.31-latest` is a moving tag. Pin an
 exact patch release before relying on this beyond a demo.
 
-### F. Open risks
-
-- **Seed meeting dates are fixed, not relative to "now" — but they
-  self-heal daily, so which meeting comes back can still vary.**
-  `mtg-001`/`mtg-002`/`mtg-003`/`mtg-004` in
-  `mcp-servers/templates/schema-init-configmap.yaml` use hardcoded absolute
-  timestamps (e.g. Bob's `mtg-001` with Clara Fontán was originally
-  `2026-08-24T10:00:00Z`), and `get_upcoming_meetings` correctly filters to
-  the future, so as real time passes these seeded meetings would silently
-  fall out of "upcoming" one by one. **RESOLVED (mitigated):**
-  `0003_meetings_refresh.sql`, run both by `schema-init-job.yaml` (on every
-  `helm install`/`upgrade`) and by the `mcp-servers-meetings-refresh`
-  `CronJob` (daily at 00:00 UTC), rolls each banker's stalest meeting
-  forward to tomorrow (same time-of-day, same client, same notes) whenever
-  they have none left in the future. So `get_upcoming_meetings` should
-  essentially never come back empty in normal operation — but *which* of a
-  banker's meetings is the upcoming one still depends on when you run this
-  relative to the last refresh (e.g. Bob cycles between `mtg-001`/Clara
-  Fontán and `mtg-002`/Grupo Delta Textil one at a time, never both).
-  Phrase prompts as "what's my next meeting" rather than naming a specific
-  client for that reason. If you do ever see "no such meeting found," that
-  means both the daily cron and the last `helm upgrade` are stale — check
-  `oc get cronjob mcp-servers-meetings-refresh` and trigger it manually with
-  `oc create job --from=cronjob/mcp-servers-meetings-refresh
-  manual-refresh-$(date +%s)`.
-- **This README is a reconstruction, not a transcription** of NVIDIA's own
-  examples. Reconcile every command against the real repo before running it.
-- **Provider profile schema** — verified against
-  [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2)
-  and a live gateway (the CLI version in use — see
-  [Prerequisites](#prerequisites)). `refresh` (with `token_url`, `scopes`,
-  `strategy`) must nest under the specific entry in `credentials[]`, not as a
-  top-level profile field.
-- **Real user identity federation** (brokering each user's own IdP into
-  Keycloak) is a materially bigger project than this demo covers.
-- **Per-server token audience** — Keycloak isn't configured with an audience
-  mapper per MCP server, so the realm role claim is the *only* thing
-  distinguishing access to one banking data service from another.
-- **`mcp-kyc-compliance`'s regulatory corpus is small and fictional.**
-  `search_regulatory_guidance` does real semantic search, but over four
-  short, hand-authored markdown docs (`mcp/mcp-kyc-compliance/data/corpus/`)
-  — not real FATF/MiFID II/AML text, and not something to demo as if it
-  were. See that server's own README disclaimer.
-- **RESOLVED: the per-server `policy update` loops in
-  [Provision the Claude Code harness](#provision-the-claude-code-harness)
-  and the Codex recipe in
-  [Annex A](#codex--byo-llm--mcp-tool) now use `openshell policy set` with a
-  document rendered from the [`policies/`](policies/) Helm chart, instead
-  of one `policy update --add-endpoint`/`--binary` call per MCP server.**
-  Earlier revisions of this note warned that `policy set` was unsafe
-  because it fully replaces the policy document, wiping the built-in
-  bundle catalog (`claude_code`, `codex`, `copilot`, `github`, `pypi`,
-  `vscode`, etc.) that `policy update --add-endpoint` merges on top of
-  automatically. That's still true, but two more things confirmed live
-  changed the calculus:
-  1. **Provider-composed grants survive `policy set` intact.** Attaching a
-     provider (`sandbox provider attach`, or `--provider` at `sandbox
-     create`) adds a `_provider_<name>` group to the *effective* policy
-     that isn't part of the base document `policy set` replaces — verified
-     by attaching a real `byo-claude`-style provider, running `policy set`
-     with a document that didn't mention its host at all, and confirming
-     the provider's group (including its own binary/endpoint grants, if
-     the profile declares any — `byo-codex`'s profile does, `byo-claude`'s
-     doesn't) was still there afterward.
-  2. **A hand-composed document only needs to cover what the guide
-     actually grants explicitly** — the built-in bundles this demo's
-     sandboxes never use (`codex`/`claude_code`'s counterpart, `copilot`,
-     `cursor`, `vscode`, `opencode`, `pypi`, `github_rest_api`,
-     `github_ssh_over_https`) are dropped on purpose, which is a tighter
-     policy for a KYC/compliance demo, not a gap.
-  Confirmed end to end for both recipes: the Claude harness's chart-set
-  policy carries all four/five MCP groups correctly (Alice's extra
-  `mcp-compatibility` verified against a throwaway sandbox); the Codex
-  recipe's chart-set policy was applied to a real `codex-bob` sandbox and a
-  real `codex exec` query correctly called `mcp-portfolio`'s
-  `get_top_client_by_aum` tool through `inference.local` and returned a
-  real answer. See [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for
-  the full writeup, including the explicit caveat that this composition
-  approach is a demo convenience, not a policy-management best practice.
-- **Workspace scoping is manual and easy to get wrong.** Every command that
-  touches a user's provider, sandbox, or policy needs an explicit
-  `--workspace` flag pointed at that user's own workspace — there's no
-  enforcement that stops you from accidentally reusing another user's
-  workspace name, or omitting the flag and silently falling back to
-  `default`. This demo shipped for a while with all users sharing `default`
-  with no membership at all (accidentally safe, since nobody could do
-  anything) — see [Workspace isolation](#workspace-isolation) for what
-  actually broke when membership was granted without separate workspaces.
-  A production system should not rely on operators remembering this flag on
-  every command; wrap it in tooling (as `util/onboard` now defaults
-  `--workspace` to the user ID) rather than leaving it to manual discipline.
-
-### G. References
+### E. References
 
 - OpenShift install path: https://docs.nvidia.com/openshell/kubernetes/openshift
 - Access Control / OIDC: https://docs.nvidia.com/openshell/kubernetes/access-control
@@ -3688,223 +3339,3 @@ exact patch release before relying on this beyond a demo.
 - Manage Workspaces and Access: https://docs.nvidia.com/openshell/sandboxes/manage-workspaces
 - Helm chart README: https://github.com/NVIDIA/OpenShell/blob/main/deploy/helm/openshell/README.md
 - OpenShift SCC restriction discussion: https://github.com/NVIDIA/OpenShell/issues/899
-
-### H. OpenClaw chat frontend (optional, experimental)
-
-> **Caveats — read before deploying.** OpenClaw
-> (`github.com/openclaw/openclaw`) is an independent, third-party
-> open-source project, not an NVIDIA/OpenShell component. Its entire
-> Kubernetes deployment story is community-maintained; OpenClaw's own
-> official docs describe their raw-manifest Kubernetes guide as "not a
-> production-ready deployment." OpenClaw's community threat model is
-> explicitly high-risk — full shell, file, and network access driven by an
-> LLM processing untrusted content — which is exactly what OpenShell
-> sandboxing exists to contain. This annex demonstrates that containment,
-> it isn't a production deployment recipe. It has only been validated for
-> a single banker (alice); repeating it for others is described but not
-> yet tested end to end (see the note at the end of this annex).
-
-**What this is.** OpenClaw is a chat-driven AI agent with its own
-"Gateway" service (its web UI + agent runtime, port 18789 — an unrelated
-namesake of the OpenShell gateway this whole demo revolves around, easy to
-confuse, so this annex always spells out which one it means). OpenClaw
-does **not** run inside an OpenShell sandbox. Its OpenShell plugin works
-the other way around: the OpenClaw Gateway process shells out to the
-`openshell` **CLI** and executes agent commands over **SSH** into whatever
-sandbox that CLI creates or reuses. Its config
-(`plugins.entries.openshell.config`: `gateway`, `gatewayEndpoint`,
-`workspace`, `command`) has no auth field of its own — authentication is
-entirely whatever `openshell` CLI session already exists for the OS user
-running the OpenClaw Gateway process. That means no Kubernetes
-ServiceAccount/Role/RoleBinding is needed for OpenClaw to reach the
-gateway; what it actually needs is a working, pre-provisioned CLI session
-mounted into its pod — the same problem
-[`onboarding-web`](onboarding-web/) already solves for its own standing
-admin session, reused here for a single banker's session instead.
-
-OpenClaw also has no native OIDC login for its own chat UI (an open
-upstream feature request as of this writing). The documented supported SSO
-path is **trusted-proxy auth**: an OIDC-aware reverse proxy authenticates
-against an IdP and forwards a trusted identity header, and OpenClaw checks
-that header against an allowlist. This annex runs an `oauth2-proxy`
-sidecar in front of OpenClaw for exactly that, reusing this demo's
-Keycloak realm via a dedicated confidential client
-(`openshell-openclaw-proxy`).
-
-**What gets deployed:** one `openclaw` Helm release
-(`demos/keycloak-oidc/openclaw/`) in the same namespace as the rest of
-this demo, running as **alice** — reusing her existing workspace,
-sandbox (`claude-alice`), and MCP config from
-[step 3](#3-onboard-a-banker)/[step 4](#4-deploy-mcp-servers). It does not
-touch anything else in this demo.
-
-#### Prerequisites
-
-- Alice fully onboarded per steps 3.0/3a (or 3b)/4/5 — her workspace,
-  provider, `claude-alice` sandbox, and MCP config must already work
-  (confirm with the [Useful commands](#useful-commands-verify-all-bankers-are-onboarded)
-  block above) before starting this annex.
-- A container registry you can push to (same as every custom-image recipe
-  in this repo — see [`docs/sandbox-service-patterns.md`](../../docs/sandbox-service-patterns.md)).
-- An Anthropic (or Anthropic-compatible) API key. **Confirmed**: setting
-  `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` as container env vars is
-  unreliable across OpenClaw gateway versions
-  (`openclaw/openclaw#56679`) — the chart instead renders
-  `models.providers.anthropic.{apiKey,baseUrl}` directly into
-  `openclaw.json` (see `openclaw/templates/secret-openclaw-config.yaml`),
-  which is documented as the reliable override path and works with this
-  demo's existing BYO-LLM DeepSeek endpoint
-  (`ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` in `.env`) —
-  leave `ANTHROPIC_BASE_URL` unset to use a real Anthropic key against the
-  real API instead.
-
-#### 1. Build and push the custom image
-
-OpenClaw's official image doesn't include the `openshell` CLI, so
-`demos/keycloak-oidc/images/openclaw-openshell/Containerfile` layers it on
-top, following this repo's [custom-image convention](../../docs/sandbox-service-patterns.md):
-
-```bash
-# Download a musl static Linux x86_64 openshell CLI build (see this
-# guide's "Installing the CLI" for the release asset naming convention)
-# into this directory before building:
-cp /path/to/openshell demos/keycloak-oidc/images/openclaw-openshell/
-
-REGISTRY="quay.io/atarazana"   # replace with your own
-IMAGE="${REGISTRY}/openclaw-openshell:2026.7.1-2-slim-openshell1"
-podman build -t "$IMAGE" \
-  -f demos/keycloak-oidc/images/openclaw-openshell/Containerfile \
-  demos/keycloak-oidc/images/openclaw-openshell/
-podman push "$IMAGE"
-```
-
-Update `demos/keycloak-oidc/openclaw/values.yaml`'s `image.repository`/
-`image.tag` to match.
-
-#### 2. Bootstrap alice's OpenShell CLI session for OpenClaw
-
-```bash
-source .env
-./scripts/12-bootstrap-openclaw-alice-session.sh
-```
-
-A browser opens — log in as **alice** (her existing banker account, not
-admin). This packages her mTLS + OIDC session into a tarball, same
-mechanism as `10-bootstrap-onboarding-web-admin.sh` but for a banker
-instead of the onboarding-web service identity. Follow the script's
-printed `oc create secret generic openclaw-alice-session ...` command.
-
-#### 3. Create the `openshell-openclaw-proxy` Keycloak client and remaining Secrets
-
-**If you're setting this demo up fresh** (realm not yet imported), the
-`openshell-openclaw-proxy` client is already in `keycloak/realm-export.json`
-and `scripts/01-deploy-keycloak.sh` renders/generates its secret as part of
-[step 1a](#1a-render-the-realm-json) — no extra action needed here beyond
-noting the secret it prints.
-
-**If this demo's realm is already live** (the common case — you're adding
-OpenClaw to an existing deployment), do **not** re-run the full realm
-import: `realm-export.json` reflects only what was true at render time,
-and re-importing it against a realm that's been live for hours risks
-clobbering state that has since evolved (rotated provider tokens, active
-sessions). Create just the one new client via the Admin REST API instead —
-fully additive, verified live to leave every other client/user untouched:
-
-```bash
-source .env
-KEYCLOAK_ADMIN_TOKEN=$(curl -sk -X POST \
-  "https://${KEYCLOAK_HOST}/realms/master/protocol/openid-connect/token" \
-  -d "grant_type=password" -d "client_id=admin-cli" \
-  -d "username=${KEYCLOAK_ADMIN_USER}" -d "password=${KEYCLOAK_ADMIN_PASSWORD}" \
-  | jq -r '.access_token')
-
-OPENCLAW_ROUTE_HOST="${OPENCLAW_ROUTE_HOST:-openclaw-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
-OPENCLAW_PROXY_CLIENT_SECRET=$(openssl rand -hex 32)
-
-curl -sk -X POST "https://${KEYCLOAK_HOST}/admin/realms/${KEYCLOAK_REALM}/clients" \
-  -H "Authorization: Bearer ${KEYCLOAK_ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"clientId\": \"openshell-openclaw-proxy\",
-    \"publicClient\": false,
-    \"protocol\": \"openid-connect\",
-    \"secret\": \"${OPENCLAW_PROXY_CLIENT_SECRET}\",
-    \"serviceAccountsEnabled\": false,
-    \"standardFlowEnabled\": true,
-    \"directAccessGrantsEnabled\": false,
-    \"redirectUris\": [\"https://${OPENCLAW_ROUTE_HOST}/oauth2/callback\"]
-  }"
-```
-
-Either way, create the oauth2-proxy Secret from that client secret plus a
-random cookie secret. **Use `--from-literal`, not `--from-file` +
-`echo > file`** — confirmed live that `echo` appends a trailing newline,
-`--from-file` stores the file's raw bytes (newline included), oauth2-proxy
-reads the env var byte-for-byte and sends `"<secret>\n"` to Keycloak, and
-Keycloak's exact-string secret comparison then rejects it with
-`unauthorized_client`/`"Invalid client or Invalid client credentials"` —
-a failure that's easy to misdiagnose as a genuinely wrong secret, since
-shell `$(...)` command substitution silently strips the trailing newline
-from both sides of any comparison you might run to sanity-check it:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" create secret generic openclaw-oauth2-proxy-secrets \
-  --from-literal=client-secret="$OPENCLAW_PROXY_CLIENT_SECRET" \
-  --from-literal=cookie-secret="$(openssl rand -base64 32 | head -c 32)"
-```
-
-And the LLM-key secret — `ANTHROPIC_API_KEY` here is the source of truth
-that `scripts/13-deploy-openclaw.sh` reads back out at deploy time (see
-[Prerequisites](#prerequisites) above for why it's passed through
-`--set-string` into the config file rather than as a container env var).
-**No `OPENCLAW_GATEWAY_TOKEN`** — confirmed live that a configured shared
-token and `gateway.auth.mode: "trusted-proxy"` (this chart's oauth2-proxy
-sidecar) are mutually exclusive; setting both blocks gateway startup with
-`gateway: Invalid input`:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" create secret generic openclaw-secrets \
-  --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
-```
-
-#### 4. Deploy
-
-```bash
-./scripts/13-deploy-openclaw.sh
-```
-
-Checks all three Secrets exist, grants the `openclaw` ServiceAccount the
-`anyuid` SCC, then `helm upgrade --install`s the chart and waits on the
-rollout. The SCC grant is required because — unlike OpenShell's own
-images — `ghcr.io/openclaw/openclaw` hardcodes `/home/node/.openclaw` to
-`0700`, owned by `uid=1000/gid=1000` (confirmed by inspecting the image
-directly), so it can't run under OpenShift's default arbitrary-UID
-convention. `anyuid` is a narrower grant than the `privileged` SCC already
-used for `openshell-sandbox` in [step 2a](#2a-helm-install) above.
-
-#### 5. Verify
-
-1. Visit the printed Route URL in a browser — confirm it redirects to
-   Keycloak, log in as alice, confirm it lands back on OpenClaw's chat UI
-   (proves the oauth2-proxy sidecar is wired correctly).
-2. Send a chat prompt that requires shell execution. From Terminal B
-   (alice's own terminal), independently confirm the command actually ran
-   inside `claude-alice` — not a local container OpenClaw might otherwise
-   default to — by checking the sandbox's own exec history/logs.
-3. Re-run this demo's existing cross-workspace denial check from alice's
-   identity (`openshell sandbox exec -n claude-bob --workspace alice --
-   echo blocked` — see [Workspace isolation](#workspace-isolation)) to
-   confirm OpenClaw's access doesn't create a new isolation bypass beyond
-   what alice could already do herself.
-
-#### Repeating for another banker
-
-Not implemented or tested in this pass — the pattern, if you want it:
-rerun steps 2-4 with a second banker (e.g. `./scripts/12-bootstrap-openclaw-alice-session.sh
-bob`, which the script supports via a positional user-ID argument),
-install a second Helm release (`helm upgrade --install openclaw-bob ...`)
-with its own `route.host`, `openshell.workspace=bob`, and
-`aliceSessionSecretName=openclaw-bob-session`, and register a second
-redirect URI (or a second Keycloak client) for that Route. Remember
-OpenClaw is single-instance upstream — this means N separate Helm
-releases, not a shared multi-tenant OpenClaw deployment.
