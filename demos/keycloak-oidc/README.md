@@ -2751,8 +2751,16 @@ admin:
 ```bash
 # Terminal A — admin
 source .env
-./scripts/14-provision-codex-sandbox.sh bob mcp-portfolio
+./scripts/14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
+
+The server list matches exactly what [step 5](#5-run-the-demo) wires into
+the Claude Code harness for bob — **the two sandboxes should be
+equivalent, not a narrower Codex subset**: same four servers, same
+`banker`-role gate, same egress allow-list, just a different agent CLI
+driving them. Pass a comma-separated list (no spaces) — the script accepts
+any subset, but there's no reason to give Codex less than Claude Code gets
+here.
 
 This is the same three-step sequence (inference route → policy profile →
 `policy set`) [step 5](#5-run-the-demo) shows manually for the Claude Code
@@ -2769,12 +2777,10 @@ answer. Re-running the script against an already-provisioned sandbox is
 safe — provider/profile/sandbox-create calls tolerate "already exists,"
 and `inference set`/`policy set` just re-apply.
 
-> Pass a comma-separated server list (no spaces) for parity with the
-> Claude Code harness's multiple servers, e.g. `mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance`
-> — don't include `mcp-compatibility` for anyone but alice, it's gated by
-> the `compatibility-user` realm role. The `[mcp_servers.*]` config only
-> takes effect at sandbox creation time, so changing the list against an
-> already-provisioned `codex-<user-id>` sandbox means deleting and
+> **Don't include `mcp-compatibility` for anyone but alice** — it's gated
+> by the `compatibility-user` realm role. The `[mcp_servers.*]` config
+> only takes effect at sandbox creation time, so changing the list against
+> an already-provisioned `codex-<user-id>` sandbox means deleting and
 > recreating it, not re-running the script. Use a custom `CODEX_IMAGE=`
 > (env var, see the script) if you need Codex >= 0.146.0 and the chart's
 > default sandbox image ships older — required for `wire_api = "responses"`
@@ -2841,12 +2847,14 @@ Codex (in sandbox)
       → Envoy checks JWT + realm role → app
 ```
 
-**Now repeat with alice.** Alice is the only banker authorized for
-`mcp-compatibility` (the Compatibility Engine — tax calculation). Provision
-her sandbox with the script, then run the test again with her variables:
+**Now repeat with alice.** Same four shared servers as bob, plus the fifth
+she alone is authorized for — `mcp-compatibility` (the Compatibility
+Engine — tax calculation), same as her Claude Code harness in
+[step 5](#5-run-the-demo). Provision her sandbox with the script, then run
+the test again with her variables:
 
 ```bash
-./scripts/14-provision-codex-sandbox.sh alice mcp-compatibility
+./scripts/14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
 ```
 
 ```bash

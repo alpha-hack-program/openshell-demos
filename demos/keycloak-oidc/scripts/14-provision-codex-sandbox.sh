@@ -9,15 +9,15 @@ set -euo pipefail
 # codex-recipe policy.
 #
 # Usage: ./14-provision-codex-sandbox.sh <user-id> <server-name>[,<server-name>...]
-#   e.g. ./14-provision-codex-sandbox.sh bob mcp-portfolio
 #   e.g. ./14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+#   e.g. ./14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
 #
-# The README's own example wires up a single server — this script accepts
-# a comma-separated list (no spaces) to give Codex parity with the Claude
-# Code harness's five MCP servers. Each name becomes its own
-# [mcp_servers.<name>] table in config.toml and is added to the policy's
-# egress allow-list. Don't include mcp-compatibility for anyone but
-# alice — it's gated by the compatibility-user realm role.
+# The README's own example wires up the same server set as the Claude Code
+# harness — the two sandboxes are meant to be equivalent, not a narrower
+# Codex subset. Each name becomes its own [mcp_servers.<name>] table in
+# config.toml and is added to the policy's egress allow-list. Don't
+# include mcp-compatibility for anyone but alice — it's gated by the
+# compatibility-user realm role.
 #
 # Run as admin — provider and policy management stay Platform-Admin
 # operations regardless of workspace (see "Workspace isolation" in the
