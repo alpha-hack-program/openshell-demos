@@ -1551,16 +1551,6 @@ done
 [ -z "$REMAINING" ] || { echo "failed to substitute USER_ACCESS_TOKEN after 3 attempts"; exit 1; }
 ```
 
-Don't construct this JSON inside `sandbox exec` in the first place, and
-don't relay `$USER_ACCESS_TOKEN`'s value out of the sandbox and back in —
-both were tried and rejected: a `printf`/heredoc nested inside
-`sandbox exec ... -- bash -c '...'` is fragile (one missed `%s` silently
-breaks the JSON, and a heredoc in that position reliably hangs on the
-layered quoting), and capturing the token out of the sandbox first (e.g.
-`openshell sandbox exec ... -- printenv USER_ACCESS_TOKEN`) was observed to
-silently return **empty** on a cold connection, producing a blank Bearer
-header with no error.
-
 **4. The full policy, from the same Helm chart used for Codex** (`recipe=
 claude-code` instead of `recipe=codex`):
 
@@ -1632,14 +1622,6 @@ openshell sandbox exec -n claude-bob --workspace bob -- \
 # No output = substituted correctly. Any output = re-run the script for
 # that banker — it's idempotent.
 ```
-
-From here on, every scene's command is just `--mcp-config
-/sandbox/.claude/mcp-servers.json` — no per-scene JSON construction. The
-file lists every server that banker is authorized for (not a hand-picked
-subset per question), which is also more realistic: a real banker's agent
-doesn't get rewired per question, and each scene's **"Servers this
-exercises"** line still tells you which of them that particular question
-is actually expected to touch.
 
 #### Log in as each banker (one-time per terminal, before Scene 1)
 
@@ -1807,15 +1789,8 @@ interactive session instead of a single question — parrot threads
 `--resume`/`codex exec resume` automatically between turns, so conversation
 memory carries over.
 
-**Caveats, from testing this live against `claude-bob`:**
+**Caveats:**
 
-- **Always pass `--workspace <user>` explicitly.** Workspace
-  auto-detection (skipping `--workspace` when you belong to exactly one
-  workspace) is unreliable in this cluster: parrot's workspace lookup
-  returned all four workspaces (`default, alice, bob, charlie`) for bob's
-  identity, even though `openshell workspace list` correctly shows bob
-  belongs to just `bob`. Omitting `--workspace` fails with `multiple
-  workspaces available`.
 - **parrot always draws its dashboard, even for one-shot `--prompt` runs**
   (`enable_raw_mode()` isn't conditional on interactive mode) — it needs a
   real terminal. That's fine for every scene below (they already assume an
@@ -1824,17 +1799,18 @@ memory carries over.
 - **A one-shot `--prompt` run doesn't auto-exit.** Once the turn completes
   you'll see `[q] quit` at the bottom of the dashboard — press any key
   (`q` works) to return to the shell.
-- Codex scenes need the separate `codex-<user>` sandbox from [Codex + BYO
-  LLM + MCP tool](#codex--byo-llm--mcp-tool) in step 6 (pass `--agent
-  codex`), not `claude-<user>` — Claude Code runs directly against the
-  `claude-<user>` sandboxes provisioned above, no extra provisioning
-  needed.
 - **Known flake, not caused by parrot:** Claude Code against `claude-bob`'s
   BYO-LLM provider occasionally fails or stalls, traced to `dispatching to
   firstParty model=` (an empty/wrong model dispatch) — intermittent,
   unresolved upstream, and reproducible with the raw CLI invocation too. If
   a turn seems to hang well past the usual 30-60s, that's the most likely
   cause, not a parrot bug — retry.
+
+**Note:** Codex scenes need the separate `codex-<user>` sandbox from
+[Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool) in step 6 (pass
+`--agent codex`), not `claude-<user>` — Claude Code runs directly against
+the `claude-<user>` sandboxes provisioned above, no extra provisioning
+needed.
 
 #### Scene 1 — Bob preps for a meeting
 
@@ -2618,14 +2594,28 @@ openshell sandbox exec -n claude-bob --workspace bob --tty \
 
 This launches Claude Code's normal interactive REPL, running inside the
 sandbox, but actually *using* it is inherently something a human does at a
-keyboard, not something a scripted guide can transcribe. Once you're in,
-there's no reason to stick to this guide's scripted
+keyboard, not something a scripted guide can transcribe.
+
+Prefer [`parrot`](#using-parrot-instead-of-raw-cli-invocations)? Drop
+`--prompt` entirely instead of using `sandbox exec --tty` above — parrot
+threads `--resume` automatically between turns, so the conversation
+carries over just like the REPL:
+
+```bash
+# Terminal C — bob (or any banker's own terminal)
+export XDG_CONFIG_HOME=/tmp/oc-bob/config XDG_STATE_HOME=/tmp/oc-bob/state
+set -a; source .env; set +a
+parrot --sandbox claude-bob --workspace bob
+```
+
+Once you're in, there's no reason to stick to this guide's scripted
 prompts: ask a follow-up to whatever a scene returned, combine two scenes
 into one conversation, try a prompt the scenes above didn't think of, or
 just poke at the boundary yourself the way [Scene 4b](#scene-4b--bob-tries-to-talk-his-way-in)
 did. The identity, the credential, the network policy, and the MCP-server
 RBAC all work exactly the same as in the scripted scenes — only the shape
-of the conversation changes.
+of the conversation changes. Press `Esc` to exit parrot's session when
+you're done.
 
 If you'd rather have a real interactive **shell** first (to poke around the
 filesystem, check `/sandbox/.claude/mcp-servers.json`, or run `claude`
