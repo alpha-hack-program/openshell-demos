@@ -2641,12 +2641,18 @@ is wired to the same four servers step 5 already gave Bob, for parity.
 > **Optional, and newer tooling than Scenes 1–6.** `session-auditor`
 > itself is validated live end to end (see
 > [`util/session-auditor/README.md`](../../util/session-auditor/README.md)),
-> but `audit-dashboard`'s RBAC — a `ClusterRoleBinding` granting its own
-> `ServiceAccount` the built-in `cluster-monitoring-view` ClusterRole, so
-> it can query Thanos-querier — has no prior confirmed pattern anywhere
-> else in this repo. **`[VERIFY]`** on your cluster: if the graph stays
-> empty or the pod logs show a `403` from Thanos-querier, that's this RBAC
-> item, not a bug in the scene itself. See
+> but two things here are unverified. First, `CLAUDE_AUDIT_IMAGE`/
+> `CODEX_AUDIT_IMAGE` point at `ghcr.io/alpha-hack-program/openshell-demos/`
+> packages that are **private as of `session-auditor-v0.1.1`** — an
+> anonymous pull returns `403` — so `sandbox create --from` will fail
+> until someone with packages-admin access on the org flips them public,
+> or you configure a GHCR image-pull `Secret` in `$OPENSHELL_NAMESPACE`.
+> Second, `audit-dashboard`'s RBAC — a `ClusterRoleBinding` granting its
+> own `ServiceAccount` the built-in `cluster-monitoring-view` ClusterRole,
+> so it can query Thanos-querier — has no prior confirmed pattern anywhere
+> else in this repo. **`[VERIFY]`** both on your cluster: an empty graph
+> or pod logs showing a `403` from Thanos-querier point at the RBAC item,
+> not a bug in the scene itself. See
 > [`audit-dashboard/README.md`](audit-dashboard/README.md).
 
 Every scene so far has shown the boundary holding from the *server's* side

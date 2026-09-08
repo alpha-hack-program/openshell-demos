@@ -211,9 +211,23 @@ network policy automatically, no separate `policy update` call needed.
 
 ```bash
 openshell sandbox create --name my-sandbox \
-  --from quay.io/atarazana/claude-audit:latest \
+  --from ghcr.io/alpha-hack-program/openshell-demos/claude-audit:latest \
   --provider session-auditor-anthropic --workspace <ws> -- true
 ```
+
+CI publishes to `ghcr.io/alpha-hack-program/openshell-demos/claude-audit`
+and `.../codex-audit` (see `.github/workflows/release-session-auditor.yml`),
+each tagged with `latest`, the exact tag of the *base* image it's built
+from, and this release's own `session-auditor-v<version>` tag — **not**
+`quay.io/atarazana/...`, despite an earlier draft of this doc saying so.
+**`[VERIFY]` package visibility before relying on this**: confirmed live
+(2026-09-08) that an anonymous pull against `ghcr.io/.../claude-audit`
+returns `403` — packages published via the default `GITHUB_TOKEN` in
+Actions are private by default, regardless of the repo's own visibility,
+unless someone with `packages` admin access on the org flips the
+package's own visibility to public (Package settings → Change visibility)
+or an image-pull `Secret` for GHCR is configured in the target namespace.
+Neither has been done yet as of this release.
 
 That's it — no `sandbox exec`, no `nohup`, no `service expose`. The agent
 calls `session-auditor` itself via all three hooks. `SessionStart` and
