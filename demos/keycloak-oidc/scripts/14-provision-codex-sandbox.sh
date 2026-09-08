@@ -28,6 +28,15 @@ set -euo pipefail
 # calls tolerate "already exists" (matching 03-onboard-user.sh's own
 # `|| true` convention) so re-running just re-applies inference set,
 # config.toml, and policy against what's already there.
+#
+# SANDBOX_PREFIX (optional, default "") is prepended to the sandbox name
+# (<prefix>codex-<user-id>) — mirrors 15-provision-claude-sandbox.sh's own
+# knob, set it to provision a second, differently named sandbox for the
+# same banker without touching their existing one (e.g.
+# 16-provision-audited-sandbox.sh's aud- prefix). Sandbox names are capped
+# at 19 characters (confirmed live in 15-provision-claude-sandbox.sh) —
+# "codex-charlie" alone is already 13, so keep any prefix short (6 chars
+# or fewer).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
@@ -51,6 +60,9 @@ IFS=',' read -ra SERVERS <<< "$SERVER_NAMES"
 # older version (see the README's LLM endpoint requirements note: Codex
 # 0.146.0+ only supports wire_api = "responses" with namespace tools).
 CODEX_IMAGE="${CODEX_IMAGE:-}"
+
+SANDBOX_PREFIX="${SANDBOX_PREFIX:-}"
+SANDBOX_NAME="${SANDBOX_PREFIX}codex-${USER_ID}"
 
 cd "$DEMO_DIR"
 
@@ -111,12 +123,12 @@ bearer_token_env_var = "USER_ACCESS_TOKEN"
 EOF
 done
 
-# Note: if codex-${USER_ID} already exists, this is a no-op — the
+# Note: if $SANDBOX_NAME already exists, this is a no-op — the
 # --upload'd config.toml only takes effect at creation time. Re-running
 # with a changed server list against an already-provisioned sandbox won't
 # update it; delete the sandbox first if you need to change its MCP
 # servers.
-openshell sandbox create --name "codex-${USER_ID}" \
+openshell sandbox create --name "$SANDBOX_NAME" \
   --provider byo-codex \
   --provider "user-${USER_ID}" \
   --from "${CODEX_IMAGE}" \
@@ -127,15 +139,15 @@ openshell sandbox create --name "codex-${USER_ID}" \
 rm -f "$CODEX_CONFIG"
 
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-helm template "codex-${USER_ID}-policy" policies \
+helm template "${SANDBOX_NAME}-policy" policies \
   --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
   --set llmHost=inference.local \
   --set recipe=codex \
   --set "mcpServers={${SERVER_NAMES}}" \
   > "${POLICY_TMPFILE}"
-openshell policy set "codex-${USER_ID}" --policy "${POLICY_TMPFILE}" \
+openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
 
-echo "Codex sandbox codex-${USER_ID} provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+echo "Codex sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
 openshell sandbox list --workspace "${USER_ID}"
