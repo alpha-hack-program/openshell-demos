@@ -34,15 +34,14 @@ Before starting, ensure the test environment is ready:
 
 1. **Cluster access.** Confirm `oc whoami` succeeds and you have the
    expected permissions.
-2. **Root `.env`.** Source the root `.env` file to get cluster-wide
-   variables (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). If the
-   root `.env` doesn't exist, create it from `.env.example` and **ask the
-   user for the real values** — don't guess.
-3. **Demo `.env`.** Source the demo's own `.env` file (e.g.
-   `demos/keycloak-oidc/.env`). Same rule: if it doesn't exist, ask.
-4. **Playwright.** Ensure Playwright + Chromium are installed (see
+2. **Demo `.env`.** There is no root `.env` — source the demo's own single
+   `.env` file (e.g. `demos/keycloak-oidc/.env`), which holds both the
+   cluster-wide variables (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`)
+   and its own demo-specific ones. If it doesn't exist, create it from
+   `.env.example` and **ask the user for the real values** — don't guess.
+3. **Playwright.** Ensure Playwright + Chromium are installed (see
    [`headless-browser-automation.md`](headless-browser-automation.md)).
-5. **xdg-open interception.** Set up the fake browser stubs before
+4. **xdg-open interception.** Set up the fake browser stubs before
    running any CLI command that might trigger an OAuth flow.
 
 ## Handling `[VERIFY]` tags

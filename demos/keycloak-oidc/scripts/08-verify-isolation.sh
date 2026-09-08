@@ -117,7 +117,7 @@ FAIL=0
 ERRORS=""
 
 for BANKER_ID in "${BANKERS[@]}"; do
-  SANDBOX="demo-${BANKER_ID}"
+  SANDBOX="claude-${BANKER_ID}"
   WORKSPACE="${BANKER_ID}"
 
   if ! openshell sandbox get "$SANDBOX" --workspace "$WORKSPACE" &>/dev/null; then
@@ -174,23 +174,23 @@ done
 # returns the same ambiguous "not found for caller" error whether the
 # client_id belongs to someone else or doesn't exist at all — so Bob's
 # response should be indistinguishable from a typo, never Alice's or
-# Charlie's actual data. [VERIFY]: HTTP code assumed 200 (JSON-RPC-level
-# error, not an HTTP-level rejection) — not confirmed against a live cluster.
+# Charlie's actual data. Confirmed live: HTTP 200 with a JSON-RPC-level
+# error (code -32602), not an HTTP-level rejection.
 # ---------------------------------------------------------------------------
-if openshell sandbox get "demo-bob" --workspace "bob" &>/dev/null; then
+if openshell sandbox get "claude-bob" --workspace "bob" &>/dev/null; then
   for PROBE_SERVER_TOOL in "mcp-portfolio|get_positions" "mcp-kyc-compliance|get_risk_profile"; do
     IFS='|' read -r PROBE_SERVER PROBE_TOOL <<< "$PROBE_SERVER_TOOL"
     MCP_URL="http://${PROBE_SERVER}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000/mcp"
-    openshell policy update "demo-bob" --workspace "bob" \
+    openshell policy update "claude-bob" --workspace "bob" \
       --add-endpoint "${PROBE_SERVER}.${OPENSHELL_NAMESPACE}.svc.cluster.local:8000:read-write:rest:enforce" \
       --binary /usr/bin/curl --wait &>/dev/null || true
-    mcp_request "demo-bob" "$MCP_URL" "$MCP_INIT" "bob" >/dev/null
+    mcp_request "claude-bob" "$MCP_URL" "$MCP_INIT" "bob" >/dev/null
 
     for probe in "cli-004|Alice's Elena Duarte" "cli-005|Charlie's Fundación Iris"; do
       IFS='|' read -r CLIENT_ID CLIENT_DESC <<< "$probe"
       PROBE_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${PROBE_TOOL}\",\"arguments\":{\"client_id\":\"${CLIENT_ID}\"}}}"
-      mcp_request "demo-bob" "$MCP_URL" "$PROBE_CALL" "bob" >/dev/null
-      BODY=$(mcp_request_body "demo-bob" "bob")
+      mcp_request "claude-bob" "$MCP_URL" "$PROBE_CALL" "bob" >/dev/null
+      BODY=$(mcp_request_body "claude-bob" "bob")
       LABEL="bob probing ${CLIENT_ID} (${CLIENT_DESC}) via ${PROBE_SERVER}.${PROBE_TOOL}"
       if echo "$BODY" | grep -qi "no encontrado\|not found"; then
         echo "PASS  ${LABEL} — denied, no cross-tenant data leaked"

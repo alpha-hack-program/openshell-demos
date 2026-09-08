@@ -21,7 +21,7 @@ automatically.
 
 **Steps:**
 
-1. **Prerequisite check** — verify `oc`, `helm`, `kubectl`, `openshell` CLI
+1. **Prerequisite check** — verify `oc`, `helm`, `openshell` CLI
    are available and the operator is logged into the cluster. Confirm the
    Agent Sandbox controller and CRDs are installed.
 2. **Create namespace** — `oc create namespace $OPENSHELL_NAMESPACE`.

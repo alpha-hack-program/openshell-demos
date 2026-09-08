@@ -4,11 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
-ROOT_ENV="$DEMO_DIR/../../.env"
-if [[ -f "$ROOT_ENV" ]]; then
-  set -a; source "$ROOT_ENV"; set +a
-fi
-
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a

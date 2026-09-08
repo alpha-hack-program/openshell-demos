@@ -10,11 +10,14 @@
   - [Workspace isolation](#workspace-isolation)
 - [Part I — OIDC RBAC demo](#part-i--oidc-rbac-demo)
   - [Prerequisites](#prerequisites)
+    - [Installing the CLI](#installing-the-cli)
+    - [Installing Agent Sandbox](#installing-agent-sandbox)
+    - [How OpenShell networking works](#how-openshell-networking-works)
   - [What this demo deploys](#what-this-demo-deploys)
   - [Getting started](#getting-started)
     - [Clone the repo and change to the demo directory](#clone-the-repo-and-change-to-the-demo-directory)
     - [Log into your OpenShift cluster](#log-into-your-openshift-cluster)
-    - [Set up your `.env` files](#set-up-your-env-files)
+    - [Set up your `.env` file](#set-up-your-env-file)
   - [1. Deploy Keycloak](#1-deploy-keycloak)
   - [2. Create the namespace, grant SCCs, and install OpenShell with OIDC](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc)
   - [3. Onboard a banker](#3-onboard-a-banker)
@@ -232,7 +235,8 @@ concrete instead of asserted.
 
 **Caveat**
 
-This works on Linux with openshell CLI 0.0.106, running four concurrent
+This works on Linux with the openshell CLI version in use (see
+[Prerequisites](#prerequisites)), running four concurrent
 identities (admin, alice, bob, charlie) with no state bleed between them
 and nothing written outside the chosen directories.
 **[VERIFY on macOS]** — the `XDG_CONFIG_HOME`/`XDG_STATE_HOME` mechanism is
@@ -355,15 +359,106 @@ banker membership in a workspace that already has one.
 
 | Tool / access | Notes |
 |---|---|
-| `oc` | Logged into the target cluster, with rights to grant SCCs |
+| `oc` | Logged into the target cluster, with rights to grant SCCs. Used for every cluster-facing command in this guide — no `kubectl` needed |
 | `helm` 3.x | |
-| `kubectl` | Compatible with cluster version |
-| `openshell` CLI | See [`demos/base/README.md`](../base/README.md#installing-the-cli) for install instructions |
+| `openshell` CLI | See [Installing the CLI](#installing-the-cli) below |
 | OpenShift 4.x cluster | |
-| Agent Sandbox controller + CRDs | See [`demos/base/README.md`](../base/README.md#installing-agent-sandbox) |
+| Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
+
+This guide is written against **OpenShell chart/CLI version `0.0.106`** —
+set as `OPENSHELL_CHART_VERSION` in your `.env` (see
+[Set up your `.env` file](#set-up-your-env-file)). The rest of this document
+refers back to that variable rather than repeating the version number.
+
+You can run these tools from any machine that can reach the cluster: your
+laptop, a jump host, a VM, a container. The repo includes a
+[Vagrantfile](../../Vagrantfile) that provisions a Fedora VM with `oc`,
+`helm`, `openshell`, and bash completions pre-installed if you want a
+self-contained Linux workstation — see
+[Using the Vagrant VM](../base/README.md#using-the-vagrant-vm-macos-intel-only)
+in `demos/base/README.md` (the Vagrantfile itself is shared repo-wide;
+substitute `demos/keycloak-oidc` for `demos/base` in the `cd`). It's
+entirely optional, and specific to macOS on Intel (x86_64).
+
+#### Installing the CLI
+
+On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
+
+```bash
+OPENSHELL_VERSION="0.0.106"   # match OPENSHELL_CHART_VERSION in .env
+sudo dnf install -y \
+  "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
+openshell --version
+```
+
+On **macOS** (Apple Silicon):
+
+```bash
+curl -sL "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-aarch64-apple-darwin.tar.gz" \
+  | tar xzf - -C /usr/local/bin
+openshell --version
+```
+
+Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
+https://github.com/NVIDIA/OpenShell/releases.
+
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.106`) but the
+> Helm chart version does **not** (`0.0.106`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.106`.
+
+Bash completions (optional):
+
+```bash
+# system-wide (requires root)
+sudo sh -c 'openshell completions bash > /etc/bash_completion.d/openshell'
+
+# or per-user
+mkdir -p ~/.local/share/bash-completion/completions
+openshell completions bash > ~/.local/share/bash-completion/completions/openshell
+```
+
+Restart your shell (or `source ~/.bashrc`) to activate. Also available for
+`zsh`, `fish`, and `powershell` — run `openshell completions --help`.
+
+#### Installing Agent Sandbox
+
+The Agent Sandbox controller and CRDs come from the
+[kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+project. Install them **before** the OpenShell Helm chart:
+
+```bash
+# Latest
+oc apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml
+
+# Or pin a version
+VERSION="v0.5.4"
+oc apply -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSION}/sandbox.yaml"
+```
+
+Verify the controller is running:
+
+```bash
+oc -n agent-sandbox-system get pods
+# NAME                                       READY   STATUS    AGE
+# agent-sandbox-controller-xxxxx             1/1     Running   ...
+```
+
+> **Gotcha:** the manifest file is called `sandbox.yaml`, **not**
+> `manifest.yaml`. The release also offers `sandbox-with-extensions.yaml`
+> (adds SandboxTemplate, SandboxClaim, SandboxWarmPool CRDs).
+
+#### How OpenShell networking works
+
+See [`docs/openshell-networking.md`](../../docs/openshell-networking.md) for
+background shared across every demo in this repo: why gRPC over HTTP/2
+constrains how you expose the gateway (passthrough Route vs. port-forward
+vs. Envoy Gateway), the gateway's two independent authentication layers
+(mTLS transport, OIDC/JWT application — this demo uses both), and how to
+choose between the PKI init job and cert-manager for generating TLS
+certificates.
 
 ### What this demo deploys
 
@@ -408,22 +503,14 @@ oc login --server=https://api.<your-cluster>:6443
 oc whoami   # confirm you're logged in
 ```
 
-#### Set up your `.env` files
+#### Set up your `.env` file
 
-This demo uses two `.env` files:
-
-1. **Root `.env`** (at the repo root) — cluster-wide variables shared across
-   all demos:
-   - `OPENSHELL_CHART_VERSION` — the Helm chart version to install
-   - `CLUSTER_APPS_DOMAIN` — your cluster's apps domain
-
-2. **Demo `.env`** (in this directory) — variables specific to this demo.
-
-Copy the example files and fill in the real values:
+This demo uses a single `.env` file, in this directory, holding both the
+cluster-wide variables (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`) and
+this demo's own variables. Copy the example and fill in the real values:
 
 ```bash
-# Root .env — cluster-wide variables
-cp ../../.env.example ../../.env
+cp .env.example .env
 ```
 
 Extract `CLUSTER_APPS_DOMAIN` from the cluster:
@@ -433,31 +520,30 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-To find the latest chart version, check the
+`.env.example` pins `OPENSHELL_CHART_VERSION=0.0.106` — the version this
+guide is written against (see [Prerequisites](#prerequisites)). To check for
+a newer one, see the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
 tag uses a `v` prefix (e.g. `v0.0.106`) but the chart version does **not**
-(e.g. `0.0.106`). You can also query it directly:
+(e.g. `0.0.106`) — or query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
 ```
 
-Edit `../../.env` and set `OPENSHELL_CHART_VERSION` (without the `v` prefix)
-and paste the `CLUSTER_APPS_DOMAIN` value from above.
+Edit `.env`, paste the `CLUSTER_APPS_DOMAIN` value from above, and update
+`OPENSHELL_CHART_VERSION` only if you're intentionally testing a different
+release than this guide was written against.
 
-```bash
-# Demo .env — demo-specific variables
-cp .env.example .env
-# Edit .env — values are listed below
-```
-
-The demo `.env` requires these variables. Don't worry about filling them all
-in now — the `01-deploy-keycloak.sh` script in step 1 prints the
-Keycloak-related values (`KEYCLOAK_HOST`, `KEYCLOAK_CLIENT_SECRET`, etc.)
-after it runs, so you'll come back and complete your `.env` then.
+Don't worry about filling in the Keycloak-related variables yet — the
+`01-deploy-keycloak.sh` script in step 1 prints them
+(`KEYCLOAK_HOST`, `KEYCLOAK_CLIENT_SECRET`, etc.) after it runs, so you'll
+come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
+| `OPENSHELL_CHART_VERSION` | `0.0.106` | OpenShell Helm chart/CLI version — no `v` prefix |
+| `CLUSTER_APPS_DOMAIN` | `apps.mycluster.example.com` | Your cluster's apps domain |
 | `OPENSHELL_NAMESPACE` | `keycloak-oidc-demo` | OpenShift namespace for this demo's gateway. Must **not** start with `openshell-` — the Route FQDN is derived as `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a redundant prefix can push it over the 64-byte X.509 CommonName limit when using `LETSENCRYPT_CLUSTER_ISSUER` (see AGENTS.md) |
 | `CERT_MANAGER` | `false` | Set `true` to use cert-manager for TLS (requires the Operator) |
 | `LETSENCRYPT_CLUSTER_ISSUER` | *(empty)* | Name of a Let's Encrypt `ClusterIssuer` for CA-signed Route cert (requires `CERT_MANAGER=true`) |
@@ -563,12 +649,12 @@ OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
    # Should show a row with "Succeeded" for the rhbk-operator
    ```
 
-3. Source your root `.env` (for `CLUSTER_APPS_DOMAIN`) and create a Keycloak
+3. Source your `.env` (for `CLUSTER_APPS_DOMAIN`) and create a Keycloak
    instance. Note the heredoc uses `<<EOF` (no quotes) so the variable is
    expanded:
 
    ```bash
-   source ../../.env
+   source .env
 
    oc -n keycloak apply -f - <<EOF
    apiVersion: k8s.keycloak.org/v2beta1
@@ -773,7 +859,6 @@ pointing at your `ClusterIssuer`) before running `helm upgrade --install`:
 
 ```bash
 source .env
-source ../../.env
 
 oc create namespace "$OPENSHELL_NAMESPACE" 2>/dev/null || true
 oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAMESPACE"
@@ -1700,7 +1785,6 @@ export XDG_CONFIG_HOME="/tmp/oc-${USER_ID}/config" XDG_STATE_HOME="/tmp/oc-${USE
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
 source .env
-source ../../.env
 
 GATEWAY_NAME="${GATEWAY_NAME:-openshift}"
 MTLS_DIR="$XDG_CONFIG_HOME/openshell/gateways/$GATEWAY_NAME/mtls"
@@ -2677,10 +2761,19 @@ single check a clever enough prompt could talk its way around.
       both bankers it covers: Bob's `mcp-portfolio` question ("biggest
       client by AUM") and Alice's `mcp-compatibility` question (Lysmark tax
       calculation), both matching the raw curl results
-- [ ] Annex A's Codex + BYO LLM + MCP tool recipe — optional (see
-      [Running demos headlessly](../../AGENTS.md)); Codex remains available
-      as an alternate agent for exercising the same RBAC boundary, but
-      Claude Code is the preferred recipe throughout this guide
+- [x] Annex A's Codex + BYO LLM + MCP tool recipe — confirmed live
+      2026-09-08 for both bob (`get_top_client_by_aum`) and alice
+      (`mcp-compatibility` tax calculation), real tool calls through
+      `inference.local` against the demo's DeepSeek BYO endpoint
+      (`deepseek-v4-flash`), correct answers matching the raw curl results.
+      This is a model-dependent result, not a blanket "DeepSeek now
+      works" — see the updated compatibility matrix in
+      [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md)
+      and the reconciliation note in
+      [`docs/evalhub-redteam.md`](docs/evalhub-redteam.md#g-validated-findings-log).
+      Codex remains available as an alternate agent for exercising the
+      same RBAC boundary, but Claude Code is the preferred recipe
+      throughout this guide.
 
 ## Part II — Red-team evaluation (EvalHub + Garak)
 
@@ -3361,6 +3454,8 @@ Results: 19 passed, 0 failed
 
 | Variable | Where used | Notes |
 |---|---|---|
+| `OPENSHELL_CHART_VERSION` | `helm upgrade --install --version` | No `v` prefix — see [Prerequisites](#prerequisites) |
+| `CLUSTER_APPS_DOMAIN` | Route FQDN derivation | e.g. `apps.mycluster.example.com` |
 | `KEYCLOAK_HOST` | Helm overlay, provider profiles | e.g. `keycloak.apps.<cluster-domain>` |
 | `KEYCLOAK_REALM` | All Keycloak-facing config | `openshell` in this demo |
 | `KEYCLOAK_CLIENT_ID_CLI` | `server.oidc.audience` | Must match the Keycloak client ID exactly |
@@ -3384,8 +3479,8 @@ Results: 19 passed, 0 failed
   getting the right provider attached to the right sandbox is entirely this
   demo's orchestration responsibility.
 - The gateway defaults to TLS with mTLS client authentication (see
-  [`demos/base/README.md`](../base/README.md) for background). Once this
-  demo's values are applied, real OIDC auth is enforced
+  [`docs/openshell-networking.md`](../../docs/openshell-networking.md) for
+  background). Once this demo's values are applied, real OIDC auth is enforced
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — evaluation-only, never expose to a public network.
 
@@ -3433,7 +3528,8 @@ exact patch release before relying on this beyond a demo.
   examples. Reconcile every command against the real repo before running it.
 - **Provider profile schema** — verified against
   [Providers v2 docs](https://docs.nvidia.com/openshell/sandboxes/providers-v2)
-  and a live gateway (CLI 0.0.106). `refresh` (with `token_url`, `scopes`,
+  and a live gateway (the CLI version in use — see
+  [Prerequisites](#prerequisites)). `refresh` (with `token_url`, `scopes`,
   `strategy`) must nest under the specific entry in `credentials[]`, not as a
   top-level profile field.
 - **Real user identity federation** (brokering each user's own IdP into
@@ -3581,9 +3677,9 @@ OpenClaw's official image doesn't include the `openshell` CLI, so
 top, following this repo's [custom-image convention](../../docs/sandbox-service-patterns.md):
 
 ```bash
-# Download a musl static Linux x86_64 openshell CLI build (see
-# demos/base/README.md's "Installing the CLI" for the release asset
-# naming convention) into this directory before building:
+# Download a musl static Linux x86_64 openshell CLI build (see this
+# guide's "Installing the CLI" for the release asset naming convention)
+# into this directory before building:
 cp /path/to/openshell demos/keycloak-oidc/images/openclaw-openshell/
 
 REGISTRY="quay.io/atarazana"   # replace with your own
@@ -3696,7 +3792,7 @@ images — `ghcr.io/openclaw/openclaw` hardcodes `/home/node/.openclaw` to
 `0700`, owned by `uid=1000/gid=1000` (confirmed by inspecting the image
 directly), so it can't run under OpenShift's default arbitrary-UID
 convention. `anyuid` is a narrower grant than the `privileged` SCC already
-used for `openshell-sandbox` in [`demos/base/README.md`](../base/README.md).
+used for `openshell-sandbox` in [step 2a](#2a-helm-install) above.
 
 #### 5. Verify
 

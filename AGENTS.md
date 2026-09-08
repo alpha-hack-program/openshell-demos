@@ -28,8 +28,8 @@ Before running anything against a real cluster:
 ├── CLAUDE.md              # agent entry point (references this file)
 ├── AGENTS.md              # this file — repo orientation + conventions
 ├── README.md              # human-facing repo overview + demo index
-├── .env.example           # cluster-wide variables
 ├── docs/
+│   ├── openshell-networking.md         # protocol stack, auth layers, TLS cert generation
 │   ├── headless-browser-automation.md  # Playwright setup + OAuth flow automation
 │   ├── guide-testing-protocol.md       # how to test a demo guide end to end
 │   ├── openshell-flows.md
@@ -59,18 +59,19 @@ Before running anything against a real cluster:
   own scripts, own extra infrastructure (Keycloak, whatever it
   needs), own provider profiles and policies, and — critically — its **own
   namespace** via `OPENSHELL_NAMESPACE` in its own `.env`. Namespace is
-  always per-demo, never shared — it does not live in the root `.env`.
-  Each demo carries a complete `helm/values.yaml` (including the
-  OpenShift-compatibility overrides) so it can be installed with a single
-  `-f`:
+  always per-demo, never shared. Each demo carries a complete
+  `helm/values.yaml` (including the OpenShift-compatibility overrides) so
+  it can be installed with a single `-f`:
   ```bash
   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
     --version "$OPENSHELL_CHART_VERSION" --namespace "$OPENSHELL_NAMESPACE" \
     -f demos/<name>/helm/values.yaml
   ```
-  The root `.env` holds only cluster-wide variables
-  (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Check a demo's own
-  `.env`/README for which namespace it targets.
+  There is no root `.env` — each demo's own `.env` is the single source of
+  truth for every variable it needs, cluster-wide (`OPENSHELL_CHART_VERSION`,
+  `CLUSTER_APPS_DOMAIN`) and demo-specific alike. Check a demo's own
+  `.env.example`/README for its full variable list, including which
+  namespace it targets.
   **Namespace names must not start with `openshell-`.** At least one demo
   derives its gateway Route hostname as
   `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a
@@ -103,11 +104,13 @@ a parent directory for others.
 
 - **Branch naming:** version-update branches use `v<VERSION>` (e.g.
   `v0.0.106`). Feature or fix branches use a short descriptive slug.
-- **Environment variables:** the root `.env` holds cluster-wide variables
-  (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`). Each demo has its own
-  `.env` with demo-specific variables — at minimum `OPENSHELL_NAMESPACE`.
-  Every `.env.example` lists variable names only. Real values go in a
-  gitignored `.env` (or a secret manager) at the same level, never
+- **Environment variables:** there is no root `.env`. Each demo has a single
+  `.env` (in its own directory) holding both the cluster-wide variables
+  every demo needs (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`) and
+  its own demo-specific variables — at minimum `OPENSHELL_NAMESPACE`. Every
+  `.env.example` lists variable names only, with `OPENSHELL_CHART_VERSION`
+  pinned to the version that demo's README is written against. Real values
+  go in a gitignored `.env` (or a secret manager) at the same level, never
   committed. Realm exports use hardcoded demo-only credentials (see each
   demo's README for details); in production, generate unique secrets per
   environment.
@@ -159,6 +162,13 @@ OAuth flows need to be automated. Two docs cover this:
 Read these before working on the relevant area — they capture patterns
 and constraints that aren't obvious from the code alone:
 
+- **[How OpenShell networking works](docs/openshell-networking.md)** — the
+  gRPC-over-HTTP/2 protocol stack and what it means for exposing the
+  gateway (passthrough Route vs. port-forward vs. Envoy Gateway), the two
+  independent authentication layers (mTLS transport, OIDC/JWT application),
+  and how to choose between the PKI init job and cert-manager for TLS
+  certificates. Shared background for every demo — `demos/base/README.md`
+  and `demos/keycloak-oidc/README.md` both link here instead of repeating it.
 - **[Sandbox service patterns](docs/sandbox-service-patterns.md)** —
   custom images (static binaries, Containerfile layout, remote gateway
   build+push workflow), running background services inside sandboxes,

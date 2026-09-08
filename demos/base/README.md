@@ -8,13 +8,18 @@ same OpenShift overrides) so they can be installed independently.
 
 | Tool / access | Notes |
 |---|---|
-| `oc` | Logged into the target cluster, with rights to grant SCCs |
+| `oc` | Logged into the target cluster, with rights to grant SCCs. Used for every cluster-facing command in this guide — no `kubectl` needed |
 | `helm` 3.x | |
-| `kubectl` | Compatible with cluster version |
 | `openshell` CLI | See [Installing the CLI](#installing-the-cli) below |
 | OpenShift 4.x cluster | |
 | Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
 | cert-manager Operator *(optional)* | If installed, you can use it for TLS instead of the built-in PKI init job — see [Choosing how TLS certificates are generated](#choosing-how-tls-certificates-are-generated) |
+
+This guide is written against **OpenShell chart/CLI version `0.0.106`** —
+set as `OPENSHELL_CHART_VERSION` in your `.env` (see
+[Create your `.env` files](#3-create-your-env-files)). The rest of this
+document refers back to that variable rather than repeating the version
+number.
 
 You can run these tools from any machine that can reach the cluster: your
 laptop, a jump host, a VM, a container. The repo includes a
@@ -71,17 +76,17 @@ project. Install them **before** the OpenShell Helm chart:
 
 ```bash
 # Latest
-kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml
+oc apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml
 
 # Or pin a version
 VERSION="v0.5.4"
-kubectl apply -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSION}/sandbox.yaml"
+oc apply -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSION}/sandbox.yaml"
 ```
 
 Verify the controller is running:
 
 ```bash
-kubectl -n agent-sandbox-system get pods
+oc -n agent-sandbox-system get pods
 # NAME                                       READY   STATUS    AGE
 # agent-sandbox-controller-xxxxx             1/1     Running   ...
 ```
@@ -92,43 +97,15 @@ kubectl -n agent-sandbox-system get pods
 
 ## How OpenShell networking works
 
-The OpenShell CLI talks to the gateway over **gRPC**, which runs natively on
-**HTTP/2**. This has direct consequences for how you expose the gateway:
-
-```
-openshell CLI
-  └── gRPC  (application: messages, streaming, status codes)
-       └── HTTP/2  (transport: multiplexed streams, binary framing)
-            └── TLS  (encryption + optional mTLS client auth)
-                 └── TCP
-```
-
-gRPC requires HTTP/2 — it cannot fall back to HTTP/1.1. A standard OpenShift
-**edge** or **re-encrypt** Route terminates TLS and re-originates the
-backend connection as HTTP/1.1, which breaks gRPC. To expose the gateway
-externally you need one of:
-
-| Approach | How it works |
-|---|---|
-| `oc port-forward` | Tunnels raw TCP from localhost to the pod — no Route involved |
-| **Passthrough Route** | Passes raw TLS through to the pod; the gateway terminates TLS itself, preserving HTTP/2 end-to-end |
-| **Envoy Gateway** | NVIDIA's recommended production path — Envoy natively supports HTTP/2 and gRPC proxying |
-
-### Authentication layers
-
-The gateway has two independent authentication checks:
-
-| Layer | Mechanism | What provides it |
-|---|---|---|
-| **Transport** | mTLS — server verifies client cert, client verifies server cert | PKI init job generates both sides; the CLI sends the client cert from `~/.config/openshell/gateways/<name>/mtls/` |
-| **Application** | gRPC `authorization` header carrying a JWT | OIDC login (`openshell gateway login`), or an edge proxy that injects tokens |
-
-With both layers active, a request must present a valid client certificate
-**and** a valid JWT. In this base install we use mTLS only and set
+See [`docs/openshell-networking.md`](../../docs/openshell-networking.md) for
+the full background: why gRPC over HTTP/2 constrains how you expose the
+gateway (passthrough Route vs. port-forward vs. Envoy Gateway), and the
+gateway's two independent authentication layers (mTLS transport, OIDC/JWT
+application). Short version for this demo: we use mTLS only and set
 `allowUnauthenticatedUsers=true` to skip the JWT check — the transport is
 still encrypted and client-authenticated, but there's no second token layer.
-The `keycloak-oidc` demo adds Keycloak as an OIDC provider, enabling
-the JWT layer as well.
+The `keycloak-oidc` demo adds Keycloak as an OIDC provider, enabling the JWT
+layer as well.
 
 ## What this installs
 
@@ -166,56 +143,21 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
 ```
 
 > **Why TLS instead of plaintext?** See
-> [How OpenShell networking works](#how-openshell-networking-works) for
-> background on the protocol stack and auth layers. The
-> [official OpenShift install guide](https://docs.nvidia.com/openshell/kubernetes/openshift)
-> sets `server.disableTls=true` because it pairs with Envoy Gateway for TLS
-> termination at the edge (see the
-> [ingress guide](https://docs.nvidia.com/openshell/kubernetes/ingress)).
-> That approach also requires `allowUnauthenticatedUsers=true` (or OIDC)
-> since there's no client certificate path through Envoy.
->
-> We keep TLS enabled because:
-> - mTLS provides client authentication out of the box — no need for
->   OIDC configuration in the base install
-> - Port-forward works (the server cert SANs include `localhost` / `127.0.0.1`)
-> - A passthrough OpenShift Route can expose the gateway externally with
->   gRPC over HTTP/2 — see
->   [Exposing the gateway via passthrough Route](#exposing-the-gateway-via-passthrough-route)
->
-> **To follow the official plaintext path instead**, use these values:
->
-> ```yaml
-> server:
->   disableTls: true
->   auth:
->     allowUnauthenticatedUsers: true
-> podSecurityContext:
->   fsGroup: null
-> securityContext:
->   runAsUser: null
-> ```
->
-> Then register the gateway with `http://` (no mTLS extraction needed):
->
-> ```bash
-> openshell gateway add http://127.0.0.1:8080 --local --name openshift
-> ```
+> [`docs/openshell-networking.md`](../../docs/openshell-networking.md) for
+> the full background on the protocol stack, auth layers, and the plaintext
+> alternative (`server.disableTls=true`, pairs with Envoy Gateway). Short
+> version: this demo keeps TLS enabled because mTLS gives client
+> authentication out of the box with no OIDC configuration required, and a
+> passthrough Route can still expose the gateway externally — see
+> [Exposing the gateway via passthrough Route](#exposing-the-gateway-via-passthrough-route).
 
 ## Choosing how TLS certificates are generated
 
-Before running the install, decide who generates the server and client
-TLS certificates. The OpenShell Helm chart supports two options:
-
-| | PKI init job (default) | cert-manager Operator |
-|---|---|---|
-| **How it works** | A Helm pre-install hook Job runs `generate-certs` and creates the TLS secrets | The chart creates `Issuer` + `Certificate` CRs; cert-manager issues the certs |
-| **Certificate renewal** | Manual — delete secrets, re-run `helm upgrade` | Automatic — cert-manager renews before expiry |
-| **JWT signing keys** | Generated by the init job | **Still** generated by the init job (JWT-only mode) |
-| **Extra dependency** | None | OpenShift cert-manager Operator must be installed |
-| **Best for** | Quick evaluation, no extra operators needed | Production-like setup, automated rotation |
-
-### Check if cert-manager is available
+This demo supports two ways to generate the server/client TLS certificates —
+see [`docs/openshell-networking.md`](../../docs/openshell-networking.md) for
+the full PKI-init-job-vs-cert-manager comparison and what each path does
+under the hood. Quick check for whether cert-manager is even available on
+your cluster:
 
 ```bash
 oc get csv -A | grep cert-manager
@@ -316,13 +258,15 @@ oc whoami   # confirm you're logged in
 The install scripts use `oc` and `helm` commands that target this cluster. If
 you're not logged in, they will fail.
 
-### 3. Create your `.env` files
+### 3. Create your `.env` file
 
-Copy the example files and fill in the real values:
+This demo uses a single `.env` file, in this directory, holding both the
+cluster-wide variables (`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`) and
+this demo's own variables (`OPENSHELL_NAMESPACE`, etc.). Copy the example and
+fill in the real values:
 
 ```bash
-# Root .env — cluster-wide variables
-cp ../../.env.example ../../.env
+cp .env.example .env
 ```
 
 Extract `CLUSTER_APPS_DOMAIN` from the cluster so you don't have to type it
@@ -333,39 +277,35 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-To find the latest chart version, check the
+`.env.example` pins `OPENSHELL_CHART_VERSION=0.0.106` — the version this
+guide is written against (see [Prerequisites](#prerequisites)). To check
+for a newer one, see the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
 tag uses a `v` prefix (e.g. `v0.0.106`) but the chart version does **not**
-(e.g. `0.0.106`). You can also query it directly:
+(e.g. `0.0.106`) — or query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
 ```
 
-Edit `../../.env` and set `OPENSHELL_CHART_VERSION` (without the `v` prefix)
-and paste the `CLUSTER_APPS_DOMAIN` value from above.
+Edit `.env` and paste the `CLUSTER_APPS_DOMAIN` value from above, and update
+`OPENSHELL_CHART_VERSION` only if you're intentionally testing a different
+release than this guide was written against.
 
-```bash
-# Demo .env — demo-specific variables
-cp .env.example .env
-# Review .env — defaults are fine for most setups
-```
-
-The `.env.example` ships with `OPENSHELL_ROUTE=true` because the **passthrough
-Route is the recommended path** for this demo. It exposes the gateway over the
-network so you don't need an active `oc port-forward` terminal, and it
-preserves HTTP/2 end-to-end for gRPC (see
+`.env.example` also ships with `OPENSHELL_ROUTE=true` because the
+**passthrough Route is the recommended path** for this demo. It exposes the
+gateway over the network so you don't need an active `oc port-forward`
+terminal, and it preserves HTTP/2 end-to-end for gRPC (see
 [How OpenShell networking works](#how-openshell-networking-works)). If you
 prefer a local-only setup, set `OPENSHELL_ROUTE=false` in your `.env`.
 
 ### 4. Run the install scripts
 
 The scripts expect environment variables to be **exported**, not just sourced.
-Source both `.env` files before running:
+Source `.env` before running:
 
 ```bash
 export $(grep -v '^#' .env | xargs)
-export $(grep -v '^#' ../../.env | xargs)
 
 ./scripts/00-prereqs-check.sh
 ./scripts/01-namespace-and-scc.sh
@@ -700,8 +640,8 @@ openshell provider delete byo-openai
 | `helm install` rejects pod security fields | `podSecurityContext.fsGroup` / `securityContext.runAsUser` not nulled out — OpenShift's admission controller needs to assign these itself |
 | Gateway pod stuck in `ContainerCreating`, event says `secret "openshell-jwt-keys" not found` | Do **not** set `pkiInitJob.enabled: false`. The PKI init job generates the sandbox JWT signing keys even when TLS is disabled. Leave it at the default (`true`) |
 | `helm install` says chart `not found` at `oci://ghcr.io/nvidia/openshell/helm-chart` | The chart version must **not** have a `v` prefix. Use `0.0.106`, not `v0.0.106`. The Git tag uses `v0.0.106` but the OCI chart is published as `0.0.106` |
-| `kubectl apply` for Agent Sandbox returns 404 | The manifest file is `sandbox.yaml`, not `manifest.yaml` — see [Installing Agent Sandbox](#installing-agent-sandbox) |
-| Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' .env | xargs)` and `export $(grep -v '^#' ../../.env | xargs)` instead of plain `source` |
+| `oc apply` for Agent Sandbox returns 404 | The manifest file is `sandbox.yaml`, not `manifest.yaml` — see [Installing Agent Sandbox](#installing-agent-sandbox) |
+| Scripts fail with `: OPENSHELL_NAMESPACE: set in .env` | Variables are sourced but not exported. Use `export $(grep -v '^#' .env | xargs)` instead of plain `source` |
 | Sandbox pods never schedule at all | Agent Sandbox controller/CRDs not installed before the chart |
 | Outbound call still blocked after adding an endpoint to the policy | The policy enforces a **binary allowlist**. Adding an endpoint alone is not enough — you must also specify which binary is allowed to use it: `openshell policy update <sandbox> --add-endpoint host:port:access:proto:enforce --binary /usr/bin/curl`. Use `readlink -f <binary>` inside the sandbox to find the canonical path if symlinks are involved |
 | `openshell status` shows Connected but `Authentication: Failed (missing authorization header)` | The gateway requires a gRPC authorization header even with mTLS. Set `server.auth.allowUnauthenticatedUsers=true` via `--set` at `helm install`/`upgrade` time, or configure OIDC. This is required for the passthrough Route path |
@@ -710,7 +650,7 @@ openshell provider delete byo-openai
 ## Using the Vagrant VM (macOS Intel only)
 
 The repo includes a [Vagrantfile](../../Vagrantfile) that creates a Fedora VM
-with `oc`, `helm`, `kubectl`, `openshell`, and bash completions pre-installed.
+with `oc`, `helm`, `openshell`, and bash completions pre-installed.
 
 > **This Vagrantfile is specific to macOS on Intel (x86_64)** using QEMU via
 > [vagrant-qemu](https://github.com/ppggff/vagrant-qemu). It will **not**

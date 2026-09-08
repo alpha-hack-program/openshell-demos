@@ -27,9 +27,11 @@ Diagrams if useful (mermaid renders fine in GitHub).
 Numbered, scripted where possible, under `demos/<name>/scripts/`.
 
 ## Configuration reference
-Table of env vars this demo needs. `OPENSHELL_NAMESPACE` must be in the
-demo's own `.env` (not the root `.env`). Cluster-wide vars
-(`OPENSHELL_CHART_VERSION`, `CLUSTER_APPS_DOMAIN`) come from the root `.env`.
+Table of env vars this demo needs, all in the demo's own single `.env` —
+there is no root `.env`. Include the cluster-wide vars every demo needs
+(`OPENSHELL_CHART_VERSION`, pinned to the version this guide is written
+against; `CLUSTER_APPS_DOMAIN`) alongside `OPENSHELL_NAMESPACE` and any
+demo-specific variables.
 
 ## Secrets and security notes
 Anything demo-specific — never rely on the reader having read another demo's notes.

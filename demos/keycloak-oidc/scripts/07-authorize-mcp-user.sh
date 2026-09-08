@@ -50,7 +50,7 @@ fi
 # in front of the server checks the caller's JWT for this role before
 # forwarding the request to the app. The convention is <server-name>-user.
 REQUIRED_ROLE="${SERVER_NAME}-user"
-SANDBOX_NAME="demo-${USER_ID}"
+SANDBOX_NAME="claude-${USER_ID}"
 
 # ---------------------------------------------------------------------------
 # Step 2 (Keycloak): verify the user holds the required realm role.

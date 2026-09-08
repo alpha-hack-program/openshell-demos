@@ -22,11 +22,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
-ROOT_ENV="$SCRIPT_DIR/../../../.env"
-if [[ -f "$ROOT_ENV" ]]; then
-  set -a; source "$ROOT_ENV"; set +a
-fi
-
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
@@ -36,7 +31,7 @@ fi
 : "${KEYCLOAK_HOST:?set in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
 : "${KEYCLOAK_CLIENT_ID_CLI:=openshell-cli}"
-: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
 ROUTE_HOST="${ROUTE_HOST:-openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 USER_ID="${1:-alice}"

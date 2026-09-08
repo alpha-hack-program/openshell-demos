@@ -4,19 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
-# Source root .env for CLUSTER_APPS_DOMAIN
-ROOT_ENV="$SCRIPT_DIR/../../../.env"
-if [[ -f "$ROOT_ENV" ]]; then
-  set -a; source "$ROOT_ENV"; set +a
-fi
-
 # Source demo .env so previously saved values are reused on re-run
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
 
-: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-openshell}"

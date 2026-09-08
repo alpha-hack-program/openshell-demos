@@ -34,20 +34,24 @@ This means the LLM endpoint must support **both**:
 |---|---|---|---|
 | **OpenAI API** | Yes | Yes | Only provider confirmed to support `namespace` tools natively |
 | **vLLM (on-cluster)** | Yes (v0.8.0+) | Yes (v0.25.0+) | Older vLLM accepts the Responses API but rejects namespace tools with a 400 error. RHOAI 3.4.x ships vLLM 0.18.0; 0.25+ is upstream only |
-| **Most third-party providers** | Yes | **No** | Tested against DeepSeek (Aug 2026) — Responses API works, `namespace` tools rejected (400). Expect similar behaviour from other providers until they add support |
+| **Third-party providers (e.g. DeepSeek)** | Yes | **Model-dependent** | Tested against DeepSeek: an unspecified model (Aug 2026) rejected `namespace` tools (400); `deepseek-v4-flash` (Sep 2026) accepted them and completed real MCP tool calls. Same Codex build (0.146.0) both times — the model, not the Codex version, is the likely variable. Don't assume either result for a model you haven't tested yourself |
 
-> **`namespace` tools are the key constraint.** Many providers implement
-> the Responses API but reject `namespace` tool definitions — they only
-> accept `function` tools. Codex model-only calls work fine on these
-> providers; only Codex + MCP breaks. Use the test script at the end of
-> this doc to verify before deploying.
+> **`namespace` tools are the key constraint, and support can change
+> between model versions on the same provider.** Some providers/models
+> implement the Responses API but reject `namespace` tool definitions —
+> they only accept `function` tools; others add support in a later model
+> generation. Codex model-only calls work fine either way; only Codex + MCP
+> is affected. Use the test script at the end of this doc against your
+> **specific** `OPENAI_MODEL` to verify before deploying — a pass or fail
+> on one model name doesn't carry over to another from the same provider.
 
 ### Verified combinations
 
 | Codex version | LLM endpoint | MCP server version | Result |
 |---|---|---|---|
 | 0.146.0 | vLLM 0.27.1 (upstream, on-cluster) | 2.4.1 / 3.2.0 | Pass (full pipeline incl. MCP) |
-| 0.146.0 | DeepSeek (external) | 2.4.1 / 3.2.0 | Pass (model-only — namespace tools rejected) |
+| 0.146.0 | DeepSeek, model unspecified (external, Aug 2026) | 2.4.1 / 3.2.0 | Fail (model-only — namespace tools rejected, HTTP 400) |
+| 0.146.0 | DeepSeek `deepseek-v4-flash` (external, Sep 2026) | current `mcp-portfolio`/`mcp-compatibility` | Pass (full pipeline incl. MCP — real `get_top_client_by_aum`/`calc_tax` tool calls) |
 
 ## Claude Code: Anthropic Messages API
 
@@ -140,7 +144,7 @@ HTTP_CODE=$(curl -sk -o /tmp/ns-tools-test -w "%{http_code}" \
   }')
 echo "HTTP: $HTTP_CODE"
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "FAIL: Namespace tools not supported (this is the vLLM < 0.25.0 case)"
+  echo "FAIL: Namespace tools not supported (vLLM < 0.25.0, or a third-party model that hasn't added namespace-tool support yet)"
   cat /tmp/ns-tools-test
   exit 1
 fi

@@ -31,12 +31,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
-# Source root .env for CLUSTER_APPS_DOMAIN
-ROOT_ENV="$SCRIPT_DIR/../../../.env"
-if [[ -f "$ROOT_ENV" ]]; then
-  set -a; source "$ROOT_ENV"; set +a
-fi
-
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
@@ -49,7 +43,7 @@ fi
 # Same formula as the gateway Route host computed inline in step 2a — not
 # stored in .env, so derive it here rather than requiring the caller to
 # export it. Override by exporting ROUTE_HOST yourself beforehand.
-: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
 ROUTE_HOST="${ROUTE_HOST:-openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 OUTPUT_DIR="${1:-$DEMO_DIR/onboarding-web-admin-session}"

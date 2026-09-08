@@ -54,14 +54,19 @@ and a Rust proxy (`agent-proxy`) uploaded into the sandbox to bridge
 Garak's OpenAI-compatible API expectations to the CLI-based agent.
 
 > **Claude Code is the primary path for this demo; Codex is optional.**
-> Against the demo's default DeepSeek BYO backend, Codex can only exercise
-> model-only red-team probes — DeepSeek rejects the `namespace` tool type
-> Codex uses for MCP, so Codex + MCP evaluations don't work here (see
-> [Annex B — Troubleshooting](#b-troubleshooting)). Codex + MCP only works
-> against an on-cluster vLLM **≥0.25.0** (upstream; RHOAI 3.4.x ships
-> 0.18.0, which is too old — see `docs/inference-api-compatibility.md`).
-> Claude Code's Anthropic Messages API has no such restriction and is
-> validated end-to-end against DeepSeek, including MCP tool use (see
+> As of the 2026-08-18 finding below, Codex could only exercise model-only
+> red-team probes against the demo's DeepSeek BYO backend — that backend's
+> then-current model rejected the `namespace` tool type Codex uses for MCP
+> (see [Annex B — Troubleshooting](#b-troubleshooting)). **This is
+> model-dependent, not a permanent DeepSeek limitation**: a 2026-09-08
+> finding against `deepseek-v4-flash` (via the main guide's Annex A, not
+> this file's agent-proxy path) got real `namespace`-tool MCP calls working
+> — see [Annex G](#g-validated-findings-log). Codex + MCP also works
+> unconditionally against an on-cluster vLLM **≥0.25.0** (upstream; RHOAI
+> 3.4.x ships 0.18.0, which is too old — see
+> `docs/inference-api-compatibility.md`). Claude Code's Anthropic Messages
+> API has no such restriction either way and is validated end-to-end
+> against DeepSeek, including MCP tool use (see
 > [Annex G — Validated findings log](#g-validated-findings-log)).
 
 ### Architecture
@@ -388,7 +393,6 @@ that variant's intro).
 
 ```bash
 source .env
-source ../../.env
 USER_ID="alice"
 SANDBOX="garak-claude-${USER_ID}"
 CLAUDE_IMAGE="quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36"
@@ -545,16 +549,19 @@ openshell sandbox delete "$SANDBOX" --workspace "${USER_ID}"
 > requires logging in as alice.
 
 Codex requires an on-cluster vLLM **≥0.25.0** (upstream — RHOAI 3.4.x
-ships 0.18.0, too old) for MCP tool use; its `namespace` tool type isn't
-supported by this demo's DeepSeek BYO backend (confirmed: DeepSeek rejects
-it with a 400). Without that endpoint, Codex can still run **model-only**
-red-team probes (no MCP tool calls). Use this variant only if you have
-such a vLLM endpoint, or specifically want to red-team the model in
-isolation.
+ships 0.18.0, too old) for guaranteed MCP tool use. Whether it also works
+against this demo's DeepSeek BYO backend is **model-dependent**: the
+2026-08-18 finding below hit a 400 rejecting the `namespace` tool type, but
+a 2026-09-08 finding against `deepseek-v4-flash` (via a different path —
+see [Annex G](#g-validated-findings-log)) did not reproduce that failure.
+Test your actual `OPENAI_MODEL` with the script in
+`docs/inference-api-compatibility.md` before assuming either result.
+Without a confirmed-working endpoint, Codex can still run **model-only**
+red-team probes (no MCP tool calls). Use this variant if you have such an
+endpoint, or specifically want to red-team the model in isolation.
 
 ```bash
 source .env
-source ../../.env
 USER_ID="alice"
 SANDBOX="garak-codex-${USER_ID}"
 AGENT_IMAGE="quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012"
@@ -705,7 +712,7 @@ full reference.
 | Question | Decision | Rationale |
 |---|---|---|
 | Proxy name / location | `agent-proxy` at `util/agent-proxy/` (repo root) | Reusable across demos, consistent with `util/onboard/` |
-| Agent selection | Claude Code (primary), Codex (optional) | Both supported via `AGENT_COMMAND` env var; separate Containerfile per agent. Codex + MCP requires an on-cluster vLLM ≥0.25.0 — against the demo's default DeepSeek backend it's model-only-probes-only. Claude Code works fully (incl. MCP) against DeepSeek. |
+| Agent selection | Claude Code (primary), Codex (optional) | Both supported via `AGENT_COMMAND` env var; separate Containerfile per agent. Codex + MCP requires an on-cluster vLLM ≥0.25.0 for a guarantee; against the demo's default DeepSeek backend, support is model-dependent — model-only-probes-only as of 2026-08-18, but MCP tool calls worked against `deepseek-v4-flash` as of 2026-09-08 (see [Annex G](#g-validated-findings-log)). Claude Code works fully (incl. MCP) against DeepSeek regardless. |
 | Sandbox naming (this demo section) | `garak-codex-<user>` / `garak-claude-<user>` | Distinguishes agent type in the sandbox name (e.g. `garak-codex-alice`, `garak-claude-alice`) — avoids ambiguity with the main demo's `demo-<user>` sandboxes and with each other. |
 | EvalHub MCP server | Not needed | Evaluations driven from RHOAI UI / CLI, not from inside sandboxes |
 | BYOF adapter | Not needed | agent-proxy already exposes an OpenAI-compatible endpoint; EvalHub's built-in `garak` provider accepts any `model.url` pointing to an OpenAI `/v1` endpoint. The `garak-kfp` risk assessment pipeline (Ch. 4) also accepts arbitrary URLs. **Confirmed from RHOAI 3.4 docs.** |
@@ -1231,6 +1238,36 @@ the Prerequisites' TrustyAI readiness check used a pod label
 (`app=trustyai-operator`) that matches nothing on RHOAI 3.4.3 — the actual
 pod is `trustyai-service-operator-controller-manager-*`, matched by
 `control-plane=controller-manager,app.kubernetes.io/part-of=trustyai`.
+
+#### DeepSeek `namespace`-tools finding no longer reproduces on `deepseek-v4-flash` (2026-09-08)
+
+**Not re-tested through this file's own agent-proxy path — this entry
+reports a related finding from the main guide, recorded here because it
+bears directly on the "DeepSeek rejects Codex's `namespace` tool type"
+claim above and in [Annex B](#b-troubleshooting).** The main guide's Annex
+A ("Codex + BYO LLM + MCP tool") was re-run end to end via the demo
+sandbox's stock `codex exec` (not agent-proxy) against `OPENAI_MODEL=
+deepseek-v4-flash`, and the `namespace`-tool MCP call **succeeded** — real
+`mcp-portfolio.get_top_client_by_aum` and `mcp-compatibility.calc_tax` tool
+calls, correct answers, for both bob and alice.
+
+This directly contradicts the 2026-08-18 finding above and what was, until
+this same date, `docs/inference-api-compatibility.md`'s flat "Most
+third-party providers: No" row (now updated to "Model-dependent" there) —
+both were recorded against DeepSeek without pinning an exact model name.
+The most likely explanation: DeepSeek's **V4** model line
+(`deepseek-v4-flash`) added support for the Responses API's `namespace`
+tool type that an earlier model (presumably V3-generation, given the
+timing) lacked — the Codex CLI build is not the variable, since both tests
+used Codex 0.146.0 (confirmed for the EvalHub path via the pinned
+`codex:0.0.1-1786355012` image, [Open items](#h-open-items) below). This
+was **not** re-verified through this file's own `agent-proxy`/pinned-image
+path, or against the original (unspecified) DeepSeek model — it's a
+reasoned reconciliation from the two data points, not a fresh direct
+retest of the claim as originally stated. Treat DeepSeek Responses-API
+namespace-tool support as **model-dependent**: re-run the test script in
+`docs/inference-api-compatibility.md` against whatever `OPENAI_MODEL`
+you're actually pointing at before relying on either result.
 
 ### H. Open items
 

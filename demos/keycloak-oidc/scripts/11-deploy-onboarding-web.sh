@@ -24,12 +24,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
-# Source root .env for CLUSTER_APPS_DOMAIN
-ROOT_ENV="$SCRIPT_DIR/../../../.env"
-if [[ -f "$ROOT_ENV" ]]; then
-  set -a; source "$ROOT_ENV"; set +a
-fi
-
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
@@ -38,7 +32,7 @@ fi
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 : "${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}"
 : "${KEYCLOAK_REALM:=openshell}"
-: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in the root .env}"
+: "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
 ONBOARDING_WEB_ROUTE_HOST="${ONBOARDING_WEB_ROUTE_HOST:-onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}}"
 
 if ! oc -n "$OPENSHELL_NAMESPACE" get secret onboarding-web-admin-session >/dev/null 2>&1; then

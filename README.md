@@ -35,6 +35,7 @@ Cross-cutting guides and reference material that apply across demos:
 
 | Document | What it covers |
 |---|---|
+| [`docs/openshell-networking.md`](docs/openshell-networking.md) | The gRPC-over-HTTP/2 protocol stack, gateway exposure options, authentication layers, and choosing between the PKI init job and cert-manager for TLS |
 | [`docs/sandbox-service-patterns.md`](docs/sandbox-service-patterns.md) | Custom images, static binaries, background services, `service expose` vs `--forward`, toolbox workarounds |
 | [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md) | Which LLM API formats each agent requires, provider compatibility matrix, test scripts |
 | [`docs/openshell-flows.md`](docs/openshell-flows.md) | Operational flows by role (admin vs user) and auth mode (mTLS vs OIDC), with diagrams |
