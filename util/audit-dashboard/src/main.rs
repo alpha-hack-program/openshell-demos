@@ -140,17 +140,33 @@ async fn get_graph(State(state): State<Arc<AppState>>) -> Json<Graph> {
     Json(state.graph.read().await.clone())
 }
 
-/// Trusts the in-cluster CA (mounted into every pod) so a plain
-/// `reqwest::Client` can verify Thanos-querier's TLS certificate. Loaded
-/// once at startup, not per-request — the SA *token* is re-read fresh on
-/// every request (see `read_token`) since projected tokens rotate, but the
-/// cluster CA does not change nearly as often.
+/// Trusts the CAs mounted into every pod so a plain `reqwest::Client` can
+/// verify Thanos-querier's TLS certificate. Loaded once at startup, not
+/// per-request — the SA *token* is re-read fresh on every request (see
+/// `read_token`) since projected tokens rotate, but these CAs don't change
+/// nearly as often.
+///
+/// Confirmed live: `ca.crt` (the Kubernetes API server's CA) is NOT the
+/// right one here and fails TLS verification against Thanos-querier
+/// ("self-signed certificate in certificate chain") — OpenShift signs
+/// in-cluster *service* serving certificates (like Thanos-querier's) with
+/// a separate internal service-ca, whose bundle OpenShift auto-projects
+/// into every pod as `service-ca.crt` alongside the regular `ca.crt`, not
+/// documented anywhere obvious but present by default. Trust both rather
+/// than picking one, since which CA actually signs a given in-cluster
+/// endpoint isn't something this binary should have to assume correctly
+/// on every OpenShift version.
 fn build_http_client() -> reqwest::Client {
     let mut builder = reqwest::Client::builder();
-    if let Ok(ca) = std::fs::read("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-        && let Ok(cert) = reqwest::Certificate::from_pem(&ca)
-    {
-        builder = builder.add_root_certificate(cert);
+    for path in [
+        "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt",
+        "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+    ] {
+        if let Ok(ca) = std::fs::read(path)
+            && let Ok(cert) = reqwest::Certificate::from_pem(&ca)
+        {
+            builder = builder.add_root_certificate(cert);
+        }
     }
     builder.build().expect("failed to build http client")
 }
@@ -172,7 +188,21 @@ async fn query_instant(
         .query(&[("query", promql)])
         .send()
         .await
-        .map_err(|e| format!("request to thanos-querier failed: {e}"))?;
+        // reqwest's own Display impl for a send error omits the actual
+        // underlying cause (e.g. a TLS verification failure) — confirmed
+        // live this cost real debugging time (the log just said "error
+        // sending request for url (...)" with no hint it was a CA
+        // mismatch). Walk the source chain so the next failure is
+        // diagnosable from the log alone.
+        .map_err(|e| {
+            let mut msg = format!("request to thanos-querier failed: {e}");
+            let mut source = std::error::Error::source(&e);
+            while let Some(s) = source {
+                msg.push_str(&format!(" -- caused by: {s}"));
+                source = s.source();
+            }
+            msg
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();

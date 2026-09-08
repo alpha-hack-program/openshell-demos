@@ -66,7 +66,12 @@ clean: ## Remove build artifacts
 doc: ## Build and open docs
 	cargo doc --open --no-deps
 
-image-build: frontend ## Build the container image, tagged with Cargo.toml's version (override with IMAGE_TAG=...)
+image-build: ## Build the container image, tagged with Cargo.toml's version (override with IMAGE_TAG=...)
+	# No local `frontend` prerequisite here on purpose — the Containerfile
+	# builds the Preact bundle itself in its own frontend-builder stage, so
+	# `podman build` alone is self-sufficient even on a machine with no
+	# Node installed at all (confirmed live: this repo's own build
+	# environment has cargo/podman but no node in the same shell).
 	$(PODMAN) build -t $(IMAGE) -f Containerfile .
 
 image-push: image-build ## Build and push the container image (override registry with IMAGE_REGISTRY=...)
