@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Provisions a dedicated Claude Code sandbox for one banker, mirroring
-# 14-provision-codex-sandbox.sh's shape: its own sandbox named
-# claude-<user-id>. This script deliberately provisions a separate,
-# disposable claude-<id> sandbox instead, for parity with how Codex gets its own.
+# Provisions one banker's Claude Code sandbox for step 5 of the README
+# ("Run the demo") — see "Provision the Claude Code harness" there for the
+# narrated walkthrough of what this does and why. Same shape as
+# 14-provision-codex-sandbox.sh: a dedicated sandbox named claude-<user-id>
+# with both providers (byo-claude for the LLM, user-<id> for MCP calls)
+# attached at creation, /sandbox/.claude/mcp-servers.json baked in via
+# --upload, and the full claude-code-recipe policy applied at the end.
 #
 # Usage: ./15-provision-claude-sandbox.sh <user-id> <server-name>[,<server-name>...]
 #   e.g. ./15-provision-claude-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
@@ -14,7 +17,16 @@ set -euo pipefail
 # onboarded. Requires ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, and
 # ANTHROPIC_MODEL set in .env.
 # Idempotent — provider/profile/sandbox create calls tolerate "already
-# exists"
+# exists", and the provider-attach fallback below still attaches
+# byo-claude/user-<id> even if the sandbox already existed without them.
+#
+# SANDBOX_PREFIX (optional, default "") is prepended to the sandbox name
+# (<prefix>claude-<user-id>) — set it to provision a second, differently
+# named sandbox for the same banker without touching their existing one,
+# e.g. for testing this script against a banker who already has a
+# claude-<id>. Sandbox names are capped at 19 characters (confirmed live:
+# 20 fails with "name exceeds maximum length") — "claude-charlie" alone is
+# already 14, so keep any prefix short (5 chars or fewer).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
@@ -42,6 +54,9 @@ LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
 # (unlike Codex, which needs a newer custom image) — leave unset unless
 # you specifically need a different one.
 CLAUDE_IMAGE="${CLAUDE_IMAGE:-}"
+
+SANDBOX_PREFIX="${SANDBOX_PREFIX:-}"
+SANDBOX_NAME="${SANDBOX_PREFIX}claude-${USER_ID}"
 
 cd "$DEMO_DIR"
 
@@ -87,7 +102,7 @@ MCP_CONFIG=$(mktemp --suffix=.json)
 } > "$MCP_CONFIG"
 
 SANDBOX_CREATE_ARGS=(
-  --name "claude-${USER_ID}"
+  --name "$SANDBOX_NAME"
   --provider byo-claude
   --provider "user-${USER_ID}"
   --upload "${MCP_CONFIG}:/sandbox/.claude/mcp-servers.json"
@@ -95,12 +110,21 @@ SANDBOX_CREATE_ARGS=(
 )
 [ -z "$CLAUDE_IMAGE" ] || SANDBOX_CREATE_ARGS+=(--from "$CLAUDE_IMAGE")
 
-# Note: if claude-${USER_ID} already exists, this is a no-op — the
-# --upload'd mcp-servers.json only takes effect at creation time.
-# Re-running with a changed server list against an already-provisioned
-# sandbox won't update it; delete the sandbox first if you need to change
-# its MCP servers.
+# Note: if $SANDBOX_NAME already exists, this is a no-op — the --upload'd
+# mcp-servers.json only takes effect at creation time. Re-running with a
+# changed server list against an already-provisioned sandbox won't update
+# it; delete the sandbox first if you need to change its MCP servers.
+#
+# The two `provider attach` calls right after are the fallback for that
+# same "already existed" case: if $SANDBOX_NAME predates this script (e.g.
+# created some other way with only one of the two providers attached),
+# `sandbox create ... || true` above silently does nothing — it would
+# never actually attach byo-claude/user-<id>, leaving Claude Code with no
+# LLM credentials with no error raised. Attaching an already-attached
+# provider is a harmless no-op, so these are safe to run unconditionally.
 openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" -- true || true
+openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
+openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
 
 rm -f "$MCP_CONFIG"
 
@@ -124,9 +148,9 @@ rm -f "$MCP_CONFIG"
 # ---------------------------------------------------------------------------
 REMAINING=""
 for attempt in 1 2 3; do
-  openshell sandbox exec -n "claude-${USER_ID}" --workspace "${USER_ID}" -- bash -c \
+  openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- bash -c \
     'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
-  REMAINING=$(openshell sandbox exec -n "claude-${USER_ID}" --workspace "${USER_ID}" -- \
+  REMAINING=$(openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- \
     grep -o __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json || true)
   [ -z "$REMAINING" ] && break
   echo "token substitution didn't take (attempt ${attempt}/3, likely the post-create cold-connection race) — retrying..."
@@ -139,15 +163,15 @@ done
 # (recipe=claude-code instead of recipe=codex).
 # ---------------------------------------------------------------------------
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-helm template "claude-${USER_ID}-policy" policies \
+helm template "${SANDBOX_NAME}-policy" policies \
   --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
   --set llmHost="${LLM_HOST}" \
   --set recipe=claude-code \
   --set "mcpServers={${SERVER_NAMES}}" \
   > "${POLICY_TMPFILE}"
-openshell policy set "claude-${USER_ID}" --policy "${POLICY_TMPFILE}" \
+openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
 
-echo "Claude sandbox claude-${USER_ID} provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+echo "Claude sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
 openshell sandbox list --workspace "${USER_ID}"
