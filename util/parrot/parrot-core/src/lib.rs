@@ -24,7 +24,7 @@ pub use error::{ParrotError, Result};
 pub use exec::{ExecOutcome, ExecStream, StreamedExecOptions};
 pub use gateway::GatewayContext;
 pub use identity::Identity;
-pub use jsonl::AgentEvent;
+pub use jsonl::{tool_result_text, AgentEvent};
 pub use state::{LogEntry, RunStatus, SessionState, StreamSource};
 pub use theme::{Palette, Rgb, ThemeMode};
 

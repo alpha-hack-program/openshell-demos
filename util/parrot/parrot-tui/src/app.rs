@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode};
 use parrot_core::{
-    Agent, AgentEvent, LogEntry, ParrotClient, RunStatus, SessionState, StreamSource,
-    StreamedExecOptions, TurnOptions,
+    tool_result_text, Agent, AgentEvent, LogEntry, ParrotClient, RunStatus, SessionState,
+    StreamSource, StreamedExecOptions, TurnOptions,
 };
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -276,13 +276,27 @@ fn render_log_entry(entry: &LogEntry, palette: &TuiPalette, width: u16) -> Vec<L
         AgentEvent::ToolCall { name, .. } => {
             ("→ ", format!("tool call: {name}"), palette.tool_call)
         }
-        AgentEvent::ToolResult { is_error: true, .. } => {
-            ("✗ ", "tool result: error".to_string(), palette.error)
+        AgentEvent::ToolResult {
+            is_error: true,
+            content,
+        } => {
+            let text = tool_result_text(content);
+            let text = if text.is_empty() {
+                "tool result: error".to_string()
+            } else {
+                format!("tool result: error: {text}")
+            };
+            ("✗ ", text, palette.error)
         }
         AgentEvent::ToolResult {
             is_error: false, ..
         } => ("✓ ", "tool result".to_string(), palette.tool_result),
         AgentEvent::Thinking(text) => ("… ", text.clone(), palette.muted),
+        AgentEvent::ThinkingTokens(estimated_tokens) => (
+            "… ",
+            format!("thinking… ({estimated_tokens} tokens)"),
+            palette.muted,
+        ),
         AgentEvent::Result(_) => ("● ", "final result".to_string(), palette.result),
         AgentEvent::Error(message) => ("! ", message.clone(), palette.error),
         AgentEvent::Info(message) => ("ℹ ", message.clone(), palette.muted),

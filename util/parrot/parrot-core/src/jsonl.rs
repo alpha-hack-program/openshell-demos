@@ -16,6 +16,12 @@ pub enum AgentEvent {
     ToolResult { content: Value, is_error: bool },
     /// Extended-thinking content, when the model surfaces its reasoning.
     Thinking(String),
+    /// A live estimated-token-count heartbeat Claude Code emits while the
+    /// model is still generating a thinking block (one event per few
+    /// tokens — hundreds to thousands per turn) — a progress counter, not
+    /// content. Distinct from `Thinking`, which carries the actual
+    /// reasoning text once the block completes.
+    ThinkingTokens(u64),
     /// The turn's final summary/result object.
     Result(Value),
     /// An error surfaced by the agent process itself (not a transport error).
@@ -79,7 +85,15 @@ fn classify_claude_code(value: &Value) -> Option<AgentEvent> {
                 .get("subtype")
                 .and_then(Value::as_str)
                 .unwrap_or("system");
-            AgentEvent::Info(format!("system: {subtype}"))
+            if subtype == "thinking_tokens" {
+                let estimated_tokens = value
+                    .get("estimated_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                AgentEvent::ThinkingTokens(estimated_tokens)
+            } else {
+                AgentEvent::Info(format!("system: {subtype}"))
+            }
         }
         _ => return None,
     };
@@ -216,6 +230,52 @@ fn codex_mcp_tool_call_event(item: &Value) -> Option<AgentEvent> {
     }
 }
 
+/// Longest error message rendered in full before truncation — a tool error
+/// is usually a short human-readable string, but nothing stops a server
+/// from returning something huge, and the dashboard shouldn't hang trying
+/// to word-wrap it.
+const MAX_TOOL_RESULT_TEXT_LEN: usize = 2000;
+
+/// Best-effort plain-text summary of a `ToolResult`'s `content`, for
+/// display — e.g. in the "tool result: error" log line. Handles every
+/// shape observed so far: Claude Code errors are a plain string; Codex
+/// errors are `{"message": "..."}`; either agent's `content` can also be
+/// an array of `{"type":"text","text":"..."}` blocks. Falls back to
+/// compact JSON for anything else rather than showing nothing.
+pub fn tool_result_text(value: &Value) -> String {
+    fn text_blocks(blocks: &[Value]) -> Option<String> {
+        let texts: Vec<&str> = blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect();
+        (!texts.is_empty()).then(|| texts.join("\n"))
+    }
+
+    let text = match value {
+        Value::String(s) => s.clone(),
+        Value::Object(map) => map
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                map.get("content")
+                    .and_then(Value::as_array)
+                    .and_then(|blocks| text_blocks(blocks))
+            })
+            .unwrap_or_else(|| value.to_string()),
+        Value::Array(blocks) => text_blocks(blocks).unwrap_or_else(|| value.to_string()),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    };
+
+    if text.chars().count() > MAX_TOOL_RESULT_TEXT_LEN {
+        let truncated: String = text.chars().take(MAX_TOOL_RESULT_TEXT_LEN).collect();
+        format!("{truncated}… (truncated)")
+    } else {
+        text
+    }
+}
+
 /// Opportunistically pull a session/thread id out of a raw JSONL line,
 /// regardless of how it classifies. Claude Code includes `session_id` on
 /// most stream-json event types; Codex uses `thread_id` instead (on its
@@ -234,6 +294,54 @@ pub fn extract_session_id(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real, captured Claude Code MCP error -- `content` is a plain string.
+    #[test]
+    fn tool_result_text_from_plain_string() {
+        let value = serde_json::json!("MCP error -32602: client_id no encontrado para el llamante autenticado");
+        assert_eq!(
+            tool_result_text(&value),
+            "MCP error -32602: client_id no encontrado para el llamante autenticado"
+        );
+    }
+
+    // Real, captured Codex `mcp_tool_call` "failed" shape -- `error` is an
+    // object with a `message` field, not a plain string.
+    #[test]
+    fn tool_result_text_from_codex_error_object() {
+        let value = serde_json::json!({"message": "tool call error: tool call failed for `mcp-portfolio/get_performance`"});
+        assert_eq!(
+            tool_result_text(&value),
+            "tool call error: tool call failed for `mcp-portfolio/get_performance`"
+        );
+    }
+
+    #[test]
+    fn tool_result_text_from_text_block_array() {
+        let value = serde_json::json!([{"type": "text", "text": "not found"}]);
+        assert_eq!(tool_result_text(&value), "not found");
+    }
+
+    #[test]
+    fn tool_result_text_from_nested_content_object() {
+        let value = serde_json::json!({"content": [{"type": "text", "text": "no permission"}]});
+        assert_eq!(tool_result_text(&value), "no permission");
+    }
+
+    #[test]
+    fn tool_result_text_falls_back_to_json_for_unrecognized_shape() {
+        let value = serde_json::json!({"code": 42});
+        assert_eq!(tool_result_text(&value), r#"{"code":42}"#);
+    }
+
+    #[test]
+    fn tool_result_text_truncates_long_messages() {
+        let long = "x".repeat(MAX_TOOL_RESULT_TEXT_LEN + 500);
+        let value = serde_json::json!(long);
+        let result = tool_result_text(&value);
+        assert!(result.ends_with("… (truncated)"));
+        assert!(result.chars().count() < long.chars().count());
+    }
 
     #[test]
     fn extracts_session_id_when_present() {
@@ -268,6 +376,29 @@ mod tests {
     #[test]
     fn classifies_unparseable_lines() {
         matches!(classify_line("not json"), AgentEvent::Unparseable(_));
+    }
+
+    // Real, captured `claude --output-format stream-json --verbose` line —
+    // Claude Code emits hundreds to thousands of these per turn while a
+    // thinking block is being generated, purely as a token-count heartbeat
+    // (no reasoning text), distinct from the `"thinking"` content block
+    // classified below.
+    #[test]
+    fn classifies_thinking_tokens_heartbeat() {
+        let line = r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":1004,"estimated_tokens_delta":1,"uuid":"e2290348-5470-43ec-89dd-0f91012a184e","session_id":"6e6e883a-cee1-4f6a-9efd-6ce8112bb6a3"}"#;
+        match classify_line(line) {
+            AgentEvent::ThinkingTokens(estimated_tokens) => assert_eq!(estimated_tokens, 1004),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_thinking_content_block() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"reasoning about the request"}]}}"#;
+        match classify_line(line) {
+            AgentEvent::Thinking(text) => assert_eq!(text, "reasoning about the request"),
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     // The following four lines are a real, captured `codex exec --json`

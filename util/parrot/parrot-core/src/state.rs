@@ -61,9 +61,23 @@ impl SessionState {
         if let Some(session_id) = extract_session_id(line) {
             self.session_id = Some(session_id);
         }
+        let event = classify_line(line);
+        // `ThinkingTokens` is a running counter re-sent every few tokens
+        // (hundreds to thousands of events per turn) — update the existing
+        // counter line in place instead of appending one log entry per
+        // event, or it drowns out the actual `Thinking`/`AssistantText`/
+        // `ToolCall` events in between.
+        if matches!(event, AgentEvent::ThinkingTokens(_)) {
+            if let Some(last) = self.log.last_mut() {
+                if matches!(last.event, AgentEvent::ThinkingTokens(_)) {
+                    last.event = event;
+                    return;
+                }
+            }
+        }
         self.log.push(LogEntry {
             source: StreamSource::Stdout,
-            event: classify_line(line),
+            event,
         });
     }
 
@@ -82,5 +96,38 @@ impl SessionState {
                 exit_code: outcome.exit_code.unwrap_or(-1),
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn thinking_tokens_line(estimated_tokens: u64) -> String {
+        format!(
+            r#"{{"type":"system","subtype":"thinking_tokens","estimated_tokens":{estimated_tokens},"estimated_tokens_delta":1}}"#
+        )
+    }
+
+    #[test]
+    fn coalesces_consecutive_thinking_tokens_into_one_log_entry() {
+        let mut state = SessionState::new();
+        for tokens in [1, 2, 3, 1000, 1004] {
+            state.push_stdout(&thinking_tokens_line(tokens));
+        }
+        assert_eq!(state.log.len(), 1);
+        assert!(matches!(
+            state.log[0].event,
+            AgentEvent::ThinkingTokens(1004)
+        ));
+    }
+
+    #[test]
+    fn thinking_tokens_does_not_coalesce_across_other_events() {
+        let mut state = SessionState::new();
+        state.push_stdout(&thinking_tokens_line(1));
+        state.push_stdout(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#);
+        state.push_stdout(&thinking_tokens_line(2));
+        assert_eq!(state.log.len(), 3);
     }
 }
