@@ -3,6 +3,7 @@
 [![OpenShell](https://img.shields.io/badge/OpenShell_Chart-0.0.106-blue)](https://github.com/NVIDIA/OpenShell)
 [![CI onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml)
 [![CI agent-proxy](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml)
+[![CI parrot](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml)
 
 > **Experimental — not production-ready.**
 > These demos build on top of the
