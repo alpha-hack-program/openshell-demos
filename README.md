@@ -4,6 +4,7 @@
 [![CI onboard CLI](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-onboard.yml)
 [![CI agent-proxy](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml)
 [![CI parrot](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml)
+[![CI session-auditor](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-session-auditor.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-session-auditor.yml)
 
 > **Experimental — not production-ready.**
 > These demos build on top of the
