@@ -298,7 +298,9 @@ mod tests {
     // Real, captured Claude Code MCP error -- `content` is a plain string.
     #[test]
     fn tool_result_text_from_plain_string() {
-        let value = serde_json::json!("MCP error -32602: client_id no encontrado para el llamante autenticado");
+        let value = serde_json::json!(
+            "MCP error -32602: client_id no encontrado para el llamante autenticado"
+        );
         assert_eq!(
             tool_result_text(&value),
             "MCP error -32602: client_id no encontrado para el llamante autenticado"

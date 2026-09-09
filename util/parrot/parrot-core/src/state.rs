@@ -126,7 +126,9 @@ mod tests {
     fn thinking_tokens_does_not_coalesce_across_other_events() {
         let mut state = SessionState::new();
         state.push_stdout(&thinking_tokens_line(1));
-        state.push_stdout(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#);
+        state.push_stdout(
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#,
+        );
         state.push_stdout(&thinking_tokens_line(2));
         assert_eq!(state.log.len(), 3);
     }
