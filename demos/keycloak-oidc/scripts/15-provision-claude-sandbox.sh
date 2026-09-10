@@ -16,6 +16,11 @@ set -euo pipefail
 # operations regardless of workspace. Assumes <user-id> was already
 # onboarded. Requires ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, and
 # ANTHROPIC_MODEL set in .env.
+#
+# This script never execs `claude` itself, so it doesn't need the native
+# OTel tracing env vars — those are exec-time-only flags added at the
+# README's `sandbox exec ... claude` call sites via scripts/lib-otel-env.sh.
+# Don't miss that other half when touching this feature.
 # Idempotent — provider/profile/sandbox create calls tolerate "already
 # exists", and the provider-attach fallback below still attaches
 # byo-claude/user-<id> even if the sandbox already existed without them.
@@ -68,6 +73,13 @@ cd "$DEMO_DIR"
 # ---------------------------------------------------------------------------
 TMPFILE=$(mktemp --suffix=.yaml)
 sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+# `|| true` only tolerates "already exists" on first run — confirmed live
+# that `import` against an already-imported profile ID is a hard error, not
+# a silent update, so editing this YAML and re-running this script does
+# NOT propagate the change to an already-provisioned workspace. To push an
+# edit to an existing profile: `provider profile export <id> --workspace
+# <ws> -o yaml`, edit, then `provider profile update <id> -f <file>
+# --workspace <ws>` (requires the exported resource_version field).
 openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}" || true
 rm -f "$TMPFILE"
 

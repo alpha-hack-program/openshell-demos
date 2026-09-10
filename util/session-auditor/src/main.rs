@@ -312,7 +312,7 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
         }
     };
 
-    let (transcript, mcp_servers) = extract_transcript(transcript_path, &content);
+    let transcript = extract_transcript(transcript_path, &content);
     if transcript.trim().is_empty() {
         log(&format!("session {session_id}: empty transcript, skipping"));
         return;
@@ -329,7 +329,6 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
     log(&format!("session {session_id}: verdict {verdict:?}"));
 
     let identity = detect_sandbox_identity();
-    let mcp_servers_joined = mcp_servers.join(",");
     let mut attrs = vec![
         ("session_id", session_id),
         ("risk_level", verdict.risk_level.as_str()),
@@ -337,9 +336,6 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
     if let Some((workspace, sandbox)) = identity.as_ref() {
         attrs.push(("workspace", workspace.as_str()));
         attrs.push(("sandbox", sandbox.as_str()));
-    }
-    if !mcp_servers_joined.is_empty() {
-        attrs.push(("mcp_servers", mcp_servers_joined.as_str()));
     }
     if let Err(e) = push_gauge_metric(
         "session_compliance_risk_score",
@@ -367,50 +363,19 @@ fn log(msg: &str) {
 /// Dispatches to the right parser based on the transcript path shape —
 /// confirmed live that Claude Code and Codex use distinct, incompatible
 /// on-disk JSONL schemas even though their Stop-hook stdin payloads share
-/// the same core field names. Returns the flattened transcript text plus a
-/// deduped, sorted list of MCP server short-names touched during the turn
-/// (e.g. `portfolio`, `kyc-compliance`) — parsed from the very same
-/// tool-call names already being flattened into the transcript text, not a
-/// second pass over the file.
-fn extract_transcript(transcript_path: &str, content: &str) -> (String, Vec<String>) {
-    let (raw, mut mcp_servers) = if transcript_path.contains("/.codex/sessions/") {
+/// the same core field names. Returns the flattened transcript text only —
+/// which MCP servers were touched during the turn is no longer
+/// reconstructed here; that's now covered structurally by native OTel
+/// tracing in Claude Code/Codex themselves (see demos/keycloak-oidc/docs),
+/// which carries real per-call timing this transcript-based heuristic
+/// never could.
+fn extract_transcript(transcript_path: &str, content: &str) -> String {
+    let raw = if transcript_path.contains("/.codex/sessions/") {
         extract_transcript_codex(content)
     } else {
         extract_transcript_claude(content)
     };
-    mcp_servers.sort();
-    mcp_servers.dedup();
-    (truncate_transcript(raw), mcp_servers)
-}
-
-/// Claude Code's confirmed MCP tool-name convention (see
-/// demos/keycloak-oidc/scripts/15-provision-claude-sandbox.sh's own comment
-/// on building mcp-servers.json): a tool call on server `<key>` shows up as
-/// `mcp__<key>__<tool>`, e.g. `mcp__portfolio__list_my_clients`.
-fn mcp_server_from_claude_tool_name(name: &str) -> Option<String> {
-    let rest = name.strip_prefix("mcp__")?;
-    let (server, _tool) = rest.split_once("__")?;
-    (!server.is_empty()).then(|| server.to_string())
-}
-
-/// [VERIFY] Codex's MCP tool-name convention has never been exercised live
-/// with a real MCP call (see docs/prometheus-scraping.md's own admitted
-/// limitation — only a trivial non-MCP `echo` tool call has been tested).
-/// `config.toml` keys the `[mcp_servers.<name>]` table by the *full* server
-/// name (e.g. `mcp-portfolio`, see
-/// demos/keycloak-oidc/scripts/14-provision-codex-sandbox.sh), unlike
-/// Claude Code's stripped-prefix key — so this tries the Claude-style
-/// `mcp__<server>__<tool>` prefix first (in case Codex aliases it), then
-/// falls back to treating the text before the first `__` as the server
-/// name. Confirm and correct this the first time Scene 7 actually runs a
-/// real MCP call through a Codex sandbox; returning `None` is a safe,
-/// non-fatal outcome either way (see "fails soft" note in `handle_stop`).
-fn mcp_server_from_codex_tool_name(name: &str) -> Option<String> {
-    if let Some(server) = mcp_server_from_claude_tool_name(name) {
-        return Some(server);
-    }
-    let (server, _tool) = name.split_once("__")?;
-    (!server.is_empty()).then(|| server.to_string())
+    truncate_transcript(raw)
 }
 
 // Cap the size sent to the LLM — most recent context matters most.
@@ -428,9 +393,8 @@ fn truncate_transcript(out: String) -> String {
 /// plain-text conversation the classification LLM call can read. Skips
 /// "attachment"/"queue-operation" lines (tool-list deltas, etc.) — noise
 /// for this purpose.
-fn extract_transcript_claude(content: &str) -> (String, Vec<String>) {
+fn extract_transcript_claude(content: &str) -> String {
     let mut out = String::new();
-    let mut mcp_servers = Vec::new();
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -444,7 +408,7 @@ fn extract_transcript_claude(content: &str) -> (String, Vec<String>) {
             continue;
         };
         let mut piece = String::new();
-        flatten_content(msg_content, &mut piece, &mut mcp_servers);
+        flatten_content(msg_content, &mut piece);
         let piece = piece.trim();
         if !piece.is_empty() {
             out.push_str(role);
@@ -453,7 +417,7 @@ fn extract_transcript_claude(content: &str) -> (String, Vec<String>) {
             out.push('\n');
         }
     }
-    (out, mcp_servers)
+    out
 }
 
 /// Codex's JSONL transcript format — confirmed live (2026-08-31,
@@ -463,9 +427,8 @@ fn extract_transcript_claude(content: &str) -> (String, Vec<String>) {
 /// tool calls are separate top-level `response_item` lines
 /// (`payload.type`: `function_call`/`function_call_output`), not nested
 /// inside a message's content array.
-fn extract_transcript_codex(content: &str) -> (String, Vec<String>) {
+fn extract_transcript_codex(content: &str) -> String {
     let mut out = String::new();
-    let mut mcp_servers = Vec::new();
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -495,9 +458,6 @@ fn extract_transcript_codex(content: &str) -> (String, Vec<String>) {
                     .and_then(|a| a.as_str())
                     .unwrap_or("");
                 out.push_str(&format!("[tool_call: {name} input={arguments}]\n"));
-                if let Some(server) = mcp_server_from_codex_tool_name(name) {
-                    mcp_servers.push(server);
-                }
             }
             Some("function_call_output") => {
                 let output = payload.get("output").and_then(|o| o.as_str()).unwrap_or("");
@@ -506,10 +466,10 @@ fn extract_transcript_codex(content: &str) -> (String, Vec<String>) {
             _ => {}
         }
     }
-    (out, mcp_servers)
+    out
 }
 
-fn flatten_content(content: &Value, out: &mut String, mcp_servers: &mut Vec<String>) {
+fn flatten_content(content: &Value, out: &mut String) {
     match content {
         Value::String(s) => {
             out.push_str(s);
@@ -528,9 +488,6 @@ fn flatten_content(content: &Value, out: &mut String, mcp_servers: &mut Vec<Stri
                         let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                         let input = item.get("input").map(|i| i.to_string()).unwrap_or_default();
                         out.push_str(&format!("[tool_call: {name} input={input}]\n"));
-                        if let Some(server) = mcp_server_from_claude_tool_name(name) {
-                            mcp_servers.push(server);
-                        }
                     }
                     Some("tool_result") => {
                         let is_error = item
@@ -539,7 +496,7 @@ fn flatten_content(content: &Value, out: &mut String, mcp_servers: &mut Vec<Stri
                             .unwrap_or(false);
                         let mut result_text = String::new();
                         if let Some(c) = item.get("content") {
-                            flatten_content(c, &mut result_text, mcp_servers);
+                            flatten_content(c, &mut result_text);
                         }
                         out.push_str(&format!(
                             "[tool_result error={is_error}: {}]\n",

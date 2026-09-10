@@ -87,6 +87,13 @@ openshell inference set \
 # inference.local:443 (the privacy router), injects OPENAI_API_KEY, and
 # declares the codex binary (see providers/byo-codex-profile.yaml).
 # ---------------------------------------------------------------------------
+# `|| true` only tolerates "already exists" on first run — confirmed live
+# that `import` against an already-imported profile ID is a hard error, not
+# a silent update, so editing this YAML and re-running this script does
+# NOT propagate the change to an already-provisioned workspace. To push an
+# edit to an existing profile: `provider profile export <id> --workspace
+# <ws> -o yaml`, edit, then `provider profile update <id> -f <file>
+# --workspace <ws>` (requires the exported resource_version field).
 openshell provider profile import -f providers/byo-codex-profile.yaml --workspace "${USER_ID}" || true
 openshell provider create --name byo-codex --type byo-codex \
   --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
@@ -111,6 +118,19 @@ wire_api = "responses"
 
 [projects."/sandbox"]
 trust_level = "trusted"
+
+# Native OTel tracing (codex-cli 0.146.0+) — config.toml only, no env-var
+# equivalent on this version. "protocol" is mandatory: omitting it is a
+# hard config-load error ("missing field \`protocol\`"), confirmed live.
+# OTEL_RESOURCE_ATTRIBUTES (workspace/sandbox identity) can't go here —
+# codex-cli has no TOML field for arbitrary resource attributes yet
+# (github.com/openai/codex#30987) — it's passed via --env instead, see
+# scripts/lib-otel-env.sh's otel_codex_env_args and README.md's exec blocks.
+[otel]
+
+[otel.trace_exporter.otlp-http]
+endpoint = "http://audit-collector:4318/v1/traces"
+protocol = "binary"
 EOF
 
 for SERVER in "${SERVERS[@]}"; do

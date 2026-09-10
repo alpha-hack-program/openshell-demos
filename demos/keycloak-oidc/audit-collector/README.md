@@ -13,9 +13,14 @@ the cluster (`oc get csv -A | grep opentelemetry-operator`). This chart
 only creates an `OpenTelemetryCollector` instance — it doesn't install the
 operator or its CRDs.
 
+[`../audit-tempo`](../audit-tempo/) must already be installed — this
+collector's `traces` pipeline forwards to its `tempo-audit` Service.
+
 ## Install
 
 ```bash
+helm upgrade --install audit-tempo demos/keycloak-oidc/audit-tempo \
+  --namespace "$OPENSHELL_NAMESPACE"
 helm upgrade --install audit demos/keycloak-oidc/audit-collector \
   --namespace "$OPENSHELL_NAMESPACE"
 ```

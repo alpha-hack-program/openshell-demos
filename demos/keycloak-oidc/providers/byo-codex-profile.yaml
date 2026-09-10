@@ -18,6 +18,18 @@ endpoints:
     protocol: rest
     access: read-write
     enforcement: enforce
+  # Native OTel traces (Codex's codex.exec_server.http_request spans, which
+  # carry a real traceparent onto outbound MCP calls — see
+  # demos/keycloak-oidc/docs) push here. Short, in-namespace DNS name
+  # matches the same convention already used for session-auditor's own
+  # identical grant (see session-auditor-anthropic-profile.yaml /
+  # session-auditor-openai-profile.yaml) and the hostname compiled into
+  # util/session-auditor's binary (util/session-auditor/otlp-endpoint.txt).
+  - host: "audit-collector"
+    port: 4318
+    protocol: rest
+    access: read-write
+    enforcement: enforce
 
 binaries:
   - /usr/bin/codex

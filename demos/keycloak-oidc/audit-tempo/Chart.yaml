@@ -1,0 +1,26 @@
+apiVersion: v2
+name: audit-tempo
+description: >-
+  A dedicated, demo-owned Tempo instance that stores the traces
+  demos/keycloak-oidc/audit-collector forwards to it (native OTel tracing
+  from Claude Code/Codex sandboxes — see demos/keycloak-oidc/docs). Ephemeral
+  in-memory storage, no PVC, by design: this is demo-scoped infra that
+  doesn't need to survive restarts, same philosophy as this repo's other
+  ephemeral demo infra. Requires the Red Hat Tempo Operator to already be
+  installed on the cluster — this chart only creates an instance, not the
+  operator/CRDs.
+
+  Deliberately separate from the cluster's other TempoMonolithic instance
+  (redhat-ods-monitoring/data-science-tempomonolithic) — that one is
+  RHOAI-shared infra for a different consumer and must not be reused here;
+  each demo owns its own trace store, same as it owns its own namespace.
+
+  Unlike audit-collector, this release's name is NOT load-bearing: nothing
+  outside this chart hardcodes a hostname for it at compile time (compare
+  audit-collector/Chart.yaml, where the Service name IS baked into
+  util/session-auditor's binary). Renaming is safe as long as you also
+  update audit-collector/templates/collector.yaml's traces exporter
+  endpoint to match.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
