@@ -460,6 +460,23 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         &format!(r#"session_compliance_risk_score{{namespace="{ns}"}}"#),
     )
     .await?;
+    // `session_compliance_risk_score` carries no per-sample timestamp of
+    // its own (unlike the two heartbeat metrics above, which wrap in
+    // `timestamp(...)`) — fetch it separately, correlated by session_id.
+    // Needed because Prometheus keeps returning a still-fresh row per
+    // distinct session_id for several minutes after it was last pushed:
+    // confirmed live that two turns run close together left two
+    // simultaneous rows for the same sandbox (different session_id,
+    // different risk_level), which made a naive "apply every row" loop
+    // flip-flop the node's color every tick depending on Prometheus's
+    // arbitrary result order, instead of settling on the actual latest
+    // verdict.
+    let risk_ts = query_instant(
+        &state.http,
+        base,
+        &format!(r#"timestamp(session_compliance_risk_score{{namespace="{ns}"}})"#),
+    )
+    .await?;
 
     // Best-effort, not `?` — unlike the three Prometheus queries above, a
     // Tempo hiccup shouldn't take down risk/heartbeat updates too. Two
@@ -574,7 +591,44 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         }
     }
 
+    let risk_ts_by_session: HashMap<&str, f64> = risk_ts
+        .iter()
+        .filter_map(|s| {
+            let session_id = s.metric.get("session_id")?;
+            let ts = s.value.1.parse::<f64>().ok()?;
+            Some((session_id.as_str(), ts))
+        })
+        .collect();
+
+    // Pick only the one row with the latest real sample timestamp per
+    // (workspace, sandbox) — see this fn's earlier comment on why a
+    // second, correlated query is needed for that. A session_id with no
+    // matching timestamp row (shouldn't happen, same underlying series)
+    // sorts last via `unwrap_or(0.0)` rather than winning by default.
+    let mut latest_risk: HashMap<(String, String), (f64, &PromSample)> = HashMap::new();
     for sample in &risk {
+        let (Some(workspace), Some(sandbox)) =
+            (sample.metric.get("workspace"), sample.metric.get("sandbox"))
+        else {
+            continue;
+        };
+        let ts = sample
+            .metric
+            .get("session_id")
+            .and_then(|sid| risk_ts_by_session.get(sid.as_str()))
+            .copied()
+            .unwrap_or(0.0);
+        let key = (workspace.clone(), sandbox.clone());
+        let is_newer = match latest_risk.get(&key) {
+            Some((prev_ts, _)) => ts >= *prev_ts,
+            None => true,
+        };
+        if is_newer {
+            latest_risk.insert(key, (ts, sample));
+        }
+    }
+
+    for (_, sample) in latest_risk.values() {
         let (Some(workspace), Some(sandbox)) =
             (sample.metric.get("workspace"), sample.metric.get("sandbox"))
         else {
