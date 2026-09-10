@@ -26,6 +26,22 @@ data:
                     "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                     stat_prefix: ingress_http
                     codec_type: AUTO
+                    # Spike/PoC only (see demos/keycloak-oidc/docs — OTel
+                    # traces investigation): logs the inbound traceparent
+                    # header (if any) to stdout so `oc logs` on this sidecar
+                    # can confirm whether a caller's trace context actually
+                    # survives the real sandbox -> gateway -> Envoy -> app
+                    # path. Remove once that question is settled, or replace
+                    # with a real OTel access-log sink if kept long-term.
+                    access_log:
+                      - name: envoy.access_loggers.stdout
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                          log_format:
+                            json_format:
+                              path: "%REQ(:PATH)%"
+                              traceparent: "%REQ(TRACEPARENT)%"
+                              response_code: "%RESPONSE_CODE%"
                     route_config:
                       name: local_route
                       virtual_hosts:

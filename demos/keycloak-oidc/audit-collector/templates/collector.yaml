@@ -21,8 +21,19 @@ spec:
     exporters:
       prometheus:
         endpoint: 0.0.0.0:8889
+      # Spike/PoC only (see demos/keycloak-oidc/docs — OTel traces
+      # investigation): dumps received spans to the collector pod's own
+      # stdout so `oc logs` can confirm Claude Code/Codex native tracing
+      # actually reaches this collector, with what resource attributes and
+      # span shape. Not a real trace backend — swap for a Tempo exporter
+      # before relying on this for anything beyond validation.
+      debug:
+        verbosity: detailed
     service:
       pipelines:
         metrics:
           receivers: [otlp]
           exporters: [prometheus]
+        traces:
+          receivers: [otlp]
+          exporters: [debug]
