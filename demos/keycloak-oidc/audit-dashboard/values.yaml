@@ -1,6 +1,6 @@
 image:
   repository: quay.io/atarazana/audit-dashboard
-  tag: 0.1.6
+  tag: 0.1.7
   pullPolicy: IfNotPresent
 
 # Optional — leave empty to let OpenShift auto-generate a hostname (this
