@@ -16,3 +16,7 @@ alerting:
   riskThreshold: 2
   severity: warning
   forDuration: 0m
+  # Keeps the alert visibly firing for at least this long even after the
+  # underlying score drops or the metric goes stale -- see
+  # templates/prometheusrule.yaml's own comment for why.
+  keepFiringFor: 15m

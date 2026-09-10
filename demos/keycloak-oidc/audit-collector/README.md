@@ -67,6 +67,54 @@ reached the platform `alertmanager-main` (same auth pattern, port 9094) with
 `status.state: active` — visible in the OpenShift console's own
 Observe → Alerting page with no further wiring needed.
 
+## Managing this alert (SRE lifecycle)
+
+**It doesn't just silently resolve itself before anyone looks.** By
+default, this kind of alert would clear the instant the underlying metric
+goes stale (sandbox idle, ~5m) or a later turn scores below threshold —
+for a compliance signal, that's a real risk: a flagged incident could
+vanish from the active-alerts list with nobody having actually seen it.
+`alerting.keepFiringFor` (default `15m`) holds the alert visibly firing
+for at least that long regardless, so an SRE has a real window to notice
+and act on it rather than it resolving by neglect. Confirmed live in this
+cluster's Prometheus Operator: setting `keep_firing_for` on the
+`PrometheusRule` object takes a normal reconciliation cycle (tens of
+seconds, not instant) before the actual rule file Thanos Ruler evaluates
+picks it up — check with the "Confirming it works" commands above if it
+doesn't seem to be applying yet.
+
+**Explicit silencing is the right tool for "I've seen this, stop paging
+me" — not automation.** Don't try to make the alert auto-suppress itself;
+that defeats the point of having a compliance signal at all. The normal
+SRE workflow is a time-bound Alertmanager silence, created only after a
+human has actually looked at the incident:
+
+```bash
+# Via the console: open the alert in Observe -> Alerting, click "Silence
+# alert", set a duration and an optional comment.
+
+# Via the API (same auth pattern as above, port 9094):
+oc port-forward -n openshift-monitoring svc/alertmanager-main 9094:9094 &
+curl -sk -H "Authorization: Bearer $(oc whoami --show-token)" \
+  -H "Content-Type: application/json" \
+  -X POST 'https://localhost:9094/api/v2/silences' \
+  -d '{
+    "matchers": [
+      {"name": "alertname", "value": "SessionComplianceRiskDetected", "isRegex": false},
+      {"name": "sandbox", "value": "aud-claude-bob", "isRegex": false}
+    ],
+    "startsAt": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'",
+    "endsAt": "'"$(date -u -d '+4 hours' +%Y-%m-%dT%H:%M:%S.000Z)"'",
+    "createdBy": "your-name",
+    "comment": "Investigating — see ticket XYZ-123"
+  }'
+```
+
+Scope the `matchers` to the specific `sandbox` (or `workspace`) under
+investigation, not the bare `alertname` — a blanket silence on the
+alertname would suppress the signal for every sandbox in the namespace,
+not just the one being looked at.
+
 ## Values reference
 
 | Value | Default | Description |
@@ -77,6 +125,7 @@ Observe → Alerting page with no further wiring needed.
 | `alerting.riskThreshold` | `2` | Score threshold the alert fires at — `2` matches `blocked_attempt` or worse (see `util/session-auditor/prompt.txt`'s score scheme). |
 | `alerting.severity` | `warning` | The alert's `severity` label. |
 | `alerting.forDuration` | `0m` | How long the condition must hold before firing — `0m` fires immediately, matching this metric's own "current state, not a blip" design (see `util/session-auditor/README.md`). |
+| `alerting.keepFiringFor` | `15m` | Minimum time the alert stays visibly firing even after the score drops or the metric goes stale — see "Managing this alert" below for why. |
 
 ## Known limitations
 

@@ -21,6 +21,15 @@ spec:
         - alert: SessionComplianceRiskDetected
           expr: session_compliance_risk_score{namespace="{{ .Release.Namespace }}"} >= {{ .Values.alerting.riskThreshold }}
           for: {{ .Values.alerting.forDuration | default "0m" | quote }}
+          # Without this, the alert clears itself the instant the metric
+          # goes stale (sandbox goes idle, ~5m) or a later turn scores
+          # below threshold -- for a compliance signal, that means a
+          # flagged incident can silently vanish from the active-alerts
+          # list before anyone actually looks at it. keep_firing_for holds
+          # it visibly firing for a minimum window regardless, forcing an
+          # SRE to see and explicitly dismiss/silence it rather than have
+          # it resolve on its own by neglect.
+          keep_firing_for: {{ .Values.alerting.keepFiringFor | default "15m" | quote }}
           labels:
             severity: {{ .Values.alerting.severity | default "warning" | quote }}
           annotations:
