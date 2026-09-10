@@ -21,14 +21,25 @@ spec:
     exporters:
       prometheus:
         endpoint: 0.0.0.0:8889
-      # Spike/PoC only (see demos/keycloak-oidc/docs — OTel traces
-      # investigation): dumps received spans to the collector pod's own
-      # stdout so `oc logs` can confirm Claude Code/Codex native tracing
-      # actually reaches this collector, with what resource attributes and
-      # span shape. Not a real trace backend — swap for a Tempo exporter
-      # before relying on this for anything beyond validation.
+      # Kept alongside the real otlp_http/tempo exporter below as cheap
+      # insurance: `oc logs` on this pod stays a working way to confirm
+      # spans are actually arriving even if Tempo ingestion itself is
+      # silently broken (wrong Service name, TLS mismatch, etc.) — the
+      # exact kind of failure that's easy to introduce and hard to notice
+      # otherwise. Remove once the Tempo path has been reliable for a while.
       debug:
         verbosity: detailed
+      # Forwards traces to demos/keycloak-oidc/audit-tempo's TempoMonolithic
+      # instance. Service name/port confirmed live (not guessed) — see
+      # audit-tempo/README.md's Install section for how to re-verify if that
+      # release is ever renamed. insecure:true because this in-namespace
+      # hop has no TLS today, matching audit-tempo's own "no auth on
+      # ingest" documented limitation (also demo-only, not a production
+      # pattern).
+      otlp_http/tempo:
+        endpoint: http://tempo-audit:4318
+        tls:
+          insecure: true
     service:
       pipelines:
         metrics:
@@ -36,4 +47,4 @@ spec:
           exporters: [prometheus]
         traces:
           receivers: [otlp]
-          exporters: [debug]
+          exporters: [debug, otlp_http/tempo]

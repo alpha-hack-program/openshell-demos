@@ -309,7 +309,7 @@ time.
 |---|---|---|---|---|
 | `agent_session_started` | `SessionStart` | gauge, always `1` | `session_id`, `agent` (`claude`/`codex`/`unknown`, from which `/etc/claude-code` or `/etc/codex` exists in the image), `workspace`, `sandbox` (both best-effort, see below) | No |
 | `agent_turn_heartbeat` | `UserPromptSubmit` | gauge, always `1` | `session_id`, `agent`, `workspace`, `sandbox` | No |
-| `session_compliance_risk_score` | `Stop` | gauge, `0`-`3` | `session_id`, `risk_level`, `workspace`, `sandbox`, `mcp_servers` (best-effort, omitted if empty — see below) | Yes |
+| `session_compliance_risk_score` | `Stop` | gauge, `0`-`3` | `session_id`, `risk_level`, `workspace`, `sandbox` | Yes |
 
 Confirmed live for both agents: `SessionStart`/`UserPromptSubmit` push
 successfully even when `AUDITOR_ANTHROPIC_API_KEY`/`AUDITOR_ANTHROPIC_MODEL`
@@ -339,27 +339,17 @@ internal naming convention**, not a stable public API. Treat it the same
 way as this repo's `[VERIFY]` tags: re-confirm after an OpenShell version
 bump rather than trusting it indefinitely.
 
-**`mcp_servers` is parsed from the same tool-call names already being
-flattened into the transcript for classification — no second pass over the
-file.** It's a comma-joined, deduped list of MCP server short-names touched
-during the turn (e.g. `portfolio,kyc-compliance`), attached only to
-`session_compliance_risk_score` (the only hook that reads a transcript at
-all) and omitted entirely when empty, rather than pushed as an empty
-string. For Claude Code this is **confirmed**: tool names come out as
-`mcp__<key>__<tool>` (e.g. `mcp__portfolio__list_my_clients`), the exact
-convention `scripts/15-provision-claude-sandbox.sh` documents for building
-`mcp-servers.json`. For Codex, this is **`[VERIFY]`** — Codex's
-`config.toml` keys `[mcp_servers.<name>]` by the *full* server name (e.g.
-`mcp-portfolio`, see `scripts/14-provision-codex-sandbox.sh`), and
-classification has only ever been exercised live against a trivial non-MCP
-`echo` tool call (see "Known limitations" in
-[`prometheus-scraping.md`](../../demos/keycloak-oidc/docs/prometheus-scraping.md)),
-so the real `function_call.name` shape for an actual MCP call on Codex is
-unconfirmed. The parser tries the Claude-style `mcp__<server>__<tool>`
-prefix first, then falls back to the text before the first `__`; getting
-this wrong just means `mcp_servers` comes back empty for Codex (fails
-soft, same as every other optional attribute here) — confirm and correct
-the heuristic the first time a real Codex MCP call is captured live.
+**No `mcp_servers` attribute anymore.** Earlier versions of this tool
+reconstructed which MCP servers were touched during a turn by grepping
+tool-call names out of the transcript (`mcp__<key>__<tool>` for Claude
+Code, an unconfirmed heuristic for Codex) and joining them into a
+comma-separated label. That's gone: both Claude Code's and Codex's own
+native OTel tracing now propagate a real `traceparent` into their outbound
+MCP HTTP requests, giving an accurately-timed, per-call sandbox→MCP-server
+graph for free — see `demos/keycloak-oidc/docs` for how that's wired up.
+It's strictly better than the transcript heuristic ever was (real timing,
+no Codex-specific guessing), so this tool no longer needs to reconstruct
+that data itself.
 
 ## Configuration
 

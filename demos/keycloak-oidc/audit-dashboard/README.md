@@ -81,7 +81,9 @@ in an audited sandbox, its node showed `risk_level: none`; after
 repeating [Scene 4a](../README.md#scene-4a--bob-overreaches)'s forcing
 prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
 (`score: 2`) with `mcp_servers` correctly attributed — visible both via
-`GET /api/graph` and through the real HTTPS Route.
+`GET /api/graph` and through the real HTTPS Route. **Dated**: describes
+behavior before `util/session-auditor` stopped pushing `mcp_servers` (see
+"Known limitations" below).
 
 ## Known limitations
 
@@ -99,3 +101,11 @@ prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
   dims once its heartbeat goes stale (`heartbeatStaleSecs`). This is a
   live liveness/risk view sourced from `session-auditor`, not a
   historical audit log — it just no longer forgets who it's ever seen.
+- **No more MCP-server edges.** `util/session-auditor` no longer pushes an
+  `mcp_servers` label (that reconstruction is superseded by native OTel
+  tracing — see `demos/keycloak-oidc/docs`), so this dashboard's graph
+  stops drawing sandbox→MCP-server edges for any new activity. Nodes
+  observed before this change may still show stale edges in a
+  PVC-persisted graph until the state file is cleared — this is a known,
+  accepted regression, not a bug; consuming the new trace data here
+  instead is separate, not-yet-started follow-up work.

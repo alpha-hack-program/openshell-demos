@@ -1,0 +1,7 @@
+# Human-inspectable stopgap only — a quick way to eyeball traces via a route
+# without building anything. Not a substitute for a real dashboard; that's
+# separate follow-up work (see demos/keycloak-oidc/audit-dashboard).
+jaegerui:
+  enabled: true
+  route:
+    enabled: true

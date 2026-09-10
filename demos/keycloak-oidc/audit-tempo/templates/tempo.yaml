@@ -1,0 +1,24 @@
+# metadata.name is fixed to "audit" (not templated on .Release.Name) purely
+# for a predictable, greppable resource name matching this demo's other
+# audit-* infra (audit-collector, audit-dashboard) — NOT load-bearing like
+# audit-collector's own fixed name (see this chart's Chart.yaml). Renaming
+# is safe; just re-point audit-collector's traces exporter endpoint to match.
+apiVersion: tempo.grafana.com/v1alpha1
+kind: TempoMonolithic
+metadata:
+  name: audit
+spec:
+  storage:
+    traces:
+      # Ephemeral, no PVC — ties trace history to this pod's lifetime, same
+      # tradeoff this repo already makes for other demo-scoped infra. `oc
+      # explain tempomonolithic.spec.storage.traces` confirms `memory` is
+      # this field's own documented default (2Gi tmpfs) — listed here
+      # explicitly rather than left implicit, so the tradeoff is visible.
+      backend: memory
+  {{- if .Values.jaegerui.enabled }}
+  jaegerui:
+    enabled: true
+    route:
+      enabled: {{ .Values.jaegerui.route.enabled }}
+  {{- end }}
