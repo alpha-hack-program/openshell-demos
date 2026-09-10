@@ -21,4 +21,14 @@ prometheus:
 refreshIntervalSecs: 5
 heartbeatStaleSecs: 90
 
+# A sandbox/MCP-server node is never removed from the graph once observed
+# (see util/audit-dashboard/src/main.rs's refresh_graph) — it only ever
+# dims when its heartbeat goes stale. This PVC is what makes that survive
+# a pod restart too, instead of resetting to an empty graph until
+# Prometheus re-populates it.
+persistence:
+  enabled: true
+  size: 256Mi
+  storageClassName: ""
+
 resources: {}

@@ -37,5 +37,20 @@ spec:
               value: {{ .Values.refreshIntervalSecs | quote }}
             - name: HEARTBEAT_STALE_SECS
               value: {{ .Values.heartbeatStaleSecs | quote }}
+            {{- if .Values.persistence.enabled }}
+            - name: STATE_FILE_PATH
+              value: /data/graph-state.json
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: audit-dashboard-data
+      {{- end }}

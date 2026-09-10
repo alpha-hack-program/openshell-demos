@@ -2,17 +2,20 @@
 // SVG graph: users -> sandboxes -> MCP servers. Sandbox node fill color
 // interpolates green (risk 0) -> amber -> red (risk 3, the "why" shown on
 // hover as risk_level); nodes with no heartbeat within
-// graph.heartbeat_stale_secs render dimmed regardless of risk color. No
+// graph.heartbeat_stale_secs render dimmed regardless of risk color, but a
+// node once observed is never removed from the graph (the backend persists
+// it — see main.rs) so users/sandboxes/MCP servers only ever accumulate. No
 // build-time routing/state library — one page, one poll loop, plain
 // Preact + hooks is enough.
 import { Fragment, h, render } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 const REFRESH_MS = 5000;
 const COL_WIDTH = 280;
 const ROW_HEIGHT = 44;
 const TOP_MARGIN = 40;
 const LEFT_MARGIN = 40;
+const PULSE_MS = 900;
 
 const RISK_STOPS = [
   [63, 185, 80], // green — risk 0
@@ -65,9 +68,47 @@ function useGraph() {
   return graph;
 }
 
+// Tracks each sandbox's last_seen_unix across polls and hands back a token
+// that increments whenever a fresh heartbeat lands. The token — not a
+// boolean — is what components key their pulse-ring element on, so a
+// second heartbeat that arrives while an earlier ring is still animating
+// re-triggers the animation instead of being a no-op.
+function useHeartbeatPulses(sandboxes) {
+  const seenRef = useRef({});
+  const [tokens, setTokens] = useState({});
+
+  useEffect(() => {
+    const prev = seenRef.current;
+    const next = {};
+    let changed = null;
+    for (const s of sandboxes) {
+      next[s.sandbox] = s.last_seen_unix;
+      if (
+        s.last_seen_unix != null &&
+        prev[s.sandbox] != null &&
+        s.last_seen_unix > prev[s.sandbox]
+      ) {
+        changed = changed || {};
+        changed[s.sandbox] = true;
+      }
+    }
+    seenRef.current = next;
+    if (changed) {
+      setTokens((t) => {
+        const out = { ...t };
+        for (const key of Object.keys(changed)) out[key] = (out[key] || 0) + 1;
+        return out;
+      });
+    }
+  }, [sandboxes]);
+
+  return tokens;
+}
+
 function App() {
   const graph = useGraph();
   const [hover, setHover] = useState(null);
+  const pulses = useHeartbeatPulses(graph.sandboxes);
   const nowUnix = Math.floor(Date.now() / 1000);
 
   const users = [...new Set(graph.sandboxes.map((s) => s.workspace))].sort();
@@ -93,6 +134,7 @@ function App() {
   return h(
     Fragment,
     null,
+    h("div", { class: "brand" }, "MERIDIAN INC."),
     h("h1", null, "OpenShell audit trail"),
     h(
       "p",
@@ -143,9 +185,22 @@ function App() {
       ),
       graph.sandboxes.map((s) => {
         const stale = isStale(s, graph.heartbeat_stale_secs, nowUnix);
+        const pulseToken = pulses[s.sandbox];
         return h(
           Fragment,
           { key: `s-${s.sandbox}` },
+          pulseToken &&
+            h("circle", {
+              key: `pulse-${s.sandbox}-${pulseToken}`,
+              class: "pulse-ring",
+              cx: sandboxX + 8,
+              cy: sandboxY[s.sandbox] + 10,
+              r: 10,
+              fill: "none",
+              stroke: riskColor(s.risk_score),
+              "stroke-width": 2,
+              style: { animationDuration: `${PULSE_MS}ms` },
+            }),
           h("circle", {
             cx: sandboxX + 8,
             cy: sandboxY[s.sandbox] + 10,

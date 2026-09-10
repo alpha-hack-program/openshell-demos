@@ -1,11 +1,11 @@
 # audit-dashboard — a live risk/heartbeat graph for audited sandboxes
 
-A small standing service that draws `user → sandbox → MCP server` and
-colors each sandbox by [`util/session-auditor`](../session-auditor/)'s
-compliance-risk score (green → red) and liveness (dimmed once its
-heartbeat goes stale) — built for Scene 7 ("Watching the audit trail
-live") in
-[`demos/keycloak-oidc/README.md`](../../demos/keycloak-oidc/README.md).
+**Meridian Inc.**'s live risk/heartbeat dashboard: a small standing service
+that draws `user → sandbox → MCP server` and colors each sandbox by
+[`util/session-auditor`](../session-auditor/)'s compliance-risk score
+(green → red) and liveness (dimmed once its heartbeat goes stale, never
+removed — see below) — built for Scene 7 ("Watching the audit trail live")
+in [`demos/keycloak-oidc/README.md`](../../demos/keycloak-oidc/README.md).
 
 ## Why it's built this way
 
@@ -36,10 +36,20 @@ speculatively.
 - Every `refreshIntervalSecs` (default `5`), the backend re-runs three
   PromQL queries scoped to its own namespace
   (`agent_session_started`/`agent_turn_heartbeat`/
-  `session_compliance_risk_score{namespace="..."}`), rebuilds an in-memory
-  graph from scratch (simpler than incrementally patching state from a
-  diff, and cheap at this demo's scale), and serves it as JSON from
-  `GET /api/graph`.
+  `session_compliance_risk_score{namespace="..."}`) and **merges** the
+  results into the existing in-memory graph, and serves it as JSON from
+  `GET /api/graph`. A sandbox (and its MCP-server edges) is added the
+  first time it's observed and never removed — not even once Prometheus's
+  own instant-query lookback window passes and it stops showing up in
+  query results. Liveness is conveyed entirely by the frontend dimming
+  stale nodes, never by dropping them; an earlier "rebuild from scratch
+  every tick" version made sandboxes vanish outright once Prometheus
+  stopped returning a sample, which read as data loss rather than "this
+  one's offline." If `STATE_FILE_PATH` is set, the sandbox list is also
+  written to that path (typically a mounted PVC — see
+  `demos/keycloak-oidc/audit-dashboard/values.yaml`'s `persistence`
+  block) after every refresh and reloaded at startup, so this "seen once,
+  shown forever" graph survives a pod restart too.
 - **Frontend: Preact**, bundled with `esbuild` (single dev dependency, no
   bundler ceremony) into a static `dist/bundle.js` + `index.html`, served
   directly by the same axum process via `tower_http::services::ServeDir` —
@@ -67,7 +77,13 @@ speculatively.
   `agent_turn_heartbeat` sample within `heartbeatStaleSecs` (default `90`)
   — this is a liveness signal independent of risk color, so an offline
   sandbox stays visibly distinct even if its last known risk score was
-  low.
+  low. Dimming, not disappearing, is deliberate: once a sandbox has been
+  observed it stays on the graph for the life of the backend (see "Why
+  it's built this way" above), so a quiet sandbox reads as "went offline,"
+  never as "was never there."
+- **A short pulse ring** flashes around a sandbox node in its own risk
+  color whenever a fresh heartbeat sample lands for it — a quick visual
+  "this one's alive right now," distinct from the steady-state fill color.
 - **Edges to MCP-server nodes** come from the `mcp_servers` attribute on
   `session_compliance_risk_score` (comma-joined server short-names).
   A sandbox that has never completed a `Stop` hook (e.g. no classification credential
@@ -79,8 +95,9 @@ speculatively.
 |---|---|---|
 | `OPENSHELL_NAMESPACE` | *(required)* | Every PromQL query is scoped to this namespace — the dashboard only ever shows its own demo's sandboxes. |
 | `THANOS_QUERIER_URL` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL |
-| `REFRESH_INTERVAL_SECS` | `5` | How often to re-poll and rebuild the graph. |
+| `REFRESH_INTERVAL_SECS` | `5` | How often to re-poll and merge new samples into the graph. |
 | `HEARTBEAT_STALE_SECS` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
+| `STATE_FILE_PATH` | *(unset)* | Optional path (typically a mounted PVC) to persist the sandbox list to after every refresh and reload at startup. In-memory-only if unset. |
 | `PORT` | `8080` | HTTP port the service listens on. |
 
 ## Development

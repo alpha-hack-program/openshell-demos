@@ -49,11 +49,20 @@ struct Config {
     #[arg(long, env = "HEARTBEAT_STALE_SECS", default_value_t = 90)]
     heartbeat_stale_secs: u64,
 
+    /// Optional path to a JSON file — typically on a mounted PVC — where
+    /// the sandbox list is written after every refresh and reloaded at
+    /// startup. A sandbox is never dropped from the graph once observed
+    /// (see `refresh_graph`); this just makes that "seen once, shown
+    /// forever, dimmed when stale" state survive a pod restart too.
+    /// Unset by default — an in-memory-only graph is fine for local dev.
+    #[arg(long, env = "STATE_FILE_PATH")]
+    state_file: Option<String>,
+
     #[arg(long, env = "PORT", default_value_t = 8080)]
     port: u16,
 }
 
-#[derive(Clone, Serialize, Default, Debug)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 struct SandboxNode {
     workspace: String,
     sandbox: String,
@@ -105,10 +114,22 @@ async fn main() {
     let config = Config::parse();
     let port = config.port;
     let http = build_http_client();
+
+    let initial_sandboxes = config
+        .state_file
+        .as_deref()
+        .map(load_state)
+        .unwrap_or_default();
+    let initial_graph = Graph {
+        generated_at_unix: now_unix(),
+        heartbeat_stale_secs: config.heartbeat_stale_secs,
+        sandboxes: initial_sandboxes,
+    };
+
     let state = Arc::new(AppState {
         config,
         http,
-        graph: RwLock::new(Graph::default()),
+        graph: RwLock::new(initial_graph),
     });
 
     let refresh_state = state.clone();
@@ -225,12 +246,20 @@ async fn query_instant(
     Ok(body.data.map(|d| d.result).unwrap_or_default())
 }
 
-/// Rebuilds the whole graph from three PromQL queries every tick — cheap
-/// enough at this demo's scale, and much simpler than incrementally
-/// patching state from a diff. `timestamp(...)` on the two heartbeat
-/// metrics recovers each series' own last-sample time (an instant query's
-/// own returned timestamp is just "now," not when the sample actually
-/// landed — see `PromSample::value`'s doc comment).
+/// Re-runs three PromQL queries every tick and merges the results into the
+/// existing graph rather than replacing it — a sandbox (and its MCP-server
+/// edges) is added the first time it's observed and then never removed,
+/// even once Prometheus's own instant-query lookback window (or the
+/// `HEARTBEAT_STALE_SECS` dimming threshold) passes and it stops showing
+/// up in query results. Liveness is conveyed entirely by the frontend
+/// dimming stale nodes (see `frontend/src/main.jsx`'s `isStale`), not by
+/// removing them — the old "rebuild from scratch every tick" version made
+/// sandboxes vanish outright once Prometheus stopped returning a sample
+/// for them, which looked like data loss rather than "this one's offline."
+/// `timestamp(...)` on the two heartbeat metrics recovers each series' own
+/// last-sample time (an instant query's own returned timestamp is just
+/// "now," not when the sample actually landed — see `PromSample::value`'s
+/// doc comment).
 async fn refresh_graph(state: &AppState) -> Result<(), String> {
     let ns = &state.config.namespace;
     let base = state.config.thanos_url.trim_end_matches('/');
@@ -254,7 +283,18 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     )
     .await?;
 
-    let mut nodes: HashMap<(String, String), SandboxNode> = HashMap::new();
+    // Seed from the current graph, not empty — see this fn's doc comment.
+    // Only fields touched below (by a sample that actually arrived this
+    // tick) get overwritten; everything else keeps its last known value.
+    let mut nodes: HashMap<(String, String), SandboxNode> = {
+        let current = state.graph.read().await;
+        current
+            .sandboxes
+            .iter()
+            .cloned()
+            .map(|s| ((s.workspace.clone(), s.sandbox.clone()), s))
+            .collect()
+    };
 
     for sample in session_started.iter().chain(turn_heartbeat.iter()) {
         let (Some(workspace), Some(sandbox)) =
@@ -318,8 +358,48 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         heartbeat_stale_secs: state.config.heartbeat_stale_secs,
         sandboxes,
     };
+    if let Some(path) = &state.config.state_file {
+        persist_state(path, &graph.sandboxes);
+    }
     *state.graph.write().await = graph;
     Ok(())
+}
+
+/// Reads a previously `persist_state`d sandbox list. Missing file (first
+/// boot, or no PVC configured) and unparseable contents both just come
+/// back empty — this is a warm-start optimization, never a hard
+/// dependency, so any failure here should degrade to "start from scratch,"
+/// not crash the process.
+fn load_state(path: &str) -> Vec<SandboxNode> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|e| {
+            eprintln!("audit-dashboard: ignoring unreadable state file {path}: {e}");
+            Vec::new()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => {
+            eprintln!("audit-dashboard: failed to read state file {path}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Writes via a `.tmp` + rename so a crash or concurrent read mid-write
+/// never leaves a truncated/corrupt state file behind — `load_state`
+/// reading garbage on the next boot would silently drop every sandbox
+/// this dashboard has ever seen.
+fn persist_state(path: &str, sandboxes: &[SandboxNode]) {
+    let body = match serde_json::to_vec(sandboxes) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("audit-dashboard: failed to serialize state: {e}");
+            return;
+        }
+    };
+    let tmp = format!("{path}.tmp");
+    if let Err(e) = std::fs::write(&tmp, &body).and_then(|_| std::fs::rename(&tmp, path)) {
+        eprintln!("audit-dashboard: failed to persist state file {path}: {e}");
+    }
 }
 
 fn now_unix() -> i64 {

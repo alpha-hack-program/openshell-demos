@@ -1,0 +1,16 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audit-dashboard-data
+  labels:
+    app.kubernetes.io/name: audit-dashboard
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.persistence.storageClassName }}
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | default "256Mi" }}
+{{- end }}

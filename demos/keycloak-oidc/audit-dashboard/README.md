@@ -71,6 +71,9 @@ against a current `util/audit-dashboard` checkout and redeploy.
 | `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
 | `refreshIntervalSecs` | `5` | How often the backend re-polls Prometheus. |
 | `heartbeatStaleSecs` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
+| `persistence.enabled` | `true` | Mounts a PVC at `/data` and sets `STATE_FILE_PATH` so the graph survives a pod restart instead of starting empty. |
+| `persistence.size` | `256Mi` | PVC size — this is a small JSON file of sandbox metadata, not audit log storage. |
+| `persistence.storageClassName` | `""` | Optional; leave empty to use the cluster default `StorageClass`. |
 
 Confirmed live end to end (2026-09-08, sandbox268): after a benign turn
 in an audited sandbox, its node showed `risk_level: none`; after
@@ -85,10 +88,13 @@ prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
   sandbox's risk/heartbeat state in this namespace. Acceptable for a demo
   audience; don't reuse this chart as-is beyond that without adding auth
   in front of it.
-- Single replica, no persistence — a pod restart just means an empty graph
-  until the next successful poll re-populates it from Prometheus (which
-  itself still has the history; nothing is lost, just not shown until the
-  next tick).
-- Shows only what `session-auditor` has pushed recently (bounded by
-  Prometheus's own ~5-minute staleness window on top of
-  `heartbeatStaleSecs`) — it is a live view, not a historical audit log.
+- Single replica. With `persistence.enabled` (default `true`), the
+  sandbox/MCP-server graph is written to a PVC after every refresh and
+  reloaded at startup, so a pod restart resumes from where it left off
+  instead of starting empty. Disable it to go back to the old
+  in-memory-only behavior (graph rebuilds from Prometheus on next poll,
+  nothing pre-restart shown until then).
+- A sandbox is never removed from the graph once observed — it only ever
+  dims once its heartbeat goes stale (`heartbeatStaleSecs`). This is a
+  live liveness/risk view sourced from `session-auditor`, not a
+  historical audit log — it just no longer forgets who it's ever seen.
