@@ -88,7 +88,17 @@ struct SandboxNode {
     last_seen_unix: Option<i64>,
     risk_score: Option<f64>,
     risk_level: Option<String>,
-    mcp_servers: Vec<String>,
+    mcp_servers: Vec<McpEdge>,
+}
+
+/// One sandbox->MCP-server edge — `last_duration_ms` is the most recently
+/// observed call's latency (not an average), refreshed every time a new
+/// matching span shows up, so the graph reflects roughly "how slow was
+/// this call last time," not a smoothed/historical figure.
+#[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq)]
+struct McpEdge {
+    server: String,
+    last_duration_ms: Option<f64>,
 }
 
 /// One raw signal that fed into the graph — the events panel's whole
@@ -187,6 +197,8 @@ struct TempoSpanSet {
 struct TempoSpan {
     #[serde(default)]
     attributes: Vec<TempoAttribute>,
+    #[serde(rename = "durationNanos")]
+    duration_nanos: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +218,13 @@ fn tempo_attrs_to_map(attrs: &[TempoAttribute]) -> HashMap<String, String> {
         .iter()
         .filter_map(|a| a.value.string_value.clone().map(|v| (a.key.clone(), v)))
         .collect()
+}
+
+/// One matched span's attributes plus its call latency — the latter shown
+/// on the sandbox->MCP-server edges in the frontend graph.
+struct TempoMatchedSpan {
+    attrs: HashMap<String, String>,
+    duration_ms: Option<f64>,
 }
 
 #[tokio::main]
@@ -377,7 +396,7 @@ async fn query_tempo_search(
     base: &str,
     traceql: &str,
     limit: usize,
-) -> Result<Vec<HashMap<String, String>>, String> {
+) -> Result<Vec<TempoMatchedSpan>, String> {
     let limit_str = limit.to_string();
     let resp = http
         .get(format!("{base}/api/search"))
@@ -410,7 +429,14 @@ async fn query_tempo_search(
         .into_iter()
         .filter_map(|t| t.span_set)
         .flat_map(|s| s.spans)
-        .map(|span| tempo_attrs_to_map(&span.attributes))
+        .map(|span| TempoMatchedSpan {
+            attrs: tempo_attrs_to_map(&span.attributes),
+            duration_ms: span
+                .duration_nanos
+                .as_deref()
+                .and_then(|d| d.parse::<f64>().ok())
+                .map(|nanos| nanos / 1_000_000.0),
+        })
         .collect())
 }
 
@@ -635,24 +661,31 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         }
     }
 
-    // `entry.mcp_servers.contains(&server)` is the "have I ever seen this
-    // edge" check — sufficient on its own since `nodes` was seeded from
-    // the current persisted graph above, unlike the heartbeat dedupe
-    // (which needs a timestamp because the same Prometheus sample keeps
-    // re-appearing every tick). Once added, never removed — same
-    // accumulate-forever philosophy as the sandboxes themselves, since
-    // Tempo's own ephemeral storage won't keep returning old spans forever.
-    for (kind, span_attrs_list) in [("claude", &claude_mcp_calls), ("codex", &codex_mcp_calls)] {
-        for attrs in span_attrs_list {
-            let (Some(workspace), Some(sandbox)) = (attrs.get("workspace"), attrs.get("sandbox"))
+    // Finding the edge by server name (not a plain `contains`/dedup check
+    // anymore) is the "have I ever seen this edge" test — sufficient on
+    // its own since `nodes` was seeded from the current persisted graph
+    // above, unlike the heartbeat dedupe (which needs a timestamp because
+    // the same Prometheus sample keeps re-appearing every tick). The edge
+    // itself is never removed once added, same accumulate-forever
+    // philosophy as the sandboxes themselves, since Tempo's own ephemeral
+    // storage won't keep returning old spans forever — but
+    // `last_duration_ms` *is* refreshed every time a fresh matching span
+    // shows up, so the graph's shown latency tracks the most recent call,
+    // not whatever it happened to be the first time the edge was observed.
+    for (kind, span_list) in [("claude", &claude_mcp_calls), ("codex", &codex_mcp_calls)] {
+        for span in span_list {
+            let (Some(workspace), Some(sandbox)) =
+                (span.attrs.get("workspace"), span.attrs.get("sandbox"))
             else {
                 continue;
             };
             let server = match kind {
-                "claude" => attrs
+                "claude" => span
+                    .attrs
                     .get("tool_name")
                     .and_then(|t| mcp_server_from_claude_tool_name(t)),
-                _ => attrs
+                _ => span
+                    .attrs
                     .get("server_name")
                     .map(|s| s.strip_prefix("mcp-").unwrap_or(s).to_string()),
             };
@@ -666,17 +699,23 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                     ..Default::default()
                 });
 
-            if !entry.mcp_servers.contains(&server) {
-                entry.mcp_servers.push(server.clone());
-                entry.mcp_servers.sort();
-                new_events.push(Event {
-                    unix_time: now_unix(),
-                    workspace: workspace.clone(),
-                    sandbox: sandbox.clone(),
-                    agent: entry.agent.clone(),
-                    kind: "mcp_call".to_string(),
-                    detail: format!("called {server}"),
-                });
+            match entry.mcp_servers.iter_mut().find(|e| e.server == server) {
+                Some(edge) => edge.last_duration_ms = span.duration_ms.or(edge.last_duration_ms),
+                None => {
+                    entry.mcp_servers.push(McpEdge {
+                        server: server.clone(),
+                        last_duration_ms: span.duration_ms,
+                    });
+                    entry.mcp_servers.sort_by(|a, b| a.server.cmp(&b.server));
+                    new_events.push(Event {
+                        unix_time: now_unix(),
+                        workspace: workspace.clone(),
+                        sandbox: sandbox.clone(),
+                        agent: entry.agent.clone(),
+                        kind: "mcp_call".to_string(),
+                        detail: format!("called {server}"),
+                    });
+                }
             }
         }
     }

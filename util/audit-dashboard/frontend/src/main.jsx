@@ -169,7 +169,7 @@ function App() {
 
   const users = [...new Set(graph.sandboxes.map((s) => s.workspace))].sort();
   const mcpServers = [
-    ...new Set(graph.sandboxes.flatMap((s) => s.mcp_servers)),
+    ...new Set(graph.sandboxes.flatMap((s) => s.mcp_servers.map((e) => e.server))),
   ].sort();
 
   const userX = LEFT_MARGIN;
@@ -225,17 +225,50 @@ function App() {
             }),
           ),
           graph.sandboxes.flatMap((s) =>
-            s.mcp_servers.map((m) =>
-              h("line", {
-                key: `sm-${s.sandbox}-${m}`,
-                x1: sandboxX + 200,
-                y1: sandboxY[s.sandbox] + 10,
-                x2: mcpX,
-                y2: (mcpY[m] ?? 0) + 10,
-                stroke: "#30363d",
-                "stroke-width": 1.5,
-              }),
-            ),
+            s.mcp_servers.map((edge) => {
+              const y1 = sandboxY[s.sandbox] + 10;
+              const y2 = (mcpY[edge.server] ?? 0) + 10;
+              const midX = (sandboxX + 200 + mcpX) / 2;
+              const midY = (y1 + y2) / 2;
+              const label =
+                edge.last_duration_ms != null ? `${Math.round(edge.last_duration_ms)}ms` : null;
+              return h(
+                Fragment,
+                { key: `sm-${s.sandbox}-${edge.server}` },
+                h("line", {
+                  x1: sandboxX + 200,
+                  y1,
+                  x2: mcpX,
+                  y2,
+                  stroke: "#30363d",
+                  "stroke-width": 1.5,
+                }),
+                label &&
+                  h(
+                    Fragment,
+                    null,
+                    h("rect", {
+                      x: midX - 18,
+                      y: midY - 9,
+                      width: 36,
+                      height: 14,
+                      fill: "#0b0f14",
+                      rx: 3,
+                    }),
+                    h(
+                      "text",
+                      {
+                        x: midX,
+                        y: midY + 2,
+                        fill: "#8b949e",
+                        "font-size": 10,
+                        "text-anchor": "middle",
+                      },
+                      label,
+                    ),
+                  ),
+              );
+            }),
           ),
           users.map((u) =>
             h(
@@ -303,7 +336,17 @@ function App() {
         h("br"),
         `risk: ${hover.risk_level || "none"} (score ${hover.risk_score ?? 0})`,
         h("br"),
-        `mcp servers: ${hover.mcp_servers.length ? hover.mcp_servers.join(", ") : "(none observed yet)"}`,
+        `mcp servers: ${
+          hover.mcp_servers.length
+            ? hover.mcp_servers
+                .map((e) =>
+                  e.last_duration_ms != null
+                    ? `${e.server} (${Math.round(e.last_duration_ms)}ms)`
+                    : e.server,
+                )
+                .join(", ")
+            : "(none observed yet)"
+        }`,
         h("br"),
         `last seen: ${
           hover.last_seen_unix
