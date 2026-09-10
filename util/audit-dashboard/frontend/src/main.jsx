@@ -173,7 +173,10 @@ function App() {
   ].sort();
 
   const userX = LEFT_MARGIN;
-  const sandboxX = LEFT_MARGIN + COL_WIDTH;
+  // Sandbox column sits 50% closer to the user column than a full
+  // COL_WIDTH — the MCP column keeps its original absolute position and
+  // spacing, unaffected by this.
+  const sandboxX = LEFT_MARGIN + COL_WIDTH / 2;
   const mcpX = LEFT_MARGIN + COL_WIDTH * 2;
 
   const yFor = (list, key) =>
@@ -310,7 +313,7 @@ function App() {
               h(
                 "text",
                 { x: sandboxX + 26, y: sandboxY[s.sandbox] + 15, fill: "#e6edf3", "font-size": 13 },
-                `${s.sandbox} (${s.agent || "?"})${stale ? " — offline" : ""}`,
+                `${s.sandbox} (${s.agent || "?"})`,
               ),
             );
           }),
