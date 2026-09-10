@@ -4,3 +4,15 @@
 serviceMonitor:
   enabled: true
   interval: 15s
+
+# Renders a PrometheusRule alerting on session_compliance_risk_score --
+# fires visibly in OpenShift's own console (Observe -> Alerting) with no
+# extra cluster config needed. riskThreshold 2 matches "blocked_attempt"
+# or worse (see util/session-auditor/prompt.txt's score scheme). Routing
+# the alert externally needs a cluster-wide opt-in this chart can't
+# enable on its own -- see README.md's "Known limitations".
+alerting:
+  enabled: true
+  riskThreshold: 2
+  severity: warning
+  forDuration: 0m

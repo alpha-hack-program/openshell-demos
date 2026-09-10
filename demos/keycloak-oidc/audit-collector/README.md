@@ -52,14 +52,45 @@ oc exec -n openshift-user-workload-monitoring prometheus-user-workload-0 -c prom
   wget -qO- 'http://localhost:9090/api/v1/query?query=test_metric'
 ```
 
+Confirm the compliance-risk alert fires (Thanos Ruler, not Prometheus, evaluates
+`PrometheusRule` alerts for user-workload namespaces — confirmed live via its
+own API, port 9091 behind the standard cluster-monitoring auth):
+
+```bash
+oc port-forward -n openshift-user-workload-monitoring svc/thanos-ruler 9091:9091 &
+curl -sk -H "Authorization: Bearer $(oc whoami --show-token)" \
+  'https://localhost:9091/api/v1/alerts' | jq '.data.Alerts[] | select(.labels.alertname=="SessionComplianceRiskDetected")'
+```
+Confirmed live: a real forced-overreach turn (`session_compliance_risk_score`
+reaching `2`) produced a `state: firing` entry here within ~15s, which then
+reached the platform `alertmanager-main` (same auth pattern, port 9094) with
+`status.state: active` — visible in the OpenShift console's own
+Observe → Alerting page with no further wiring needed.
+
 ## Values reference
 
 | Value | Default | Description |
 |---|---|---|
 | `serviceMonitor.enabled` | `true` | Render a `ServiceMonitor` scraping the collector's Prometheus exporter into `openshift-user-workload-monitoring`. |
 | `serviceMonitor.interval` | `15s` | Scrape interval. |
+| `alerting.enabled` | `true` | Render a `PrometheusRule` alerting on `session_compliance_risk_score`. |
+| `alerting.riskThreshold` | `2` | Score threshold the alert fires at — `2` matches `blocked_attempt` or worse (see `util/session-auditor/prompt.txt`'s score scheme). |
+| `alerting.severity` | `warning` | The alert's `severity` label. |
+| `alerting.forDuration` | `0m` | How long the condition must hold before firing — `0m` fires immediately, matching this metric's own "current state, not a blip" design (see `util/session-auditor/README.md`). |
 
 ## Known limitations
 
 - Single `OpenTelemetryCollector` instance, `mode: deployment` (no HA) — fine for a demo, not sized for production load.
 - The ServiceMonitor's selector deliberately excludes the Operator's generated `-headless` and `-monitoring` Services (confirmed live: without this, they produce duplicate scrape targets for the same pod).
+- **The alert reaches Alertmanager but only the default catch-all
+  receiver.** Confirmed live: `enableUserWorkload: true` (already set on
+  this cluster) is enough for the `PrometheusRule` to be evaluated and for
+  the resulting alert to show up in the OpenShift console's own
+  Observe → Alerting page — no extra config needed for that. Routing it
+  somewhere specific (Slack, email, a webhook) needs a namespace-scoped
+  `AlertmanagerConfig`, which additionally requires
+  `enableUserAlertmanagerConfig: true` in the *cluster-wide*
+  `cluster-monitoring-config` ConfigMap in `openshift-monitoring` —
+  confirmed live this is **not** set on this cluster. Enabling it is a
+  platform-admin decision affecting every namespace's alerting posture,
+  not something this chart can or should turn on by itself.

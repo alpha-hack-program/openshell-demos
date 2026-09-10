@@ -1,0 +1,29 @@
+{{- if .Values.alerting.enabled }}
+# Evaluated by openshift-user-workload-monitoring's Thanos Ruler purely
+# because enableUserWorkload: true is set cluster-wide (confirmed live —
+# no extra label/selector needed, same as how the ServiceMonitor above
+# just works). Firing this alert makes it show up in OpenShift's own
+# console (Observe -> Alerting) automatically. Routing it further (Slack,
+# email, a webhook) needs a namespace-scoped AlertmanagerConfig, which
+# additionally needs enableUserAlertmanagerConfig: true set in the
+# *cluster-wide* cluster-monitoring-config ConfigMap — confirmed live this
+# is NOT set on this cluster and is a platform-admin decision affecting
+# every namespace's alerting posture, not something this chart enables on
+# its own. See README.md's "Known limitations".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: audit-compliance-risk
+spec:
+  groups:
+    - name: session-compliance-risk
+      rules:
+        - alert: SessionComplianceRiskDetected
+          expr: session_compliance_risk_score{namespace="{{ .Release.Namespace }}"} >= {{ .Values.alerting.riskThreshold }}
+          for: {{ .Values.alerting.forDuration | default "0m" | quote }}
+          labels:
+            severity: {{ .Values.alerting.severity | default "warning" | quote }}
+          annotations:
+            summary: "Compliance risk detected: workspace={{ "{{ $labels.workspace }}" }} sandbox={{ "{{ $labels.sandbox }}" }} score={{ "{{ $value }}" }}"
+            description: "session_compliance_risk_score reached {{ "{{ $value }}" }} (threshold {{ .Values.alerting.riskThreshold }}) for workspace={{ "{{ $labels.workspace }}" }} sandbox={{ "{{ $labels.sandbox }}" }} in namespace {{ .Release.Namespace }}. See the audit-dashboard for the full graph."
+{{- end }}
