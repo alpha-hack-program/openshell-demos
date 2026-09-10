@@ -21,6 +21,16 @@ spec:
     exporters:
       prometheus:
         endpoint: 0.0.0.0:8889
+        # Confirmed live this defaults to false, which made every metric
+        # sample carry the *scrape* time, not session-auditor's own push
+        # time — audit-dashboard's `timestamp(...)` queries (used to
+        # distinguish which of several still-live session_id series is
+        # actually most recent, see util/audit-dashboard) were therefore
+        # comparing "time of last scrape" across series, which is
+        # meaningless since every live series gets re-scraped on the same
+        # cycle regardless of when it was actually pushed. Setting this
+        # true makes Prometheus preserve the real OTLP push timestamp.
+        send_timestamps: true
       # Kept alongside the real otlp_http/tempo exporter below as cheap
       # insurance: `oc logs` on this pod stays a working way to confirm
       # spans are actually arriving even if Tempo ingestion itself is

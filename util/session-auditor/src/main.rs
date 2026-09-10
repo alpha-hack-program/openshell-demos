@@ -329,10 +329,22 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
     log(&format!("session {session_id}: verdict {verdict:?}"));
 
     let identity = detect_sandbox_identity();
-    let mut attrs = vec![
-        ("session_id", session_id),
-        ("risk_level", verdict.risk_level.as_str()),
-    ];
+    // Deliberately no `session_id` label here (unlike the two heartbeat
+    // metrics) — this gauge represents the sandbox's *current* risk state,
+    // not a historical log entry. Confirmed live: including session_id
+    // makes every turn mint a brand-new, independently-live time series
+    // that Prometheus keeps returning for its whole staleness window
+    // (~5 min) alongside any earlier turn's still-live series for the
+    // same sandbox, so a viewer briefly sees the sandbox flip-flop between
+    // two "current" risk verdicts every refresh tick, with no reliable way
+    // to tell which one is actually latest (Prometheus's own scrape
+    // timestamp doesn't reflect real push order in this cluster's
+    // monitoring stack, confirmed live — `send_timestamps: true` on the
+    // collector's own prometheus exporter didn't help, since the scrape
+    // itself doesn't honor embedded timestamps). Dropping session_id here
+    // means each push overwrites the same (workspace, sandbox) series in
+    // place, so there's only ever one current value, no ambiguity.
+    let mut attrs = vec![("risk_level", verdict.risk_level.as_str())];
     if let Some((workspace, sandbox)) = identity.as_ref() {
         attrs.push(("workspace", workspace.as_str()));
         attrs.push(("sandbox", sandbox.as_str()));

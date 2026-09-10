@@ -309,13 +309,28 @@ time.
 |---|---|---|---|---|
 | `agent_session_started` | `SessionStart` | gauge, always `1` | `session_id`, `agent` (`claude`/`codex`/`unknown`, from which `/etc/claude-code` or `/etc/codex` exists in the image), `workspace`, `sandbox` (both best-effort, see below) | No |
 | `agent_turn_heartbeat` | `UserPromptSubmit` | gauge, always `1` | `session_id`, `agent`, `workspace`, `sandbox` | No |
-| `session_compliance_risk_score` | `Stop` | gauge, `0`-`3` | `session_id`, `risk_level`, `workspace`, `sandbox` | Yes |
+| `session_compliance_risk_score` | `Stop` | gauge, `0`-`3` | `risk_level`, `workspace`, `sandbox` | Yes |
 
 Confirmed live for both agents: `SessionStart`/`UserPromptSubmit` push
 successfully even when `AUDITOR_ANTHROPIC_API_KEY`/`AUDITOR_ANTHROPIC_MODEL`
 are entirely unset or misconfigured — the two are dispatched before any
 `Config::resolve` check, so a missing classification credential never
 blocks the heartbeat.
+
+**`session_compliance_risk_score` deliberately has no `session_id` label,
+unlike the two heartbeat metrics.** It represents the sandbox's *current*
+risk state, not a per-turn log entry — including `session_id` would mint
+a brand-new, independently-live time series on every single turn, and
+Prometheus keeps returning each one for its whole staleness window
+(~5 min) regardless of which is actually more recent. Confirmed live: two
+turns run close together left two simultaneous "current" verdicts for the
+same sandbox, with no reliable way to tell which was truly latest —
+Prometheus's own scrape timestamp doesn't reflect real push order on this
+cluster's monitoring stack (`send_timestamps: true` on the collector's
+`prometheus` exporter didn't help; the scrape itself doesn't honor
+embedded timestamps). Dropping `session_id` means each push overwrites
+the same `(workspace, sandbox)` series in place — exactly one current
+value, no ambiguity.
 
 **`workspace`/`sandbox` are best-effort, not a security control.** Both
 are read from `/etc/hostname`, which on this OpenShell version is set to
