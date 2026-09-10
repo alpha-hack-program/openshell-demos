@@ -42,6 +42,7 @@ function isStale(sandbox, staleSecs, nowUnix) {
 function useGraph() {
   const [graph, setGraph] = useState({
     sandboxes: [],
+    events: [],
     heartbeat_stale_secs: 90,
     generated_at_unix: 0,
   });
@@ -105,6 +106,61 @@ function useHeartbeatPulses(sandboxes) {
   return tokens;
 }
 
+const EVENT_KIND_COLORS = {
+  session_started: "#58a6ff",
+  heartbeat: "#3fb950",
+  risk_verdict: "#f0883e",
+};
+
+const EVENT_KIND_LABELS = {
+  session_started: "session started",
+  heartbeat: "heartbeat",
+  risk_verdict: "risk verdict",
+};
+
+function formatEventTime(unixTime) {
+  return new Date(unixTime * 1000).toLocaleTimeString();
+}
+
+// events arrives newest-first from the backend (see main.rs's refresh_graph)
+// — this panel is a plain feed of the raw signals the graph is built from,
+// not a derived view, so it renders the list as-is.
+function EventsPanel({ events }) {
+  return h(
+    "div",
+    { class: "events-panel" },
+    h("h2", null, "Events"),
+    h("p", { class: "subtitle" }, "Raw signals behind the graph — newest first."),
+    h(
+      "ul",
+      { class: "event-list" },
+      events.length === 0
+        ? h("li", { class: "event-empty" }, "No events observed yet.")
+        : events.map((e, i) =>
+            h(
+              "li",
+              {
+                key: `${e.unix_time}-${e.workspace}-${e.sandbox}-${e.kind}-${i}`,
+                class: "event-item",
+              },
+              h("span", { class: "event-time" }, formatEventTime(e.unix_time)),
+              h("span", {
+                class: "event-dot",
+                style: { background: EVENT_KIND_COLORS[e.kind] || "#8b949e" },
+              }),
+              h(
+                "span",
+                { class: "event-body" },
+                h("strong", null, `${e.workspace}/${e.sandbox}`),
+                ` — ${EVENT_KIND_LABELS[e.kind] || e.kind}`,
+                e.kind === "risk_verdict" ? h(Fragment, null, h("br"), e.detail) : null,
+              ),
+            ),
+          ),
+    ),
+  );
+}
+
 function App() {
   const graph = useGraph();
   const [hover, setHover] = useState(null);
@@ -143,90 +199,99 @@ function App() {
     ),
     h(
       "div",
-      { class: "legend" },
-      h("span", null, h("i", { class: "swatch", style: { background: riskColor(0) } }), "no risk"),
-      h("span", null, h("i", { class: "swatch", style: { background: riskColor(3) } }), "risk detected"),
-      h("span", null, h("i", { class: "swatch", style: { background: "#8b949e", opacity: 0.5 } }), "no recent heartbeat"),
-    ),
-    h(
-      "svg",
-      { viewBox: `0 0 ${width} ${height}` },
-      graph.sandboxes.map((s) =>
-        h("line", {
-          key: `us-${s.sandbox}`,
-          x1: userX + 90,
-          y1: (userY[s.workspace] ?? 0) + 10,
-          x2: sandboxX,
-          y2: sandboxY[s.sandbox] + 10,
-          stroke: "#30363d",
-          "stroke-width": 1.5,
-        }),
-      ),
-      graph.sandboxes.flatMap((s) =>
-        s.mcp_servers.map((m) =>
-          h("line", {
-            key: `sm-${s.sandbox}-${m}`,
-            x1: sandboxX + 200,
-            y1: sandboxY[s.sandbox] + 10,
-            x2: mcpX,
-            y2: (mcpY[m] ?? 0) + 10,
-            stroke: "#30363d",
-            "stroke-width": 1.5,
-          }),
-        ),
-      ),
-      users.map((u) =>
+      { class: "layout" },
+      h(
+        "div",
+        { class: "main" },
         h(
-          Fragment,
-          { key: `u-${u}` },
-          h("circle", { cx: userX + 8, cy: userY[u] + 10, r: 8, fill: "#58a6ff" }),
-          h("text", { x: userX + 24, y: userY[u] + 15, fill: "#e6edf3", "font-size": 13 }, u),
+          "div",
+          { class: "legend" },
+          h("span", null, h("i", { class: "swatch", style: { background: riskColor(0) } }), "no risk"),
+          h("span", null, h("i", { class: "swatch", style: { background: riskColor(3) } }), "risk detected"),
+          h("span", null, h("i", { class: "swatch", style: { background: "#8b949e", opacity: 0.5 } }), "no recent heartbeat"),
         ),
-      ),
-      graph.sandboxes.map((s) => {
-        const stale = isStale(s, graph.heartbeat_stale_secs, nowUnix);
-        const pulseToken = pulses[s.sandbox];
-        return h(
-          Fragment,
-          { key: `s-${s.sandbox}` },
-          pulseToken &&
-            h("circle", {
-              key: `pulse-${s.sandbox}-${pulseToken}`,
-              class: "pulse-ring",
-              cx: sandboxX + 8,
-              cy: sandboxY[s.sandbox] + 10,
-              r: 10,
-              fill: "none",
-              stroke: riskColor(s.risk_score),
-              "stroke-width": 2,
-              style: { animationDuration: `${PULSE_MS}ms` },
+        h(
+          "svg",
+          { viewBox: `0 0 ${width} ${height}` },
+          graph.sandboxes.map((s) =>
+            h("line", {
+              key: `us-${s.sandbox}`,
+              x1: userX + 90,
+              y1: (userY[s.workspace] ?? 0) + 10,
+              x2: sandboxX,
+              y2: sandboxY[s.sandbox] + 10,
+              stroke: "#30363d",
+              "stroke-width": 1.5,
             }),
-          h("circle", {
-            cx: sandboxX + 8,
-            cy: sandboxY[s.sandbox] + 10,
-            r: 10,
-            fill: riskColor(s.risk_score),
-            opacity: stale ? 0.35 : 1,
-            stroke: stale ? "#8b949e" : "#0b0f14",
-            "stroke-width": 2,
-            onMouseEnter: () => setHover(s),
-            onMouseLeave: () => setHover((h) => (h === s ? null : h)),
-          }),
-          h(
-            "text",
-            { x: sandboxX + 26, y: sandboxY[s.sandbox] + 15, fill: "#e6edf3", "font-size": 13 },
-            `${s.sandbox} (${s.agent || "?"})${stale ? " — offline" : ""}`,
           ),
-        );
-      }),
-      mcpServers.map((m) =>
-        h(
-          Fragment,
-          { key: `m-${m}` },
-          h("circle", { cx: mcpX + 8, cy: mcpY[m] + 10, r: 8, fill: "#8957e5" }),
-          h("text", { x: mcpX + 24, y: mcpY[m] + 15, fill: "#e6edf3", "font-size": 13 }, m),
+          graph.sandboxes.flatMap((s) =>
+            s.mcp_servers.map((m) =>
+              h("line", {
+                key: `sm-${s.sandbox}-${m}`,
+                x1: sandboxX + 200,
+                y1: sandboxY[s.sandbox] + 10,
+                x2: mcpX,
+                y2: (mcpY[m] ?? 0) + 10,
+                stroke: "#30363d",
+                "stroke-width": 1.5,
+              }),
+            ),
+          ),
+          users.map((u) =>
+            h(
+              Fragment,
+              { key: `u-${u}` },
+              h("circle", { cx: userX + 8, cy: userY[u] + 10, r: 8, fill: "#58a6ff" }),
+              h("text", { x: userX + 24, y: userY[u] + 15, fill: "#e6edf3", "font-size": 13 }, u),
+            ),
+          ),
+          graph.sandboxes.map((s) => {
+            const stale = isStale(s, graph.heartbeat_stale_secs, nowUnix);
+            const pulseToken = pulses[s.sandbox];
+            return h(
+              Fragment,
+              { key: `s-${s.sandbox}` },
+              pulseToken &&
+                h("circle", {
+                  key: `pulse-${s.sandbox}-${pulseToken}`,
+                  class: "pulse-ring",
+                  cx: sandboxX + 8,
+                  cy: sandboxY[s.sandbox] + 10,
+                  r: 10,
+                  fill: "none",
+                  stroke: riskColor(s.risk_score),
+                  "stroke-width": 2,
+                  style: { animationDuration: `${PULSE_MS}ms` },
+                }),
+              h("circle", {
+                cx: sandboxX + 8,
+                cy: sandboxY[s.sandbox] + 10,
+                r: 10,
+                fill: riskColor(s.risk_score),
+                opacity: stale ? 0.35 : 1,
+                stroke: stale ? "#8b949e" : "#0b0f14",
+                "stroke-width": 2,
+                onMouseEnter: () => setHover(s),
+                onMouseLeave: () => setHover((h) => (h === s ? null : h)),
+              }),
+              h(
+                "text",
+                { x: sandboxX + 26, y: sandboxY[s.sandbox] + 15, fill: "#e6edf3", "font-size": 13 },
+                `${s.sandbox} (${s.agent || "?"})${stale ? " — offline" : ""}`,
+              ),
+            );
+          }),
+          mcpServers.map((m) =>
+            h(
+              Fragment,
+              { key: `m-${m}` },
+              h("circle", { cx: mcpX + 8, cy: mcpY[m] + 10, r: 8, fill: "#8957e5" }),
+              h("text", { x: mcpX + 24, y: mcpY[m] + 15, fill: "#e6edf3", "font-size": 13 }, m),
+            ),
+          ),
         ),
       ),
+      h(EventsPanel, { events: graph.events }),
     ),
     hover &&
       h(

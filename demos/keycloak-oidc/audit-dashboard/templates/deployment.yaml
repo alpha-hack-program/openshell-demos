@@ -37,6 +37,8 @@ spec:
               value: {{ .Values.refreshIntervalSecs | quote }}
             - name: HEARTBEAT_STALE_SECS
               value: {{ .Values.heartbeatStaleSecs | quote }}
+            - name: MAX_EVENTS
+              value: {{ .Values.maxEvents | quote }}
             {{- if .Values.persistence.enabled }}
             - name: STATE_FILE_PATH
               value: /data/graph-state.json

@@ -20,6 +20,7 @@ prometheus:
 
 refreshIntervalSecs: 5
 heartbeatStaleSecs: 90
+maxEvents: 50
 
 # A sandbox/MCP-server node is never removed from the graph once observed
 # (see util/audit-dashboard/src/main.rs's refresh_graph) — it only ever

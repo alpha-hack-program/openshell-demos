@@ -58,6 +58,13 @@ struct Config {
     #[arg(long, env = "STATE_FILE_PATH")]
     state_file: Option<String>,
 
+    /// How many of the most recent events (session started / heartbeat /
+    /// risk verdict) to keep and serve — the raw feed the events panel
+    /// renders newest-first, capped so it can't grow unbounded over a
+    /// long-lived pod.
+    #[arg(long, env = "MAX_EVENTS", default_value_t = 50)]
+    max_events: usize,
+
     #[arg(long, env = "PORT", default_value_t = 8080)]
     port: u16,
 }
@@ -73,17 +80,49 @@ struct SandboxNode {
     mcp_servers: Vec<String>,
 }
 
+/// One raw signal that fed into the graph — the events panel's whole
+/// reason to exist is to show *why* the graph looks the way it does,
+/// distinct from the graph's own steady-state view. Kept as a bounded,
+/// newest-first log rather than derived on demand, since the underlying
+/// Prometheus samples this is built from don't carry their own history —
+/// an instant query only ever answers "what's true right now."
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct Event {
+    unix_time: i64,
+    workspace: String,
+    sandbox: String,
+    agent: String,
+    kind: String,
+    detail: String,
+}
+
 #[derive(Clone, Serialize, Default)]
 struct Graph {
     generated_at_unix: i64,
     heartbeat_stale_secs: u64,
     sandboxes: Vec<SandboxNode>,
+    events: Vec<Event>,
+}
+
+/// What `persist_state`/`load_state` read and write — a plain
+/// `Vec<SandboxNode>` was the on-disk shape before events existed;
+/// `load_state` still accepts that old shape (see its own doc comment).
+#[derive(Serialize, Deserialize, Default)]
+struct PersistedState {
+    sandboxes: Vec<SandboxNode>,
+    events: Vec<Event>,
 }
 
 struct AppState {
     config: Config,
     http: reqwest::Client,
     graph: RwLock<Graph>,
+    // Per (workspace, sandbox, metric) last-seen timestamp already turned
+    // into an event — an instant query keeps re-returning the same sample
+    // every tick until a genuinely new one lands, and without this a
+    // still-current sample would otherwise get logged as a fresh event on
+    // every single refresh.
+    dedupe: RwLock<HashMap<(String, String, &'static str), i64>>,
 }
 
 #[derive(Deserialize)]
@@ -115,21 +154,44 @@ async fn main() {
     let port = config.port;
     let http = build_http_client();
 
-    let initial_sandboxes = config
+    let initial_state = config
         .state_file
         .as_deref()
         .map(load_state)
         .unwrap_or_default();
+
+    // Seed dedupe from the loaded sandboxes' last-known timestamp for both
+    // heartbeat metrics — a conservative approximation (we don't persist
+    // which of the two metrics actually produced last_seen_unix), but it's
+    // the safe direction to err in: skipping one legitimate event right
+    // after a restart beats replaying a burst of "new" events for samples
+    // that haven't actually advanced since before the restart.
+    let mut dedupe = HashMap::new();
+    for s in &initial_state.sandboxes {
+        if let Some(ts) = s.last_seen_unix {
+            dedupe.insert(
+                (s.workspace.clone(), s.sandbox.clone(), "session_started"),
+                ts,
+            );
+            dedupe.insert(
+                (s.workspace.clone(), s.sandbox.clone(), "turn_heartbeat"),
+                ts,
+            );
+        }
+    }
+
     let initial_graph = Graph {
         generated_at_unix: now_unix(),
         heartbeat_stale_secs: config.heartbeat_stale_secs,
-        sandboxes: initial_sandboxes,
+        sandboxes: initial_state.sandboxes,
+        events: initial_state.events,
     };
 
     let state = Arc::new(AppState {
         config,
         http,
         graph: RwLock::new(initial_graph),
+        dedupe: RwLock::new(dedupe),
     });
 
     let refresh_state = state.clone();
@@ -296,29 +358,62 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
             .collect()
     };
 
-    for sample in session_started.iter().chain(turn_heartbeat.iter()) {
-        let (Some(workspace), Some(sandbox)) =
-            (sample.metric.get("workspace"), sample.metric.get("sandbox"))
-        else {
-            continue;
-        };
-        let agent = sample.metric.get("agent").cloned().unwrap_or_default();
-        let Ok(ts) = sample.value.1.parse::<f64>() else {
-            continue;
-        };
-        let ts = ts as i64;
+    let mut new_events: Vec<Event> = Vec::new();
 
-        let entry = nodes
-            .entry((workspace.clone(), sandbox.clone()))
-            .or_insert_with(|| SandboxNode {
-                workspace: workspace.clone(),
-                sandbox: sandbox.clone(),
-                ..Default::default()
-            });
-        if entry.agent.is_empty() {
-            entry.agent = agent;
+    for (samples, metric, kind, label) in [
+        (
+            &session_started,
+            "session_started",
+            "session_started",
+            "session started",
+        ),
+        (&turn_heartbeat, "turn_heartbeat", "heartbeat", "heartbeat"),
+    ] {
+        for sample in samples {
+            let (Some(workspace), Some(sandbox)) =
+                (sample.metric.get("workspace"), sample.metric.get("sandbox"))
+            else {
+                continue;
+            };
+            let agent = sample.metric.get("agent").cloned().unwrap_or_default();
+            let Ok(ts) = sample.value.1.parse::<f64>() else {
+                continue;
+            };
+            let ts = ts as i64;
+
+            let is_new = {
+                let mut dedupe = state.dedupe.write().await;
+                let key = (workspace.clone(), sandbox.clone(), metric);
+                let already_seen = dedupe.get(&key).is_some_and(|prev| ts <= *prev);
+                if !already_seen {
+                    dedupe.insert(key, ts);
+                }
+                !already_seen
+            };
+
+            let entry = nodes
+                .entry((workspace.clone(), sandbox.clone()))
+                .or_insert_with(|| SandboxNode {
+                    workspace: workspace.clone(),
+                    sandbox: sandbox.clone(),
+                    ..Default::default()
+                });
+            if entry.agent.is_empty() {
+                entry.agent = agent.clone();
+            }
+            entry.last_seen_unix = Some(entry.last_seen_unix.map_or(ts, |prev| prev.max(ts)));
+
+            if is_new {
+                new_events.push(Event {
+                    unix_time: ts,
+                    workspace: workspace.clone(),
+                    sandbox: sandbox.clone(),
+                    agent,
+                    kind: kind.to_string(),
+                    detail: label.to_string(),
+                });
+            }
         }
-        entry.last_seen_unix = Some(entry.last_seen_unix.map_or(ts, |prev| prev.max(ts)));
     }
 
     for sample in &risk {
@@ -334,8 +429,12 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                 sandbox: sandbox.clone(),
                 ..Default::default()
             });
-        entry.risk_score = sample.value.1.parse::<f64>().ok();
-        entry.risk_level = sample.metric.get("risk_level").cloned();
+        let new_score = sample.value.1.parse::<f64>().ok();
+        let new_level = sample.metric.get("risk_level").cloned();
+        let changed = new_score != entry.risk_score || new_level != entry.risk_level;
+
+        entry.risk_score = new_score;
+        entry.risk_level = new_level.clone();
         entry.mcp_servers = sample
             .metric
             .get("mcp_servers")
@@ -346,6 +445,21 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                     .collect()
             })
             .unwrap_or_default();
+
+        if changed {
+            new_events.push(Event {
+                unix_time: now_unix(),
+                workspace: workspace.clone(),
+                sandbox: sandbox.clone(),
+                agent: entry.agent.clone(),
+                kind: "risk_verdict".to_string(),
+                detail: format!(
+                    "{} (score {})",
+                    new_level.as_deref().unwrap_or("none"),
+                    new_score.unwrap_or(0.0)
+                ),
+            });
+        }
     }
 
     let mut sandboxes: Vec<SandboxNode> = nodes.into_values().collect();
@@ -353,43 +467,74 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         (a.workspace.as_str(), a.sandbox.as_str()).cmp(&(b.workspace.as_str(), b.sandbox.as_str()))
     });
 
+    // Newest first, capped at max_events — new_events from this tick are
+    // themselves in roughly chronological order (session started before a
+    // heartbeat before a risk verdict), so prepending the whole batch
+    // preserves that ordering relative to what's already there.
+    let events = {
+        let mut events = state.graph.read().await.events.clone();
+        // Insert in chronological order so the last one pushed (assumed
+        // most recent — risk verdict, after heartbeat, after session
+        // started) ends up frontmost, ahead of what's already there.
+        for event in new_events {
+            events.insert(0, event);
+        }
+        events.truncate(state.config.max_events);
+        events
+    };
+
     let graph = Graph {
         generated_at_unix: now_unix(),
         heartbeat_stale_secs: state.config.heartbeat_stale_secs,
         sandboxes,
+        events,
     };
     if let Some(path) = &state.config.state_file {
-        persist_state(path, &graph.sandboxes);
+        persist_state(path, &graph.sandboxes, &graph.events);
     }
     *state.graph.write().await = graph;
     Ok(())
 }
 
-/// Reads a previously `persist_state`d sandbox list. Missing file (first
-/// boot, or no PVC configured) and unparseable contents both just come
-/// back empty — this is a warm-start optimization, never a hard
-/// dependency, so any failure here should degrade to "start from scratch,"
-/// not crash the process.
-fn load_state(path: &str) -> Vec<SandboxNode> {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|e| {
-            eprintln!("audit-dashboard: ignoring unreadable state file {path}: {e}");
-            Vec::new()
-        }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+/// Reads a previously `persist_state`d snapshot. Missing file (first boot,
+/// or no PVC configured) and unparseable contents both just come back
+/// empty — this is a warm-start optimization, never a hard dependency, so
+/// any failure here should degrade to "start from scratch," not crash the
+/// process. Also accepts the older on-disk shape (a bare sandbox array,
+/// from before the events log existed) so an existing PVC doesn't get
+/// silently wiped by an upgrade.
+fn load_state(path: &str) -> PersistedState {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return PersistedState::default(),
         Err(e) => {
             eprintln!("audit-dashboard: failed to read state file {path}: {e}");
-            Vec::new()
+            return PersistedState::default();
         }
+    };
+    if let Ok(state) = serde_json::from_str::<PersistedState>(&raw) {
+        return state;
     }
+    if let Ok(sandboxes) = serde_json::from_str::<Vec<SandboxNode>>(&raw) {
+        return PersistedState {
+            sandboxes,
+            events: Vec::new(),
+        };
+    }
+    eprintln!("audit-dashboard: ignoring unreadable state file {path}");
+    PersistedState::default()
 }
 
 /// Writes via a `.tmp` + rename so a crash or concurrent read mid-write
 /// never leaves a truncated/corrupt state file behind — `load_state`
 /// reading garbage on the next boot would silently drop every sandbox
 /// this dashboard has ever seen.
-fn persist_state(path: &str, sandboxes: &[SandboxNode]) {
-    let body = match serde_json::to_vec(sandboxes) {
+fn persist_state(path: &str, sandboxes: &[SandboxNode], events: &[Event]) {
+    let state = PersistedState {
+        sandboxes: sandboxes.to_vec(),
+        events: events.to_vec(),
+    };
+    let body = match serde_json::to_vec(&state) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("audit-dashboard: failed to serialize state: {e}");

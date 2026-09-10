@@ -71,6 +71,7 @@ against a current `util/audit-dashboard` checkout and redeploy.
 | `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
 | `refreshIntervalSecs` | `5` | How often the backend re-polls Prometheus. |
 | `heartbeatStaleSecs` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
+| `maxEvents` | `50` | How many of the most recent events the right-hand events panel keeps and serves. |
 | `persistence.enabled` | `true` | Mounts a PVC at `/data` and sets `STATE_FILE_PATH` so the graph survives a pod restart instead of starting empty. |
 | `persistence.size` | `256Mi` | PVC size — this is a small JSON file of sandbox metadata, not audit log storage. |
 | `persistence.storageClassName` | `""` | Optional; leave empty to use the cluster default `StorageClass`. |

@@ -88,6 +88,16 @@ speculatively.
   `session_compliance_risk_score` (comma-joined server short-names).
   A sandbox that has never completed a `Stop` hook (e.g. no classification credential
   configured) shows no MCP edges yet, even if it's live.
+- **The events panel** (right side) is a plain, newest-first feed of the
+  raw signals the graph above is built from — `session_started`,
+  `heartbeat`, and `risk_verdict` — capped at `maxEvents` (default `50`).
+  It exists to show *why* the graph looks the way it does, not to add new
+  information: each entry is exactly one Prometheus sample the backend
+  noticed had genuinely advanced since the previous poll (see
+  `refresh_graph`'s dedupe logic in `src/main.rs`) — a still-current
+  sample that Thanos keeps re-returning unchanged does not spawn a new
+  entry every 5s. Persisted alongside the sandbox list when
+  `STATE_FILE_PATH` is set.
 
 ## Configuration
 
@@ -98,6 +108,7 @@ speculatively.
 | `REFRESH_INTERVAL_SECS` | `5` | How often to re-poll and merge new samples into the graph. |
 | `HEARTBEAT_STALE_SECS` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
 | `STATE_FILE_PATH` | *(unset)* | Optional path (typically a mounted PVC) to persist the sandbox list to after every refresh and reload at startup. In-memory-only if unset. |
+| `MAX_EVENTS` | `50` | How many of the most recent events (session started / heartbeat / risk verdict) the events panel keeps and serves. |
 | `PORT` | `8080` | HTTP port the service listens on. |
 
 ## Development
