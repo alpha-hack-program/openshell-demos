@@ -1,10 +1,12 @@
 # audit-dashboard
 
 Deploys [`util/audit-dashboard`](../../../util/audit-dashboard/) — a live
-`user → sandbox → MCP server` graph, colored by
-[`session-auditor`](../../../util/session-auditor/)'s risk/heartbeat
-metrics, queried directly from
-`openshift-user-workload-monitoring`'s Thanos-querier. See
+`user → sandbox → MCP server` graph. Risk/heartbeat coloring comes from
+[`session-auditor`](../../../util/session-auditor/)'s metrics, queried
+directly from `openshift-user-workload-monitoring`'s Thanos-querier; the
+sandbox→MCP-server edges come from Claude Code's/Codex's own native OTel
+tracing, queried directly from
+[`../audit-tempo/`](../audit-tempo/). See
 [`util/audit-dashboard/README.md`](../../../util/audit-dashboard/README.md)
 for the full design, and
 [`../docs/prometheus-scraping.md`](../docs/prometheus-scraping.md) for the
@@ -14,6 +16,9 @@ metrics this reads.
 
 - [`../audit-collector/`](../audit-collector/) already deployed (this
   chart reads what that one collects — deploy it first).
+- [`../audit-tempo/`](../audit-tempo/) already deployed — this chart
+  queries its `tempo-audit` Service directly for the MCP-server graph
+  edges.
 - At least one sandbox provisioned via
   `../scripts/16-provision-audited-sandbox.sh` and pushing metrics, or the
   graph will simply be empty (not an error — see "Verifying it works").
@@ -69,6 +74,7 @@ against a current `util/audit-dashboard` checkout and redeploy.
 | `image.{repository,tag}` | `quay.io/atarazana/audit-dashboard:0.1.0` | Image to deploy. |
 | `route.host` | `""` | Optional fixed hostname; leave empty for an OpenShift-auto-generated one. |
 | `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
+| `tempo.url` | `http://tempo-audit:3200` | In-cluster Tempo base URL (plain HTTP, no auth) — the sandbox→MCP-server graph edges are queried from here directly. |
 | `refreshIntervalSecs` | `5` | How often the backend re-polls Prometheus. |
 | `heartbeatStaleSecs` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
 | `maxEvents` | `50` | How many of the most recent events the right-hand events panel keeps and serves. |
@@ -80,10 +86,9 @@ Confirmed live end to end (2026-09-08, sandbox268): after a benign turn
 in an audited sandbox, its node showed `risk_level: none`; after
 repeating [Scene 4a](../README.md#scene-4a--bob-overreaches)'s forcing
 prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
-(`score: 2`) with `mcp_servers` correctly attributed — visible both via
-`GET /api/graph` and through the real HTTPS Route. **Dated**: describes
-behavior before `util/session-auditor` stopped pushing `mcp_servers` (see
-"Known limitations" below).
+(`score: 2`). `mcp_servers` attribution has since moved from a
+`session-auditor`-pushed metric label to direct TraceQL queries against
+Tempo (see "Known limitations" below).
 
 ## Known limitations
 
@@ -101,11 +106,16 @@ behavior before `util/session-auditor` stopped pushing `mcp_servers` (see
   dims once its heartbeat goes stale (`heartbeatStaleSecs`). This is a
   live liveness/risk view sourced from `session-auditor`, not a
   historical audit log — it just no longer forgets who it's ever seen.
-- **No more MCP-server edges.** `util/session-auditor` no longer pushes an
-  `mcp_servers` label (that reconstruction is superseded by native OTel
-  tracing — see `demos/keycloak-oidc/docs`), so this dashboard's graph
-  stops drawing sandbox→MCP-server edges for any new activity. Nodes
-  observed before this change may still show stale edges in a
-  PVC-persisted graph until the state file is cleared — this is a known,
-  accepted regression, not a bug; consuming the new trace data here
-  instead is separate, not-yet-started follow-up work.
+- **MCP-server edges now come from Tempo, not session-auditor.**
+  `util/session-auditor` no longer pushes an `mcp_servers` label (that
+  reconstruction is superseded by native OTel tracing — see
+  `demos/keycloak-oidc/docs`); this dashboard now queries
+  [`../audit-tempo/`](../audit-tempo/) directly via TraceQL for the same
+  data, with real per-call attribution instead of a transcript-parsed
+  heuristic. Edges accumulate forever once observed, same as sandbox nodes
+  themselves — this matters because `audit-tempo`'s own storage is
+  ephemeral (`storage.traces.backend: memory`, short retention), so an
+  edge only needs to be caught by *one* refresh tick to be remembered
+  permanently in this dashboard's own (optionally PVC-persisted) state.
+  Tempo query failures are logged and skipped, not fatal — a Tempo hiccup
+  doesn't block risk/heartbeat updates.

@@ -11,8 +11,11 @@ use tower_http::services::ServeDir;
 
 /// Queries openshift-user-workload-monitoring's Thanos-querier from inside
 /// the cluster (via this pod's own ServiceAccount token) for the three
-/// metrics util/session-auditor pushes, and serves a small JSON snapshot
-/// plus a static Preact frontend that polls it. See
+/// metrics util/session-auditor pushes, and separately queries the
+/// demo-owned Tempo instance directly (plain HTTP, no auth) for the
+/// sandbox->MCP-server call graph — Claude Code's/Codex's own native OTel
+/// tracing, not anything session-auditor pushes — then serves a small JSON
+/// snapshot plus a static Preact frontend that polls it. See
 /// demos/keycloak-oidc/docs/prometheus-scraping.md for the metrics this
 /// reads, and this crate's own README for the RBAC this needs
 /// (`[VERIFY]` against a live cluster — no prior confirmed pattern for a
@@ -38,6 +41,14 @@ struct Config {
         default_value = "https://thanos-querier.openshift-monitoring.svc:9091"
     )]
     thanos_url: String,
+
+    /// In-cluster Tempo base URL — the demo-owned instance
+    /// demos/keycloak-oidc/audit-tempo deploys. Plain HTTP, no auth
+    /// (matches that chart's own documented "no auth on ingest/query"
+    /// limitation), unlike Thanos-querier — no ServiceAccount token or CA
+    /// trust needed for these requests.
+    #[arg(long, env = "TEMPO_URL", default_value = "http://tempo-audit:3200")]
+    tempo_url: String,
 
     /// How often to re-poll Thanos-querier and rebuild the in-memory graph.
     #[arg(long, env = "REFRESH_INTERVAL_SECS", default_value_t = 5)]
@@ -146,6 +157,55 @@ struct PromSample {
     // own timestamp (in seconds) — either way, the number we actually
     // want is always the second element.
     value: (f64, String),
+}
+
+/// Tempo's `/api/search` response shape — confirmed live against a real
+/// TraceQL query, not assumed. Only `traces[].spanSet.spans[].attributes`
+/// is used: Tempo already flattens both resource attributes (workspace,
+/// sandbox) and the matched span attribute (tool_name/server_name) into
+/// one list per matched span, so a single search call is enough — no
+/// per-trace follow-up fetch needed.
+#[derive(Deserialize)]
+struct TempoSearchResponse {
+    #[serde(default)]
+    traces: Vec<TempoTraceMatch>,
+}
+
+#[derive(Deserialize)]
+struct TempoTraceMatch {
+    #[serde(rename = "spanSet")]
+    span_set: Option<TempoSpanSet>,
+}
+
+#[derive(Deserialize)]
+struct TempoSpanSet {
+    #[serde(default)]
+    spans: Vec<TempoSpan>,
+}
+
+#[derive(Deserialize)]
+struct TempoSpan {
+    #[serde(default)]
+    attributes: Vec<TempoAttribute>,
+}
+
+#[derive(Deserialize)]
+struct TempoAttribute {
+    key: String,
+    value: TempoAttributeValue,
+}
+
+#[derive(Deserialize)]
+struct TempoAttributeValue {
+    #[serde(rename = "stringValue")]
+    string_value: Option<String>,
+}
+
+fn tempo_attrs_to_map(attrs: &[TempoAttribute]) -> HashMap<String, String> {
+    attrs
+        .iter()
+        .filter_map(|a| a.value.string_value.clone().map(|v| (a.key.clone(), v)))
+        .collect()
 }
 
 #[tokio::main]
@@ -308,9 +368,65 @@ async fn query_instant(
     Ok(body.data.map(|d| d.result).unwrap_or_default())
 }
 
-/// Re-runs three PromQL queries every tick and merges the results into the
-/// existing graph rather than replacing it — a sandbox (and its MCP-server
-/// edges) is added the first time it's observed and then never removed,
+/// Plain HTTP, no auth, no CA trust needed — see `Config::tempo_url`'s own
+/// doc comment. Returns one attribute map per matched span (workspace,
+/// sandbox, tool_name/server_name — whatever the query selector touched),
+/// already flattened by Tempo itself.
+async fn query_tempo_search(
+    http: &reqwest::Client,
+    base: &str,
+    traceql: &str,
+    limit: usize,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    let limit_str = limit.to_string();
+    let resp = http
+        .get(format!("{base}/api/search"))
+        .query(&[("q", traceql), ("limit", limit_str.as_str())])
+        .send()
+        .await
+        .map_err(|e| {
+            let mut msg = format!("request to tempo failed: {e}");
+            let mut source = std::error::Error::source(&e);
+            while let Some(s) = source {
+                msg.push_str(&format!(" -- caused by: {s}"));
+                source = s.source();
+            }
+            msg
+        })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("tempo search returned {status}: {body}"));
+    }
+
+    let body: TempoSearchResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("invalid JSON from tempo: {e}"))?;
+
+    Ok(body
+        .traces
+        .into_iter()
+        .filter_map(|t| t.span_set)
+        .flat_map(|s| s.spans)
+        .map(|span| tempo_attrs_to_map(&span.attributes))
+        .collect())
+}
+
+/// Claude Code's confirmed MCP tool-name convention: a tool call on server
+/// `<key>` shows up as `mcp__<key>__<tool>`, e.g.
+/// `mcp__portfolio__list_my_clients`.
+fn mcp_server_from_claude_tool_name(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("mcp__")?;
+    let (server, _tool) = rest.split_once("__")?;
+    (!server.is_empty()).then(|| server.to_string())
+}
+
+/// Re-runs three PromQL queries and two TraceQL searches every tick and
+/// merges the results into the existing graph rather than replacing it —
+/// a sandbox (and its MCP-server edges) is added the first time it's
+/// observed and then never removed,
 /// even once Prometheus's own instant-query lookback window (or the
 /// `HEARTBEAT_STALE_SECS` dimming threshold) passes and it stops showing
 /// up in query results. Liveness is conveyed entirely by the frontend
@@ -344,6 +460,38 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         &format!(r#"session_compliance_risk_score{{namespace="{ns}"}}"#),
     )
     .await?;
+
+    // Best-effort, not `?` — unlike the three Prometheus queries above, a
+    // Tempo hiccup shouldn't take down risk/heartbeat updates too. Two
+    // separate TraceQL queries rather than one combined expression, same
+    // reasoning as running 3 separate PromQL queries instead of one: each
+    // agent's MCP-call signal shows up under a different attribute name
+    // (see the merge loop below), so keeping them separate avoids relying
+    // on unverified OR-query behavior on this Tempo version.
+    const TEMPO_SEARCH_LIMIT: usize = 50;
+    let tempo_base = state.config.tempo_url.trim_end_matches('/');
+    let claude_mcp_calls = query_tempo_search(
+        &state.http,
+        tempo_base,
+        r#"{span.tool_name=~"mcp__.*"}"#,
+        TEMPO_SEARCH_LIMIT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("audit-dashboard: tempo query (claude tool_name) failed: {e}");
+        Vec::new()
+    });
+    let codex_mcp_calls = query_tempo_search(
+        &state.http,
+        tempo_base,
+        r#"{span.server_name!=""}"#,
+        TEMPO_SEARCH_LIMIT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("audit-dashboard: tempo query (codex server_name) failed: {e}");
+        Vec::new()
+    });
 
     // Seed from the current graph, not empty — see this fn's doc comment.
     // Only fields touched below (by a sample that actually arrived this
@@ -435,16 +583,6 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
 
         entry.risk_score = new_score;
         entry.risk_level = new_level.clone();
-        entry.mcp_servers = sample
-            .metric
-            .get("mcp_servers")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
 
         if changed {
             new_events.push(Event {
@@ -459,6 +597,52 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                     new_score.unwrap_or(0.0)
                 ),
             });
+        }
+    }
+
+    // `entry.mcp_servers.contains(&server)` is the "have I ever seen this
+    // edge" check — sufficient on its own since `nodes` was seeded from
+    // the current persisted graph above, unlike the heartbeat dedupe
+    // (which needs a timestamp because the same Prometheus sample keeps
+    // re-appearing every tick). Once added, never removed — same
+    // accumulate-forever philosophy as the sandboxes themselves, since
+    // Tempo's own ephemeral storage won't keep returning old spans forever.
+    for (kind, span_attrs_list) in [("claude", &claude_mcp_calls), ("codex", &codex_mcp_calls)] {
+        for attrs in span_attrs_list {
+            let (Some(workspace), Some(sandbox)) = (attrs.get("workspace"), attrs.get("sandbox"))
+            else {
+                continue;
+            };
+            let server = match kind {
+                "claude" => attrs
+                    .get("tool_name")
+                    .and_then(|t| mcp_server_from_claude_tool_name(t)),
+                _ => attrs
+                    .get("server_name")
+                    .map(|s| s.strip_prefix("mcp-").unwrap_or(s).to_string()),
+            };
+            let Some(server) = server else { continue };
+
+            let entry = nodes
+                .entry((workspace.clone(), sandbox.clone()))
+                .or_insert_with(|| SandboxNode {
+                    workspace: workspace.clone(),
+                    sandbox: sandbox.clone(),
+                    ..Default::default()
+                });
+
+            if !entry.mcp_servers.contains(&server) {
+                entry.mcp_servers.push(server.clone());
+                entry.mcp_servers.sort();
+                new_events.push(Event {
+                    unix_time: now_unix(),
+                    workspace: workspace.clone(),
+                    sandbox: sandbox.clone(),
+                    agent: entry.agent.clone(),
+                    kind: "mcp_call".to_string(),
+                    detail: format!("called {server}"),
+                });
+            }
         }
     }
 

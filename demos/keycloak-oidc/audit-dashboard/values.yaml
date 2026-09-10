@@ -18,6 +18,12 @@ route:
 prometheus:
   thanosQuerierUrl: https://thanos-querier.openshift-monitoring.svc:9091
 
+# demos/keycloak-oidc/audit-tempo's own Service — plain in-namespace HTTP,
+# no auth, no CA trust needed (unlike Thanos-querier above). Must already
+# be deployed; see audit-tempo/README.md.
+tempo:
+  url: http://tempo-audit:3200
+
 refreshIntervalSecs: 5
 heartbeatStaleSecs: 90
 maxEvents: 50

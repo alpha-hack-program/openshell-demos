@@ -33,6 +33,8 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: THANOS_QUERIER_URL
               value: {{ .Values.prometheus.thanosQuerierUrl | quote }}
+            - name: TEMPO_URL
+              value: {{ .Values.tempo.url | quote }}
             - name: REFRESH_INTERVAL_SECS
               value: {{ .Values.refreshIntervalSecs | quote }}
             - name: HEARTBEAT_STALE_SECS

@@ -170,7 +170,10 @@ without `session-auditor` reconstructing anything from a transcript. See
 [`demos/keycloak-oidc/audit-collector/`](../audit-collector/) for how
 those traces are collected, and
 [`util/session-auditor/README.md`](../../../util/session-auditor/README.md#metrics-pushed)
-for the removal.
+for the removal. `audit-dashboard` now queries `audit-tempo` directly via
+TraceQL for the sandbox→MCP-server graph edges, alongside (not instead of)
+the Prometheus queries above for risk/heartbeat coloring — see
+[`../audit-dashboard/README.md`](../audit-dashboard/README.md).
 
 `workspace`/`sandbox` are best-effort attribution, not a security
 control — see
