@@ -329,22 +329,27 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
     log(&format!("session {session_id}: verdict {verdict:?}"));
 
     let identity = detect_sandbox_identity();
-    // Deliberately no `session_id` label here (unlike the two heartbeat
-    // metrics) — this gauge represents the sandbox's *current* risk state,
-    // not a historical log entry. Confirmed live: including session_id
-    // makes every turn mint a brand-new, independently-live time series
-    // that Prometheus keeps returning for its whole staleness window
-    // (~5 min) alongside any earlier turn's still-live series for the
-    // same sandbox, so a viewer briefly sees the sandbox flip-flop between
-    // two "current" risk verdicts every refresh tick, with no reliable way
-    // to tell which one is actually latest (Prometheus's own scrape
-    // timestamp doesn't reflect real push order in this cluster's
+    // Deliberately no `session_id` *or* `risk_level` label here (unlike
+    // the two heartbeat metrics, which do carry session_id) — this gauge
+    // represents the sandbox's *current* risk state, not a historical log
+    // entry, so its only labels are the sandbox's static identity.
+    // Confirmed live, the hard way: putting either a per-turn ID or the
+    // classification result itself in the labels makes every turn (or
+    // every *change* in verdict) mint a brand-new, independently-live
+    // time series — Prometheus keeps returning each one for its whole
+    // staleness window (~5 min) alongside any earlier turn's still-live
+    // series for the same sandbox, so a viewer sees the sandbox flip-flop
+    // between two simultaneous "current" verdicts every refresh tick, with
+    // no reliable way to tell which is actually latest (Prometheus's own
+    // scrape timestamp doesn't reflect real push order on this cluster's
     // monitoring stack, confirmed live — `send_timestamps: true` on the
     // collector's own prometheus exporter didn't help, since the scrape
-    // itself doesn't honor embedded timestamps). Dropping session_id here
-    // means each push overwrites the same (workspace, sandbox) series in
-    // place, so there's only ever one current value, no ambiguity.
-    let mut attrs = vec![("risk_level", verdict.risk_level.as_str())];
+    // itself doesn't honor embedded timestamps). `risk_level` itself is
+    // redundant anyway: `demos/keycloak-oidc/audit-dashboard` derives it
+    // from `score` via the fixed mapping already baked into `prompt.txt`
+    // (none=0, self_refused=1, blocked_attempt=2, complied_or_fabricated=3),
+    // so there's no information lost by pushing only the number.
+    let mut attrs = vec![];
     if let Some((workspace, sandbox)) = identity.as_ref() {
         attrs.push(("workspace", workspace.as_str()));
         attrs.push(("sandbox", sandbox.as_str()));

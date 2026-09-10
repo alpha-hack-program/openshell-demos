@@ -156,7 +156,7 @@ audit-dashboard (Thanos-querier, own ServiceAccount) → live risk/heartbeat gra
 ```
 agent_session_started{session_id="...", agent="claude"|"codex", workspace="...", sandbox="..."}   # gauge, always 1, from SessionStart
 agent_turn_heartbeat{session_id="...", agent="claude"|"codex", workspace="...", sandbox="..."}    # gauge, always 1, from UserPromptSubmit
-session_compliance_risk_score{session_id="...", risk_level="...", workspace="...", sandbox="..."} # gauge, 0-3, from Stop
+session_compliance_risk_score{workspace="...", sandbox="..."} # gauge, 0-3, from Stop -- no session_id/risk_level labels, see below
 ```
 
 **No more `mcp_servers` attribute.** Earlier versions of this metric
@@ -174,6 +174,21 @@ for the removal. `audit-dashboard` now queries `audit-tempo` directly via
 TraceQL for the sandbox→MCP-server graph edges, alongside (not instead of)
 the Prometheus queries above for risk/heartbeat coloring — see
 [`../audit-dashboard/README.md`](../audit-dashboard/README.md).
+
+**No more `session_id`/`risk_level` labels on `session_compliance_risk_score`
+either.** Confirmed live: labeling a gauge by a per-turn `session_id` (or
+by the volatile `risk_level` value itself) mints a brand-new,
+independently-live time series on every turn — Prometheus keeps returning
+each one for its whole staleness window (~5 min), so two turns close
+together left two simultaneous "current" verdicts for the same sandbox
+with no reliable way to tell which was actually latest (this cluster's
+monitoring stack doesn't honor embedded sample timestamps on scrape, so
+that avenue didn't help either — see
+[`util/session-auditor/README.md`](../../../util/session-auditor/README.md#metrics-pushed)
+for the full story). Now only `workspace`/`sandbox` are labels, so each
+push overwrites the same series in place; `audit-dashboard` derives the
+human-readable `risk_level` string from the numeric score using the fixed
+mapping baked into `util/session-auditor/prompt.txt`.
 
 `workspace`/`sandbox` are best-effort attribution, not a security
 control — see

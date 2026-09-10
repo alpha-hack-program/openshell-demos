@@ -414,6 +414,22 @@ async fn query_tempo_search(
         .collect())
 }
 
+/// `session_compliance_risk_score` only pushes the numeric score, not a
+/// `risk_level` label (see util/session-auditor/src/main.rs's own comment
+/// on why) — this is the exact fixed mapping baked into
+/// util/session-auditor/prompt.txt's classification prompt, reproduced
+/// here rather than sent over the wire, since it's a closed, unchanging
+/// four-value enum, not something that needs to travel as data.
+fn risk_level_from_score(score: f64) -> String {
+    match score.round() as i64 {
+        0 => "none",
+        1 => "self_refused",
+        2 => "blocked_attempt",
+        _ => "complied_or_fabricated",
+    }
+    .to_string()
+}
+
 /// Claude Code's confirmed MCP tool-name convention: a tool call on server
 /// `<key>` shows up as `mcp__<key>__<tool>`, e.g.
 /// `mcp__portfolio__list_my_clients`.
@@ -454,27 +470,19 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         &format!(r#"timestamp(agent_turn_heartbeat{{namespace="{ns}"}})"#),
     )
     .await?;
+    // `session_compliance_risk_score` deliberately has only (workspace,
+    // sandbox) as labels — no session_id, no risk_level — so there's
+    // exactly one live row per sandbox at all times, always overwritten in
+    // place by the latest push. (Earlier versions of both this dashboard
+    // and session-auditor's own metric labels tried to fix/work around
+    // multiple simultaneous rows per sandbox client-side — timestamp
+    // correlation, "pick the newest" logic — before landing on removing
+    // the volatile labels at the source instead; see
+    // util/session-auditor/src/main.rs's own comment on `handle_stop`.)
     let risk = query_instant(
         &state.http,
         base,
         &format!(r#"session_compliance_risk_score{{namespace="{ns}"}}"#),
-    )
-    .await?;
-    // `session_compliance_risk_score` carries no per-sample timestamp of
-    // its own (unlike the two heartbeat metrics above, which wrap in
-    // `timestamp(...)`) — fetch it separately, correlated by session_id.
-    // Needed because Prometheus keeps returning a still-fresh row per
-    // distinct session_id for several minutes after it was last pushed:
-    // confirmed live that two turns run close together left two
-    // simultaneous rows for the same sandbox (different session_id,
-    // different risk_level), which made a naive "apply every row" loop
-    // flip-flop the node's color every tick depending on Prometheus's
-    // arbitrary result order, instead of settling on the actual latest
-    // verdict.
-    let risk_ts = query_instant(
-        &state.http,
-        base,
-        &format!(r#"timestamp(session_compliance_risk_score{{namespace="{ns}"}})"#),
     )
     .await?;
 
@@ -591,44 +599,7 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         }
     }
 
-    let risk_ts_by_session: HashMap<&str, f64> = risk_ts
-        .iter()
-        .filter_map(|s| {
-            let session_id = s.metric.get("session_id")?;
-            let ts = s.value.1.parse::<f64>().ok()?;
-            Some((session_id.as_str(), ts))
-        })
-        .collect();
-
-    // Pick only the one row with the latest real sample timestamp per
-    // (workspace, sandbox) — see this fn's earlier comment on why a
-    // second, correlated query is needed for that. A session_id with no
-    // matching timestamp row (shouldn't happen, same underlying series)
-    // sorts last via `unwrap_or(0.0)` rather than winning by default.
-    let mut latest_risk: HashMap<(String, String), (f64, &PromSample)> = HashMap::new();
     for sample in &risk {
-        let (Some(workspace), Some(sandbox)) =
-            (sample.metric.get("workspace"), sample.metric.get("sandbox"))
-        else {
-            continue;
-        };
-        let ts = sample
-            .metric
-            .get("session_id")
-            .and_then(|sid| risk_ts_by_session.get(sid.as_str()))
-            .copied()
-            .unwrap_or(0.0);
-        let key = (workspace.clone(), sandbox.clone());
-        let is_newer = match latest_risk.get(&key) {
-            Some((prev_ts, _)) => ts >= *prev_ts,
-            None => true,
-        };
-        if is_newer {
-            latest_risk.insert(key, (ts, sample));
-        }
-    }
-
-    for (_, sample) in latest_risk.values() {
         let (Some(workspace), Some(sandbox)) =
             (sample.metric.get("workspace"), sample.metric.get("sandbox"))
         else {
@@ -642,7 +613,7 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                 ..Default::default()
             });
         let new_score = sample.value.1.parse::<f64>().ok();
-        let new_level = sample.metric.get("risk_level").cloned();
+        let new_level = new_score.map(risk_level_from_score);
         let changed = new_score != entry.risk_score || new_level != entry.risk_level;
 
         entry.risk_score = new_score;
