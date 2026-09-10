@@ -468,12 +468,22 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     // agent's MCP-call signal shows up under a different attribute name
     // (see the merge loop below), so keeping them separate avoids relying
     // on unverified OR-query behavior on this Tempo version.
+    //
+    // The `resource.workspace!="" && resource.sandbox!=""` clauses are
+    // NOT a real filter (every span here always has both) — they exist
+    // purely to make Tempo echo those attributes back. Confirmed live:
+    // Tempo's search API only projects attributes actually *referenced*
+    // in the query expression onto each matched span's own `attributes`
+    // list, not all resource attributes automatically — a query of just
+    // `{span.tool_name=~"mcp__.*"}` silently omits workspace/sandbox
+    // entirely, which looked like "no edges found" rather than "wrong
+    // query shape" until traced back to this.
     const TEMPO_SEARCH_LIMIT: usize = 50;
     let tempo_base = state.config.tempo_url.trim_end_matches('/');
     let claude_mcp_calls = query_tempo_search(
         &state.http,
         tempo_base,
-        r#"{span.tool_name=~"mcp__.*"}"#,
+        r#"{span.tool_name=~"mcp__.*" && resource.workspace!="" && resource.sandbox!=""}"#,
         TEMPO_SEARCH_LIMIT,
     )
     .await
@@ -484,7 +494,7 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     let codex_mcp_calls = query_tempo_search(
         &state.http,
         tempo_base,
-        r#"{span.server_name!=""}"#,
+        r#"{span.server_name!="" && resource.workspace!="" && resource.sandbox!=""}"#,
         TEMPO_SEARCH_LIMIT,
     )
     .await
