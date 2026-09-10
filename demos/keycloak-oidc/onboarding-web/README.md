@@ -58,7 +58,7 @@ helm upgrade --install onboarding-web ./demos/keycloak-oidc/onboarding-web \
 
 | Value | Default | Notes |
 |---|---|---|
-| `image.repository` | `ghcr.io/alpha-hack-program/openshell-demos/onboarding-web` | |
+| `image.repository` | `quay.io/atarazana/onboarding-web` | |
 | `image.tag` | `latest` | Pin to a released tag for anything beyond a quick demo |
 | `route.host` | *(required by the chart; `11-deploy-onboarding-web.sh` derives `onboarding-web-<namespace>.<apps-domain>` if `ONBOARDING_WEB_ROUTE_HOST` isn't set)* | Must exactly match the `redirectUris` host on the `openshell-onboarding-web` Keycloak client — Keycloak rejects any mismatch |
 | `keycloak.host` | *(required)* | e.g. `keycloak.apps.<cluster-domain>` |

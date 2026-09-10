@@ -5,7 +5,10 @@ on:
     tags: ['agent-proxy-v*']
 
 env:
-  REGISTRY: ghcr.io
+  # quay.io/atarazana — the same registry every other image in this repo
+  # publishes to (see the release-mcp-*.yml workflows). This was
+  # previously ghcr.io, which nothing in this demo actually pulls from.
+  REGISTRY: quay.io/atarazana
 
 defaults:
   run:
@@ -35,14 +38,13 @@ jobs:
           name: agent-proxy-linux-x86_64-musl
           path: util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy
 
-  # Bakes the musl binary into both sandbox base images and pushes to GHCR
-  # (see demos/keycloak-oidc/docs/evalhub-redteam.md, "Approach B").
+  # Bakes the musl binary into both sandbox base images and pushes to
+  # quay.io/atarazana (see demos/keycloak-oidc/docs/evalhub-redteam.md, "Approach B").
   images:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     defaults:
       run:
         working-directory: .
@@ -55,31 +57,31 @@ jobs:
       - run: chmod +x util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: quay.io
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
       - name: Build and push codex-garak
         run: |
           cp util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy \
             demos/keycloak-oidc/images/codex-garak/agent-proxy
           docker build \
-            -t "$REGISTRY/${{ github.repository }}/codex-garak:${{ github.ref_name }}" \
-            -t "$REGISTRY/${{ github.repository }}/codex-garak:latest" \
+            -t "$REGISTRY/codex-garak:${{ github.ref_name }}" \
+            -t "$REGISTRY/codex-garak:latest" \
             -f demos/keycloak-oidc/images/codex-garak/Containerfile \
             demos/keycloak-oidc/images/codex-garak/
-          docker push "$REGISTRY/${{ github.repository }}/codex-garak:${{ github.ref_name }}"
-          docker push "$REGISTRY/${{ github.repository }}/codex-garak:latest"
+          docker push "$REGISTRY/codex-garak:${{ github.ref_name }}"
+          docker push "$REGISTRY/codex-garak:latest"
       - name: Build and push claude-garak
         run: |
           cp util/agent-proxy/target/x86_64-unknown-linux-musl/release/agent-proxy \
             demos/keycloak-oidc/images/claude-garak/agent-proxy
           docker build \
-            -t "$REGISTRY/${{ github.repository }}/claude-garak:${{ github.ref_name }}" \
-            -t "$REGISTRY/${{ github.repository }}/claude-garak:latest" \
+            -t "$REGISTRY/claude-garak:${{ github.ref_name }}" \
+            -t "$REGISTRY/claude-garak:latest" \
             -f demos/keycloak-oidc/images/claude-garak/Containerfile \
             demos/keycloak-oidc/images/claude-garak/
-          docker push "$REGISTRY/${{ github.repository }}/claude-garak:${{ github.ref_name }}"
-          docker push "$REGISTRY/${{ github.repository }}/claude-garak:latest"
+          docker push "$REGISTRY/claude-garak:${{ github.ref_name }}"
+          docker push "$REGISTRY/claude-garak:latest"
 
   release:
     needs: [build, images]

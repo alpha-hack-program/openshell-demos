@@ -216,20 +216,20 @@ openshell sandbox create --name my-sandbox \
 ```
 
 `quay.io/atarazana` is this repo's registry for every deployable image
-(same as `onboarding-web`, `mcp-portfolio`, etc.) — published via `make
-image-claude image-codex push-claude push-codex` (or plain `make push` for
-both) from this directory, tagged with the exact tag of the *base* image
-each is built from plus `latest`. This is a separate, manual step from
-cutting a `session-auditor-v<version>` release: `cargo release` bumps the
-crate version, tags, and pushes git history; it does **not** publish these
-sandbox images anywhere — that only happens when someone (or CI) actually
-runs the `push-*` targets against `quay.io/atarazana`. (GitHub Actions'
-own `.github/workflows/release-session-auditor.yml`, triggered by the
-release tag, separately publishes the *same* two images to
-`ghcr.io/alpha-hack-program/openshell-demos/` — useful for that release's
-own audit trail, but not what any chart/script in this repo actually
-references; treat `quay.io/atarazana` as the one real answer to "where do
-I get this image.")
+(same as `onboarding-web`, `mcp-portfolio`, etc.), tagged with the exact
+tag of the *base* image each is built from, plus `latest`, plus the
+`session-auditor-v<version>` release tag itself. Two ways to get an image
+published there: `make image-claude image-codex push-claude push-codex`
+(or plain `make push`) run locally from this directory, or — the normal
+path — `cargo release` (`make release-patch`/`-minor`/`-major`), which
+bumps the crate version, tags, pushes, and triggers
+`.github/workflows/release-session-auditor.yml` to build and push both
+images to `quay.io/atarazana` automatically. (This workflow previously
+pushed to `ghcr.io/alpha-hack-program/openshell-demos/` instead — a
+registry nothing in this repo's charts/scripts ever actually pulled
+from, silently leaving every CI-triggered release un-deployed until fixed
+2026-09-10. `quay.io/atarazana` is the one real answer to "where do I get
+this image," for both the manual and CI paths now.)
 
 That's it — no `sandbox exec`, no `nohup`, no `service expose`. The agent
 calls `session-auditor` itself via all three hooks. `SessionStart` and

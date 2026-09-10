@@ -5,7 +5,12 @@ on:
     tags: ['session-auditor-v*']
 
 env:
-  REGISTRY: ghcr.io
+  # quay.io/atarazana — the same registry every other image in this repo
+  # publishes to (see the release-mcp-*.yml workflows). This was
+  # previously ghcr.io, which nothing in this demo actually pulls from —
+  # sandboxes created via CLAUDE_AUDIT_IMAGE/CODEX_AUDIT_IMAGE
+  # (quay.io/atarazana/...) never saw images pushed there.
+  REGISTRY: quay.io/atarazana
 
 defaults:
   run:
@@ -36,7 +41,7 @@ jobs:
           path: util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor
 
   # Bakes the musl binary into each agent's sandbox base image and pushes
-  # to GHCR. This is load-bearing, not a convenience: /usr/local/bin is
+  # to quay.io/atarazana. This is load-bearing, not a convenience: /usr/local/bin is
   # read_only under OpenShell's default filesystem_policy (Landlock), and
   # neither `sandbox exec` nor `sandbox upload` can write there once a
   # sandbox exists — baking the binary in here, before the sandbox is
@@ -53,7 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     defaults:
       run:
         working-directory: .
@@ -66,37 +70,37 @@ jobs:
       - run: chmod +x util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: quay.io
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
       - name: Build and push claude-audit
         run: |
           cp util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor \
             demos/keycloak-oidc/images/claude-audit/session-auditor
           BASE_TAG=$(grep '^FROM' demos/keycloak-oidc/images/claude-audit/Containerfile | sed 's/.*://')
           docker build \
-            -t "$REGISTRY/${{ github.repository }}/claude-audit:$BASE_TAG" \
-            -t "$REGISTRY/${{ github.repository }}/claude-audit:latest" \
-            -t "$REGISTRY/${{ github.repository }}/claude-audit:${{ github.ref_name }}" \
+            -t "$REGISTRY/claude-audit:$BASE_TAG" \
+            -t "$REGISTRY/claude-audit:latest" \
+            -t "$REGISTRY/claude-audit:${{ github.ref_name }}" \
             -f demos/keycloak-oidc/images/claude-audit/Containerfile \
             demos/keycloak-oidc/images/claude-audit/
-          docker push "$REGISTRY/${{ github.repository }}/claude-audit:$BASE_TAG"
-          docker push "$REGISTRY/${{ github.repository }}/claude-audit:latest"
-          docker push "$REGISTRY/${{ github.repository }}/claude-audit:${{ github.ref_name }}"
+          docker push "$REGISTRY/claude-audit:$BASE_TAG"
+          docker push "$REGISTRY/claude-audit:latest"
+          docker push "$REGISTRY/claude-audit:${{ github.ref_name }}"
       - name: Build and push codex-audit
         run: |
           cp util/session-auditor/target/x86_64-unknown-linux-musl/release/session-auditor \
             demos/keycloak-oidc/images/codex-audit/session-auditor
           BASE_TAG=$(grep '^FROM' demos/keycloak-oidc/images/codex-audit/Containerfile | sed 's/.*://')
           docker build \
-            -t "$REGISTRY/${{ github.repository }}/codex-audit:$BASE_TAG" \
-            -t "$REGISTRY/${{ github.repository }}/codex-audit:latest" \
-            -t "$REGISTRY/${{ github.repository }}/codex-audit:${{ github.ref_name }}" \
+            -t "$REGISTRY/codex-audit:$BASE_TAG" \
+            -t "$REGISTRY/codex-audit:latest" \
+            -t "$REGISTRY/codex-audit:${{ github.ref_name }}" \
             -f demos/keycloak-oidc/images/codex-audit/Containerfile \
             demos/keycloak-oidc/images/codex-audit/
-          docker push "$REGISTRY/${{ github.repository }}/codex-audit:$BASE_TAG"
-          docker push "$REGISTRY/${{ github.repository }}/codex-audit:latest"
-          docker push "$REGISTRY/${{ github.repository }}/codex-audit:${{ github.ref_name }}"
+          docker push "$REGISTRY/codex-audit:$BASE_TAG"
+          docker push "$REGISTRY/codex-audit:latest"
+          docker push "$REGISTRY/codex-audit:${{ github.ref_name }}"
 
   release:
     needs: [build, image]
