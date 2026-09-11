@@ -26,22 +26,32 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: parrot-linux-x86_64
+            gpui-artifact: parrot-gpui-linux-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: parrot-macos-aarch64
+            gpui-artifact: parrot-gpui-macos-aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # Only parrot-tui (the `parrot` bin) — parrot-gpui is a stub not
-      # shipped yet, and needs system X11 dev headers on Linux to link.
-      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui
+      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux.
+      # macOS links only against system frameworks — Xcode, already on
+      # macos-latest runners, provides the Metal shader compiler gpui's
+      # build script shells out to.
+      - if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           path: util/parrot/target/${{ matrix.target }}/release/parrot
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.gpui-artifact }}
+          path: util/parrot/target/${{ matrix.target }}/release/parrot-gpui
 
   release:
     needs: build
@@ -55,10 +65,14 @@ jobs:
       - run: |
           mv artifacts/parrot-linux-x86_64/parrot parrot-linux-x86_64
           mv artifacts/parrot-macos-aarch64/parrot parrot-macos-aarch64
-          chmod +x parrot-linux-x86_64 parrot-macos-aarch64
+          mv artifacts/parrot-gpui-linux-x86_64/parrot-gpui parrot-gpui-linux-x86_64
+          mv artifacts/parrot-gpui-macos-aarch64/parrot-gpui parrot-gpui-macos-aarch64
+          chmod +x parrot-linux-x86_64 parrot-macos-aarch64 parrot-gpui-linux-x86_64 parrot-gpui-macos-aarch64
         working-directory: .
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             parrot-linux-x86_64
             parrot-macos-aarch64
+            parrot-gpui-linux-x86_64
+            parrot-gpui-macos-aarch64

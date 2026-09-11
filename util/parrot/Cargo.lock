@@ -4340,8 +4340,12 @@ dependencies = [
 name = "parrot-gpui"
 version = "0.1.1"
 dependencies = [
+ "clap",
  "gpui",
  "parrot-core",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

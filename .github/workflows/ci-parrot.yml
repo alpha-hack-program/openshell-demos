@@ -37,6 +37,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # Only parrot-tui (the `parrot` bin) — parrot-gpui is a stub not
-      # shipped yet, and needs system X11 dev headers on Linux to link.
-      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui
+      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux.
+      # macOS links only against system frameworks — Xcode, already on
+      # macos-latest runners, provides the Metal shader compiler gpui's
+      # build script shells out to.
+      - if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui

@@ -6,11 +6,12 @@ OPENSHELL_REPO := https://github.com/NVIDIA/OpenShell
 .PHONY: build fmt fmt-check clippy test check ci clean bump-openshell-sdk \
         release-patch release-minor release-major
 
-# parrot-gpui is excluded from build/test (but not fmt/clippy, which don't
-# link): it's an intentionally minimal, not-yet-functional stub, and
-# linking it needs system X11 dev headers (libxcb, libxkbcommon,
-# libxkbcommon-x11) that aren't guaranteed present in every dev/CI
-# environment. `cargo check -p parrot-gpui` still verifies it type-checks.
+# parrot-gpui is a real, functional frontend, but stays out of build/test
+# (unlike fmt/clippy, which don't link): linking it needs system X11 dev
+# headers (libxcb, libxkbcommon, libxkbcommon-x11) that aren't guaranteed
+# present in every dev environment. CI installs them explicitly and builds
+# it separately (see .github/workflows/ci-parrot.yml). `cargo check -p
+# parrot-gpui` still verifies it type-checks without those headers.
 build:
 	cargo build -p parrot-core -p parrot-tui
 
