@@ -8,7 +8,7 @@ I need you to run the keycloak-oidc demo from `demos/keycloak-oidc/README.md` en
 
 **Browser-based OAuth flows:**
 
-For any step that requires a browser login (e.g. `openshell gateway login`, the `onboard` tool's OAuth callback), use **Playwright** with headless Chromium to automate the Keycloak login form. Playwright is installed at `/tmp/playwright-scratch/` (run scripts with `cd /tmp/playwright-scratch && node -e "..."` or `node /path/to/script.js`). The Chromium binary is cached in `~/.cache/ms-playwright/`.
+For any step that requires a browser login (e.g. `openshell gateway login`, the `onboard` tool's OAuth callback), use **Playwright** with headless Chromium to automate the Keycloak login form. Playwright is installed at `$HOME/.local/state/openshell-demos/playwright-scratch/` (run scripts with `cd $HOME/.local/state/openshell-demos/playwright-scratch && node -e "..."` or `node /path/to/script.js`). The Chromium binary is cached in `~/.cache/ms-playwright/`.
 
 The Keycloak demo bankers and their passwords (from `keycloak/realm-export.json`):
 - `openshell-admin` / `openshell-admin` (has `openshell-admin` role)

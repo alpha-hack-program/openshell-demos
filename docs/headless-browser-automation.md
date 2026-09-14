@@ -7,7 +7,7 @@ headless Chromium to automate the Keycloak login form.
 ## Playwright setup
 
 ```bash
-mkdir -p /tmp/playwright-scratch && cd /tmp/playwright-scratch
+mkdir -p "$HOME/.local/state/openshell-demos/playwright-scratch" && cd "$HOME/.local/state/openshell-demos/playwright-scratch"
 npm init -y && npm install playwright
 npx playwright install chromium
 ```
@@ -137,7 +137,7 @@ if [[ -z "$OAUTH_URL" ]]; then
 fi
 
 # 4. Drive the Keycloak login form with Playwright
-node /tmp/playwright-scratch/keycloak-login.js "$OAUTH_URL" "$USERNAME" "$PASSWORD"
+node "$HOME/.local/state/openshell-demos/playwright-scratch/keycloak-login.js" "$OAUTH_URL" "$USERNAME" "$PASSWORD"
 
 # 5. Wait for the CLI to finish (it completes after the callback)
 wait "$CLI_PID"
@@ -182,7 +182,10 @@ juggling incognito windows or separate machines.
 Setup:
 
 ```bash
-ROOT=/tmp/openshell-identities
+# Under $HOME, not /tmp: /tmp is cleared on container/host restart
+# (confirmed on a Fedora toolbox), which would otherwise force re-running
+# every `gateway add`/OAuth login below after every reboot.
+ROOT="$HOME/.local/state/openshell-demos/identities"
 mkdir -p "$ROOT"/{admin,user1,user2}/{config,state}
 
 # Run every openshell command for a given identity with both vars set:
@@ -218,7 +221,7 @@ commands, and diffing the resulting trees:
 - **No leakage outside the two XDG roots was found**: the real
   `$HOME/.config/openshell` directory (holding unrelated pre-existing
   gateways) was untouched throughout, and `$HOME/.ssh` saw no new files.
-  Nothing else under `/tmp` outside the chosen roots was touched either.
+  Nothing else outside the chosen roots was touched either.
 - **Gateway RBAC bonus finding**: CLI sessions authenticated as `user1`/
   `user2` (Keycloak `openshell-user` role) were denied *every* gateway
   operation tried, including read-only ones like `sandbox list` — not with
