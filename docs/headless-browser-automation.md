@@ -51,8 +51,19 @@ const context = await browser.newContext();  // never contexts()[0]
 const page = await context.newPage();
 // ... page.goto/fill/click/waitForURL as usual ...
 await page.close();
-await context.close();  // browser.close() here would kill the shared host browser
+// Confirmed hang: on a CDP-connected browser, context.close() can block
+// indefinitely even though the OAuth flow itself already completed —
+// race it against a timeout instead of awaiting it directly.
+await Promise.race([context.close(), new Promise((resolve) => setTimeout(resolve, 5000))]);
+process.exit(0); // don't rely on the event loop draining on its own
 ```
+
+If you adapt the "Minimal Playwright login script" below for the CDP
+fallback (swapping `chromium.launch(...)`/`browser.close()` for
+`chromium.connectOverCDP(...)`/`context.close()`), carry over both the
+timeout-race and the explicit `process.exit(0)` — otherwise the script
+(and anything doing `wait "$CLI_PID"` on the CLI process next to it) hangs
+forever after a successful login.
 
 ## Keycloak demo credentials
 
