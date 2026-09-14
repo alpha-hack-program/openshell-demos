@@ -3,7 +3,7 @@
 OPENSHELL_SDK_TAG ?= v0.0.106
 OPENSHELL_REPO := https://github.com/NVIDIA/OpenShell
 
-.PHONY: build fmt fmt-check clippy test check ci clean bump-openshell-sdk \
+.PHONY: build build-release fmt fmt-check clippy test check ci clean bump-openshell-sdk \
         release-patch release-minor release-major
 
 # parrot-gpui is a real, functional frontend, but stays out of build/test
@@ -14,6 +14,13 @@ OPENSHELL_REPO := https://github.com/NVIDIA/OpenShell
 # parrot-gpui` still verifies it type-checks without those headers.
 build:
 	cargo build -p parrot-core -p parrot-tui
+
+# Release-profile binaries for both frontends (the `parrot` and
+# `parrot-gpui` bins). On Linux this needs libxcb/libxkbcommon(-x11) dev
+# headers installed to link parrot-gpui — see ci-parrot.yml for the exact
+# apt packages; on macOS no extra install is needed beyond Xcode.
+build-release:
+	cargo build --release -p parrot-tui -p parrot-gpui
 
 fmt:
 	cargo fmt --all
