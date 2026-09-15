@@ -47,7 +47,9 @@ Keycloak SSO session bleed into the next login attempt:
 ```javascript
 const { chromium } = require('playwright');
 const browser = await chromium.connectOverCDP('http://localhost:9333');
-const context = await browser.newContext();  // never contexts()[0]
+// ignoreHTTPSErrors: true — needed whenever Keycloak's Route rides a
+// self-signed cert (the common case; see "Self-signed Keycloak TLS" below)
+const context = await browser.newContext({ ignoreHTTPSErrors: true });  // never contexts()[0]
 const page = await context.newPage();
 // ... page.goto/fill/click/waitForURL as usual ...
 await page.close();
@@ -106,6 +108,30 @@ of opening a browser. Read that file and drive it with Playwright.
   in a child process, capture the URL, drive the Keycloak login form with
   Playwright, and let the redirect complete to the tool's localhost
   callback listener (`127.0.0.1:9999`).
+
+## Self-signed Keycloak TLS (default OpenShift ingress cert)
+
+On a fresh/lab cluster, Keycloak's Route typically rides the default
+IngressController certificate, which is self-signed by `ingress-operator`,
+not publicly trusted. This breaks two things independently of everything
+else in this doc — see
+[`demos/keycloak-oidc/README.md`'s "OIDC issuer TLS trust" section](../demos/keycloak-oidc/README.md#oidc-issuer-tls-trust-self-signed-default-ingress-cert)
+for the gateway-side fix (`server.oidc.caConfigMapName`):
+
+- **The `openshell` CLI itself** (`gateway add`/`gateway login`, and the
+  `openshell` subprocess calls `onboard` shells out to) does its own OIDC
+  discovery against the Keycloak issuer URL with no CA-trust flag. Export
+  `SSL_CERT_FILE` to a bundle containing the system trust store plus the
+  cluster's `default-ingress-cert` (from `openshift-config-managed`) before
+  running any `openshell`/`onboard` command, in every terminal/script that
+  touches this gateway — see the README section linked above for the exact
+  commands. `onboard`'s own token exchange doesn't need this (it accepts
+  invalid certs by default, per its `--strict-tls` flag), but the CLI calls
+  it shells out to do.
+- **Playwright** will fail navigating to the Keycloak login page with
+  `net::ERR_CERT_AUTHORITY_INVALID` unless the browser context is told to
+  ignore it — add `ignoreHTTPSErrors: true` when creating the context (see
+  the minimal script below).
 
 ## Keycloak login form selectors
 
@@ -168,8 +194,10 @@ const { chromium } = require('playwright');
 const [url, username, password] = process.argv.slice(2);
 
 (async () => {
+  // ignoreHTTPSErrors: true — needed whenever Keycloak's Route rides a
+  // self-signed cert (the common case; see "Self-signed Keycloak TLS" above)
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const page = await browser.newPage({ ignoreHTTPSErrors: true });
   await page.goto(url);
   await page.fill('#username', username);
   await page.fill('#password', password);

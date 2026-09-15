@@ -850,6 +850,77 @@ CERT_MANAGER=true
 LETSENCRYPT_CLUSTER_ISSUER=letsencrypt-prod
 ```
 
+##### OIDC issuer TLS trust (self-signed default ingress cert)
+
+**Whichever path you pick above, this is a separate concern: it's about
+Keycloak's own Route (created in step 1b), not the gateway's.** Keycloak's
+Route gets no explicit certificate of its own — it rides on your cluster's
+default IngressController certificate. On most fresh/lab clusters, that
+default certificate is self-signed by `ingress-operator`, not publicly
+trusted.
+
+The gateway does real TLS verification when it discovers the OIDC issuer's
+`.well-known/openid-configuration` at startup — it does **not** silently
+trust a self-signed chain, and it does not treat this as a soft failure.
+Against a self-signed Keycloak Route, it crashes on every start with
+`configuration error: OIDC initialization failed: OIDC discovery request
+failed: error sending request for url (https://<keycloak-host>/realms/
+<realm>/.well-known/openid-configuration)`, and the StatefulSet
+CrashLoopBackOffs indefinitely — it does not self-heal like the embeddings
+race in [step 4](#4-deploy-mcp-servers), because there's no dependency to
+wait out.
+
+The chart has `server.oidc.caConfigMapName` for exactly this: a ConfigMap
+(key `ca.crt`) with a CA bundle the gateway should additionally trust for
+OIDC discovery. The cluster already publishes the right bundle for its own
+default ingress cert at `default-ingress-cert` in
+`openshift-config-managed` — pull it into your namespace and point the
+chart at it. Skip this if your Keycloak Route already serves a
+publicly/CA-trusted certificate (e.g. you gave the default
+IngressController a real cert, or Keycloak has its own `tlsSecret`):
+
+```bash
+oc get configmap default-ingress-cert -n openshift-config-managed \
+  -o jsonpath='{.data.ca-bundle\.crt}' > /tmp/ingress-ca.crt
+oc -n "$OPENSHELL_NAMESPACE" create configmap openshell-oidc-ca \
+  --from-file=ca.crt=/tmp/ingress-ca.crt
+rm -f /tmp/ingress-ca.crt
+```
+
+Add `--set server.oidc.caConfigMapName=openshell-oidc-ca` to the
+`helm upgrade --install` command below (already included in the command as
+written). If the gateway pod is already crash-looping on this error from an
+earlier attempt, re-running `helm upgrade --install` after creating the
+ConfigMap is not enough by itself — StatefulSets don't always replace an
+already-failing pod-0 promptly on a spec change; force it with
+`oc -n "$OPENSHELL_NAMESPACE" delete pod openshell-0`.
+
+**This same self-signed chain also breaks the `openshell` CLI itself**
+(`gateway add`, `gateway login`, and the `openshell` subprocess calls the
+`onboard` tool shells out to) — it does its own OIDC discovery against the
+same URL, with no CA-trust flag of its own. Fix by exporting `SSL_CERT_FILE`
+to a bundle containing both the system trust store and the same ingress CA,
+for every terminal/session running `openshell` or `onboard` against this
+gateway:
+
+```bash
+oc get configmap default-ingress-cert -n openshift-config-managed \
+  -o jsonpath='{.data.ca-bundle\.crt}' > /tmp/ingress-ca.crt
+cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /tmp/ingress-ca.crt \
+  > /tmp/combined-ca-bundle.crt   # path is Fedora/RHEL-specific; adjust for your OS
+export SSL_CERT_FILE=/tmp/combined-ca-bundle.crt
+```
+
+(`onboard` itself doesn't need this — it accepts invalid certs by default
+for its own token exchange, per its `--strict-tls` flag — but the
+`openshell` CLI commands it shells out to still do, since they go through
+the same code path as running `openshell` directly.) If you're driving
+`gateway add`/`onboard` headlessly with Playwright per
+[`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md),
+the browser context needs the equivalent
+`context = await browser.newContext({ ignoreHTTPSErrors: true })` or it
+will fail navigating to the same self-signed Keycloak login page.
+
 With those set, the command below creates the namespace and grants the
 sandbox SCC, computes `ROUTE_HOST`, then branches on `CERT_MANAGER` /
 `LETSENCRYPT_CLUSTER_ISSUER` to pick the right values file
@@ -892,6 +963,12 @@ else
   ISSUER_SET=()
 fi
 
+OIDC_CA_SET=()
+# Only needed if you created the openshell-oidc-ca ConfigMap above (self-signed
+# default ingress cert on Keycloak's Route) — leave OIDC_CA_SET empty otherwise.
+oc -n "$OPENSHELL_NAMESPACE" get configmap openshell-oidc-ca >/dev/null 2>&1 && \
+  OIDC_CA_SET=(--set "server.oidc.caConfigMapName=openshell-oidc-ca")
+
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
@@ -899,7 +976,8 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
   --set "openshiftRoute.host=${ROUTE_HOST}" \
   "${SAN_SET[@]}" \
-  "${ISSUER_SET[@]}"
+  "${ISSUER_SET[@]}" \
+  "${OIDC_CA_SET[@]}"
 ```
 
 Wait for the gateway to come up:
@@ -1395,6 +1473,18 @@ upgrade --install`, safe to re-run) after waiting a minute or two:
 oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-market-news
 oc -n "$OPENSHELL_NAMESPACE" rollout status deployment/mcp-kyc-compliance
 ```
+
+**On a high-core-count node, every MCP server's Envoy sidecar can instead
+crash on its very first start with `evutil_make_internal_pipe_: pipe: Too
+many open files`.** Envoy defaults to one worker thread per visible CPU,
+and with no `--concurrency` set that blows through the container's default
+1024-fd soft ulimit before Envoy finishes initializing, regardless of the
+embeddings service or Postgres being ready. `mcp-servers/values.yaml`'s
+`envoy.concurrency` (default `1`, templated into the sidecar's `args` in
+`mcp-servers/templates/deployment.yaml`) fixes this — these sidecars carry
+negligible traffic, so one worker thread is enough. If you still hit this
+after a fresh `helm upgrade --install` on an unusually large node, raise
+`envoy.concurrency` slightly rather than removing the limit entirely.
 
 The MCP server roles are already assigned to the demo bankers in the realm
 JSON imported in step 1c: `banker` (and therefore `mcp-portfolio-user`,

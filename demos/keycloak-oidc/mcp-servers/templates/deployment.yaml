@@ -30,7 +30,13 @@ spec:
         # unreachable except from this sidecar.
         - name: envoy
           image: "{{ $envoy.image.repository }}:{{ $envoy.image.tag }}"
-          args: ["-c", "/etc/envoy/envoy.yaml"]
+          # --concurrency: without this, Envoy defaults to one worker thread
+          # per visible CPU. On a high-core-count node that blows through the
+          # container's default 1024-fd soft ulimit before Envoy finishes
+          # initializing ("Too many open files" on the internal libevent
+          # pipe) — this sidecar handles negligible traffic, one worker is
+          # plenty.
+          args: ["-c", "/etc/envoy/envoy.yaml", "--concurrency", "{{ $envoy.concurrency | default 1 }}"]
           ports:
             - name: http
               containerPort: {{ .port }}

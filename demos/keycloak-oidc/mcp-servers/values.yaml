@@ -29,6 +29,12 @@ envoy:
   # trust store, the same reason every curl call in this demo uses -k.
   # Fine for evaluation, never for production.
   insecureSkipVerifyJwks: true
+  # Envoy worker thread count. Defaults to 1 — this sidecar handles
+  # negligible traffic, and Envoy's own default (one thread per visible
+  # CPU) can exceed the container's default 1024-fd ulimit on high-core-count
+  # nodes, crashing the sidecar with "Too many open files" before it even
+  # starts listening.
+  concurrency: 1
 
 # Shared PostgreSQL instance for the mcp-portfolio / mcp-crm-calendar /
 # mcp-market-news family. Schema + seed data are NOT applied by any of those
