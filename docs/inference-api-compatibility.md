@@ -90,7 +90,12 @@ frontend — see the provider table below.
 
 Quick smoke test to verify your endpoint supports the Responses API with
 namespace tools (for Codex). Run from a machine that can reach the
-endpoint:
+endpoint. The `namespace` tool type is an official OpenAI Responses API
+tool (grouping mechanism used with Tool Search), not a Codex invention —
+the object requires `name`, `description`, and a `tools` array of
+`type: "function"` entries; see [OpenAI's tool search
+guide](https://developers.openai.com/api/docs/guides/tools-tool-search)
+for the full schema:
 
 ```bash
 # Set these to match your provider
@@ -132,8 +137,10 @@ HTTP_CODE=$(curl -sk -o /tmp/ns-tools-test -w "%{http_code}" \
       {
         "type": "namespace",
         "name": "test-server",
-        "functions": [
+        "description": "A test namespace",
+        "tools": [
           {
+            "type": "function",
             "name": "hello",
             "description": "Says hello",
             "parameters": {"type": "object", "properties": {}, "required": []}
