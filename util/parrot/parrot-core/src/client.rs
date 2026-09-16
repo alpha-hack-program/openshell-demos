@@ -34,6 +34,7 @@ impl ParrotClient {
 
         let mut config = ClientConfig::new(gateway.endpoint.clone());
         config.auth = Some(auth);
+        config.ca_cert = load_gateway_ca_cert(&gateway.name);
         let inner = OpenShellClient::connect(config).await?;
 
         Ok(Self {
@@ -71,4 +72,34 @@ impl ParrotClient {
             )),
         }
     }
+}
+
+/// Load a gateway's own CA (the same self-signed CA that signs its server
+/// cert, written under `mtls/` by `openshell gateway add`) so the SDK
+/// trusts it instead of falling back to public web PKI roots.
+///
+/// Without this, every gateway with a self-signed or private-CA server
+/// cert fails to connect at all (`connect error: transport error`) — a
+/// generic message that gives no hint the cause is an untrusted cert, not
+/// a network or auth problem. Confirmed live against a gateway requiring
+/// both mTLS and OIDC: loading only this CA (no client certificate is
+/// presented — `openshell-sdk` has no such field) is sufficient for an
+/// OIDC-authenticated connection to succeed.
+///
+/// Reconstructed manually rather than via `openshell-bootstrap`, whose
+/// path-resolution helpers are private to that crate — matches the
+/// documented `$XDG_CONFIG_HOME/openshell/gateways/<name>/mtls/`
+/// convention. Returns `None` (falling back to system roots, the correct
+/// behavior for a publicly-trusted gateway cert) if `XDG_CONFIG_HOME`/
+/// `HOME` can't be resolved or no `ca.crt` exists for this gateway.
+fn load_gateway_ca_cert(gateway_name: &str) -> Option<Vec<u8>> {
+    let config_home = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|_| std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .ok()?;
+    let ca_path = config_home
+        .join("openshell/gateways")
+        .join(gateway_name)
+        .join("mtls/ca.crt");
+    std::fs::read(&ca_path).ok()
 }
