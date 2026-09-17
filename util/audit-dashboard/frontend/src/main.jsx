@@ -66,7 +66,17 @@ function useGraph() {
     };
   }, []);
 
-  return graph;
+  // Applies the server's response directly rather than waiting for the
+  // next poll tick — /api/clear returns the now-empty graph, so there's
+  // no reason to sit on stale state for up to REFRESH_MS after a clear
+  // that already succeeded.
+  async function clear() {
+    const res = await fetch("/api/clear", { method: "POST" });
+    const data = await res.json();
+    setGraph(data);
+  }
+
+  return [graph, clear];
 }
 
 // Tracks each sandbox's last_seen_unix across polls and hands back a token
@@ -162,7 +172,7 @@ function EventsPanel({ events }) {
 }
 
 function App() {
-  const graph = useGraph();
+  const [graph, clearGraph] = useGraph();
   const [hover, setHover] = useState(null);
   const pulses = useHeartbeatPulses(graph.sandboxes);
   const nowUnix = Math.floor(Date.now() / 1000);
@@ -212,6 +222,18 @@ function App() {
           h("span", null, h("i", { class: "swatch", style: { background: riskColor(0) } }), "no risk"),
           h("span", null, h("i", { class: "swatch", style: { background: riskColor(3) } }), "risk detected"),
           h("span", null, h("i", { class: "swatch", style: { background: "#8b949e", opacity: 0.5 } }), "no recent heartbeat"),
+          h(
+            "button",
+            {
+              class: "clear-btn",
+              onClick: () => {
+                if (window.confirm("Clear every sandbox/edge/event this dashboard has recorded? This cannot be undone.")) {
+                  clearGraph().catch((e) => console.error("audit-dashboard: failed to clear graph", e));
+                }
+              },
+            },
+            "Clear dashboard",
+          ),
         ),
         h(
           "svg",

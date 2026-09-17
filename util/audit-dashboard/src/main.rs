@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{Json, Router, extract::State, routing::get, routing::post};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -128,10 +128,14 @@ struct Graph {
 /// What `persist_state`/`load_state` read and write — a plain
 /// `Vec<SandboxNode>` was the on-disk shape before events existed;
 /// `load_state` still accepts that old shape (see its own doc comment).
+/// `cleared_before_unix` defaults to 0 (accept everything) for state files
+/// written before `/api/clear` existed.
 #[derive(Serialize, Deserialize, Default)]
 struct PersistedState {
     sandboxes: Vec<SandboxNode>,
     events: Vec<Event>,
+    #[serde(default)]
+    cleared_before_unix: i64,
 }
 
 struct AppState {
@@ -144,6 +148,18 @@ struct AppState {
     // still-current sample would otherwise get logged as a fresh event on
     // every single refresh.
     dedupe: RwLock<HashMap<(String, String, &'static str), i64>>,
+    // Set by `/api/clear` to that call's own timestamp. `refresh_graph`
+    // drops any Prometheus sample whose *own* sample time (not the query's
+    // evaluation time — see `PromSample::value`'s doc comment) is at or
+    // before this cutoff, so a still-live gauge that hasn't been updated
+    // since before the clear doesn't just reappear on the very next
+    // refresh tick — confirmed live that without this, the
+    // accumulate-forever design in `refresh_graph` undid a clear within
+    // one `refresh_interval_secs` (default 5s), since Thanos-querier keeps
+    // answering instant queries with each series' last-known value
+    // indefinitely (or at least far longer than 5s), independent of
+    // whether the dashboard itself was just told to forget it.
+    cleared_before_unix: RwLock<i64>,
 }
 
 #[derive(Deserialize)]
@@ -199,6 +215,8 @@ struct TempoSpan {
     attributes: Vec<TempoAttribute>,
     #[serde(rename = "durationNanos")]
     duration_nanos: Option<String>,
+    #[serde(rename = "startTimeUnixNano")]
+    start_time_unix_nano: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -221,10 +239,14 @@ fn tempo_attrs_to_map(attrs: &[TempoAttribute]) -> HashMap<String, String> {
 }
 
 /// One matched span's attributes plus its call latency — the latter shown
-/// on the sandbox->MCP-server edges in the frontend graph.
+/// on the sandbox->MCP-server edges in the frontend graph. `start_unix`
+/// (seconds) is what lets a clear tell "this edge predates the clear"
+/// apart from "this is a genuinely new call" — see
+/// `AppState::cleared_before_unix`'s doc comment.
 struct TempoMatchedSpan {
     attrs: HashMap<String, String>,
     duration_ms: Option<f64>,
+    start_unix: Option<i64>,
 }
 
 #[tokio::main]
@@ -271,6 +293,7 @@ async fn main() {
         http,
         graph: RwLock::new(initial_graph),
         dedupe: RwLock::new(dedupe),
+        cleared_before_unix: RwLock::new(initial_state.cleared_before_unix),
     });
 
     let refresh_state = state.clone();
@@ -288,6 +311,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/graph", get(get_graph))
+        .route("/api/clear", post(clear_graph))
         .fallback_service(ServeDir::new("dist"))
         .with_state(state);
 
@@ -300,6 +324,29 @@ async fn main() {
 
 async fn get_graph(State(state): State<Arc<AppState>>) -> Json<Graph> {
     Json(state.graph.read().await.clone())
+}
+
+/// Wipes every sandbox/edge/event this dashboard has ever accumulated —
+/// the "seen once, shown forever" design in `refresh_graph`'s doc comment
+/// means there's otherwise no way to get back to an empty graph short of
+/// deleting the PVC and restarting the pod. Also clears `dedupe`, or the
+/// next tick would treat every still-current Prometheus sample as
+/// already-seen and silently skip re-logging it as a fresh event.
+/// Persists immediately (not just on the next refresh tick) so a pod
+/// restart right after clearing doesn't reload the pre-clear state from
+/// the PVC.
+async fn clear_graph(State(state): State<Arc<AppState>>) -> Json<Graph> {
+    let cutoff = now_unix();
+    *state.cleared_before_unix.write().await = cutoff;
+    let mut graph = state.graph.write().await;
+    graph.sandboxes.clear();
+    graph.events.clear();
+    graph.generated_at_unix = cutoff;
+    state.dedupe.write().await.clear();
+    if let Some(path) = state.config.state_file.as_deref() {
+        persist_state(path, &graph.sandboxes, &graph.events, cutoff);
+    }
+    Json(graph.clone())
 }
 
 /// Trusts the CAs mounted into every pod so a plain `reqwest::Client` can
@@ -436,6 +483,11 @@ async fn query_tempo_search(
                 .as_deref()
                 .and_then(|d| d.parse::<f64>().ok())
                 .map(|nanos| nanos / 1_000_000.0),
+            start_unix: span
+                .start_time_unix_nano
+                .as_deref()
+                .and_then(|n| n.parse::<i64>().ok())
+                .map(|nanos| nanos / 1_000_000_000),
         })
         .collect())
 }
@@ -483,6 +535,10 @@ fn mcp_server_from_claude_tool_name(name: &str) -> Option<String> {
 async fn refresh_graph(state: &AppState) -> Result<(), String> {
     let ns = &state.config.namespace;
     let base = state.config.thanos_url.trim_end_matches('/');
+    // Anything with its own sample time at or before this doesn't get
+    // (re-)admitted this tick — see `AppState::cleared_before_unix`'s doc
+    // comment for why `/api/clear` alone isn't enough.
+    let cleared_before = *state.cleared_before_unix.read().await;
 
     let session_started = query_instant(
         &state.http,
@@ -511,6 +567,25 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         &format!(r#"session_compliance_risk_score{{namespace="{ns}"}}"#),
     )
     .await?;
+    // The risk score's own value carries no useful timestamp (it's the
+    // score, not when it was pushed) — a separate `timestamp(...)` query,
+    // same trick as the two heartbeat metrics above, so a clear can tell
+    // "still the pre-clear verdict" apart from "a genuinely new one."
+    let risk_ts = query_instant(
+        &state.http,
+        base,
+        &format!(r#"timestamp(session_compliance_risk_score{{namespace="{ns}"}})"#),
+    )
+    .await?;
+    let risk_ts_by_key: HashMap<(String, String), i64> = risk_ts
+        .iter()
+        .filter_map(|s| {
+            let workspace = s.metric.get("workspace")?;
+            let sandbox = s.metric.get("sandbox")?;
+            let ts = s.value.1.parse::<f64>().ok()? as i64;
+            Some(((workspace.clone(), sandbox.clone()), ts))
+        })
+        .collect();
 
     // Best-effort, not `?` — unlike the three Prometheus queries above, a
     // Tempo hiccup shouldn't take down risk/heartbeat updates too. Two
@@ -589,6 +664,9 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                 continue;
             };
             let ts = ts as i64;
+            if ts <= cleared_before {
+                continue;
+            }
 
             let is_new = {
                 let mut dedupe = state.dedupe.write().await;
@@ -631,6 +709,11 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         else {
             continue;
         };
+        let key = (workspace.clone(), sandbox.clone());
+        let is_pre_clear = risk_ts_by_key.get(&key).is_none_or(|ts| *ts <= cleared_before);
+        if is_pre_clear {
+            continue;
+        }
         let entry = nodes
             .entry((workspace.clone(), sandbox.clone()))
             .or_insert_with(|| SandboxNode {
@@ -672,8 +755,14 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     // `last_duration_ms` *is* refreshed every time a fresh matching span
     // shows up, so the graph's shown latency tracks the most recent call,
     // not whatever it happened to be the first time the edge was observed.
+    // `start_unix.is_some_and(...)` rather than requiring it: a span with
+    // no parseable start time fails open (still shown) rather than
+    // silently vanishing if Tempo's response shape ever changes.
     for (kind, span_list) in [("claude", &claude_mcp_calls), ("codex", &codex_mcp_calls)] {
         for span in span_list {
+            if span.start_unix.is_some_and(|ts| ts <= cleared_before) {
+                continue;
+            }
             let (Some(workspace), Some(sandbox)) =
                 (span.attrs.get("workspace"), span.attrs.get("sandbox"))
             else {
@@ -748,7 +837,7 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
         events,
     };
     if let Some(path) = &state.config.state_file {
-        persist_state(path, &graph.sandboxes, &graph.events);
+        persist_state(path, &graph.sandboxes, &graph.events, cleared_before);
     }
     *state.graph.write().await = graph;
     Ok(())
@@ -777,6 +866,7 @@ fn load_state(path: &str) -> PersistedState {
         return PersistedState {
             sandboxes,
             events: Vec::new(),
+            cleared_before_unix: 0,
         };
     }
     eprintln!("audit-dashboard: ignoring unreadable state file {path}");
@@ -787,10 +877,11 @@ fn load_state(path: &str) -> PersistedState {
 /// never leaves a truncated/corrupt state file behind — `load_state`
 /// reading garbage on the next boot would silently drop every sandbox
 /// this dashboard has ever seen.
-fn persist_state(path: &str, sandboxes: &[SandboxNode], events: &[Event]) {
+fn persist_state(path: &str, sandboxes: &[SandboxNode], events: &[Event], cleared_before_unix: i64) {
     let state = PersistedState {
         sandboxes: sandboxes.to_vec(),
         events: events.to_vec(),
+        cleared_before_unix,
     };
     let body = match serde_json::to_vec(&state) {
         Ok(b) => b,
