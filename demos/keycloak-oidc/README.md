@@ -681,6 +681,23 @@ OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
    > `keycloak-openshell.${CLUSTER_APPS_DOMAIN}`) and update `KEYCLOAK_HOST`
    > in your `.env` to match.
 
+   > **This CR has no database configured, so Keycloak runs on ephemeral
+   > (in-memory H2) storage — confirmed live: the RHBK Operator's own
+   > `installPlanApproval: Automatic` (set on the Subscription above)
+   > silently auto-upgraded the operator mid-session, which recreated
+   > `keycloak-0` and wiped the entire `openshell` realm with no warning,
+   > breaking every banker's workspace membership (keyed to a Keycloak
+   > subject ID that no longer existed) and provider refresh token.
+   > `99-teardown.sh keep-keycloak`'s promise of a stable Keycloak to
+   > iterate against is only as good as this pod never restarting — a node
+   > drain, OOM, or operator upgrade any time between runs has the same
+   > effect. Recovery is step 1c's re-import plus re-running step 3
+   > (`onboard`) for every banker and fixing `workspace member`
+   > entries — there is no fix short of that once it happens. For a demo
+   > you intend to leave running unattended for any length of time,
+   > consider adding a real `db:` block (external/persistent Postgres) to
+   > this CR instead of relying on the default ephemeral store.
+
 4. Wait for the pod to become ready:
 
    ```bash
@@ -1450,6 +1467,15 @@ source .env
 ./scripts/06-deploy-mcp-servers.sh
 ```
 
+`OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL` must be set in `.env` to a
+real OpenAI-compatible chat-completions endpoint before running this —
+`mcp-market-news`'s news-generator sidecar calls it directly and has no
+built-in default provider (the chart used to default to DeepSeek here; it
+no longer does, so a wrong/placeholder value now fails the deploy instead
+of silently calling DeepSeek with an invalid key). Any reachable
+OpenAI-compatible endpoint works for this specific purpose, including a
+local vLLM deployment already used for the "Codex + BYO LLM" recipe.
+
 This deploys all five servers into `$OPENSHELL_NAMESPACE` as two-container
 pods (Envoy + the app), each with its own ServiceAccount, plus the shared
 Postgres and the shared embeddings `InferenceService`.
@@ -1527,17 +1553,36 @@ banker](#provision-every-banker) for just the command.
 > **Requires an Anthropic Messages API endpoint.** Claude Code uses the
 > Anthropic Messages API format, not OpenAI. This only works if your LLM
 > provider exposes an Anthropic-compatible endpoint (e.g. DeepSeek's
-> `https://api.deepseek.com/anthropic`, or a LiteLLM proxy configured with
-> an `/anthropic` route). Standard OpenAI-compatible endpoints (vLLM,
-> OpenAI, etc.) will **not** work — see the Codex recipe in [step 6 —
-> Alternative agents](#codex--byo-llm--mcp-tool) for an OpenAI-compatible
-> alternative.
+> `https://api.deepseek.com/anthropic`, a LiteLLM proxy configured with an
+> `/anthropic` route, or vLLM's own Python frontend, v0.18.0+ — see
+> [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md)
+> for the full matrix; a plain OpenAI-only endpoint won't work, but vLLM on
+> its own is not automatically excluded). See the Codex recipe in
+> [step 6 — Alternative agents](#codex--byo-llm--mcp-tool) for an
+> OpenAI-Responses-API-based alternative.
 >
 > **DeepSeek note:** the Anthropic-compatible endpoint uses a different
 > base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
 > (`https://api.deepseek.com`). Both use model name `deepseek-v4-flash`
 > (or `deepseek-v4-pro`) and the same API key. See `.env.example` for the
 > correct values.
+>
+> **Prefer an in-cluster endpoint's internal Service over an external
+> Route, if you have the choice.** Confirmed live (2026-09-16): an
+> external Route goes through the sandbox's forward-proxy (TLS-terminating,
+> credential-injecting), which was found broken for **all** external HTTPS
+> egress after a Keycloak realm re-import — every external host failed
+> identically (`Connection error` / empty reply), including hosts needing
+> no injected credential at all (`api.anthropic.com`,
+> `raw.githubusercontent.com`), and neither restarting the sandbox nor the
+> gateway pod fixed it. A plain `http://<svc>.<ns>.svc.cluster.local:<port>`
+> endpoint (e.g. a KServe/vLLM InferenceService's own ClusterIP Service)
+> bypasses that forward-proxy path entirely, the same way cluster-internal
+> MCP server calls already do — `scripts/15-provision-claude-sandbox.sh`
+> parses a non-443 port out of `ANTHROPIC_BASE_URL` for exactly this case.
+> This is a real fragility in the forward-proxy path worth tracking down
+> further, but switching to the internal Service is the practical
+> workaround for now.
 
 **Prerequisites** — set `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and
 `ANTHROPIC_MODEL` in your `.env`.
@@ -1554,17 +1599,31 @@ admin-only calls from their own terminal. The script runs the whole
 sequence from Terminal A for simplicity (Platform Admin bypasses every
 workspace check regardless, so it's guaranteed correct either way).
 
-**1. Provider profile + provider.** `<llm-host>` in the profile has to
-match `$ANTHROPIC_BASE_URL`'s real host — in 0.0.106 the proxy only
-injects credentials for matching endpoints. Both calls are `|| true`:
-re-running the script against a banker who's already provisioned should
-re-apply everything downstream, not fail on "already exists":
+**1. Provider profile + provider.** `<llm-host>`/`<llm-port>` in the
+profile have to match `$ANTHROPIC_BASE_URL`'s real host/port — in 0.0.106
+the proxy only injects credentials for matching endpoints, and the
+network-policy schema needs host and port as separate fields, not a URL
+(see the profile's own `endpoints:` block — every entry there, e.g.
+`audit-collector`'s, is a bare host/port pair). The profile's own
+hardcoded `port: 443` used to be the only option; parsing a port out of
+the URL matters as soon as `ANTHROPIC_BASE_URL` is a non-443 endpoint —
+e.g. a plain `http://<svc>.<ns>.svc.cluster.local:<port>` in-cluster
+Service (see the "Prefer an in-cluster endpoint" note above). Both calls
+are `|| true`: re-running the script against a banker who's already
+provisioned should re-apply everything downstream, not fail on "already
+exists":
 
 ```bash
-LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+LLM_HOST="${LLM_HOST_PORT%%:*}"
+if [[ "$LLM_HOST_PORT" == *:* ]]; then
+  LLM_PORT="${LLM_HOST_PORT##*:}"
+else
+  LLM_PORT=443
+fi
 
 TMPFILE=$(mktemp --suffix=.yaml)
-sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" providers/byo-claude-profile.yaml > "$TMPFILE"
 openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}" || true
 rm -f "$TMPFILE"
 
@@ -1572,6 +1631,26 @@ openshell provider create --name byo-claude --type byo-claude \
   --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
   --workspace "${USER_ID}" || true
 ```
+
+**Editing an already-imported profile.** `provider profile import` against
+an existing profile ID is a hard error, not a silent update — re-running
+the script above (or `.env`'s `ANTHROPIC_BASE_URL` changing) does **not**
+propagate to a banker already provisioned. Push the change explicitly:
+
+```bash
+openshell provider profile export byo-claude --workspace "${USER_ID}" -o yaml > /tmp/byo-claude-profile.yaml
+# edit /tmp/byo-claude-profile.yaml's endpoints[0].host/port by hand
+openshell provider profile update byo-claude -f /tmp/byo-claude-profile.yaml --workspace "${USER_ID}"
+```
+
+A sandbox that's already `Ready` also needs its pod (not just the Sandbox
+resource) recreated to pick up the change — confirmed live that a plain
+policy/profile update alone doesn't reach an already-running sandbox
+process: `oc -n "$OPENSHELL_NAMESPACE" delete pod "${USER_ID}--claude-${USER_ID}"`
+(or, more reliably if that alone doesn't clear it — confirmed needed at
+least once — delete and re-provision the sandbox outright: `openshell
+sandbox delete "claude-${USER_ID}" --workspace "${USER_ID}"` then re-run
+[`scripts/15-provision-claude-sandbox.sh`](scripts/15-provision-claude-sandbox.sh)).
 
 **2. The MCP config, with a placeholder token, baked into the sandbox at
 creation.** Every scene needs to hand `claude --mcp-config` a JSON blob
@@ -1886,6 +1965,27 @@ memory carries over.
 
 **Caveats:**
 
+- **`parrot` (release `v0.1.1`) fails against this demo's gateway with
+  `OpenShell SDK error: connect error: transport error`, on every
+  persona/sandbox/LLM endpoint.** Root cause: `parrot-core`'s own
+  `client.rs` never loads the gateway's `mtls/ca.crt` into the SDK's
+  `ClientConfig.ca_cert`, so it falls back to trusting only the public web
+  PKI — and this gateway's cert is self-signed. It's a real, small bug in
+  `parrot` itself (not a fundamental incompatibility with mTLS-enabled
+  gateways — the gateway's own client-cert requirement, separately, does
+  not block an OIDC-authenticated connection like this one). Until a
+  release with that fix ships, use the raw `openshell sandbox exec`
+  commands shown inline instead — for a real interactive session (not
+  just one-shot `-p`), add `--tty` and drop `-p`/`--output-format`, e.g.:
+  ```bash
+  openshell sandbox exec -n claude-bob --workspace bob --tty \
+    --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
+    -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config \
+       --permission-mode bypassPermissions
+  ```
+  That goes through `openshell-cli`'s own mTLS-capable connection path
+  rather than `openshell-sdk`, and drops you into Claude Code's real
+  interactive REPL.
 - **parrot always draws its dashboard, even for one-shot `--prompt` runs**
   (`enable_raw_mode()` isn't conditional on interactive mode) — it needs a
   real terminal. That's fine for every scene below (they already assume an
@@ -2814,7 +2914,11 @@ oc get route audit-dashboard -n "$OPENSHELL_NAMESPACE" -o jsonpath='{.spec.host}
 
 `audit-tempo` must be installed first — `audit-collector`'s traces
 pipeline forwards to its `tempo-audit` Service. See
-[`audit-tempo/README.md`](audit-tempo/README.md).
+[`audit-tempo/README.md`](audit-tempo/README.md). **Check
+`audit-collector/README.md`'s prerequisites before this step** —
+user-workload-monitoring isn't enabled on every cluster by default, and
+without it the dashboard's graph stays permanently empty with no error to
+point at the cause.
 
 Open that host in a browser — the graph starts empty until the next steps
 give it something to show.

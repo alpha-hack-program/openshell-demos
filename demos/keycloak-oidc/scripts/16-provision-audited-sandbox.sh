@@ -34,14 +34,16 @@ set -euo pipefail
 # session-auditor-openai-profile.yaml (see util/session-auditor/README.md
 # "Classification backend: Anthropic or OpenAI-compatible").
 #
-# NOTE: both session-auditor-*-profile.yaml files hardcode their egress
-# endpoint to api.deepseek.com, not a <llm-host> placeholder like
-# byo-claude-profile.yaml — this script reuses ANTHROPIC_BASE_URL/
-# OPENAI_BASE_URL as AUDITOR_LLM_BASE_URL's printed value on the assumption
-# your .env's classification backend already is DeepSeek (matching this
-# demo's own deepseek-claude precedent). If yours points somewhere else,
-# either edit the profile's endpoint host before importing it, or attach a
-# host that matches — network policy will otherwise deny the classify call.
+# Both session-auditor-*-profile.yaml files have a <llm-host>/<llm-port>
+# placeholder for the classification endpoint, same convention as
+# byo-claude-profile.yaml — this script substitutes both from
+# AUDITOR_BASE_URL_VALUE (ANTHROPIC_BASE_URL or OPENAI_BASE_URL depending
+# on AUDITOR_PROVIDER_STYLE) before importing. Previously hardcoded to
+# api.deepseek.com:443: confirmed live that once .env's LLM endpoint
+# pointed elsewhere, the classification call was silently network-policy-
+# denied on every turn — SessionStart/heartbeat metrics still arrived fine
+# (they don't call this endpoint), so there was no obvious error, just a
+# permanently-missing risk-classification metric.
 #
 # Idempotent, same conventions as 14/15 (provider/attach calls tolerate
 # "already exists").
@@ -123,9 +125,22 @@ fi
 # to /usr/local/bin/session-auditor only — see the profile's own comments)
 # and attach it alongside whatever 14/15 already attached.
 # ---------------------------------------------------------------------------
+# <llm-host>/<llm-port> substitution — see the profile's own comment on
+# why this can't stay hardcoded to api.deepseek.com:443.
+AUDITOR_LLM_HOST_PORT=$(echo "$AUDITOR_BASE_URL_VALUE" | sed 's|https\?://||;s|/.*||')
+AUDITOR_LLM_HOST="${AUDITOR_LLM_HOST_PORT%%:*}"
+if [[ "$AUDITOR_LLM_HOST_PORT" == *:* ]]; then
+  AUDITOR_LLM_PORT="${AUDITOR_LLM_HOST_PORT##*:}"
+else
+  AUDITOR_LLM_PORT=443
+fi
+AUDITOR_PROFILE_TMPFILE=$(mktemp --suffix=.yaml)
+sed -e "s/<llm-host>/${AUDITOR_LLM_HOST}/" -e "s/<llm-port>/${AUDITOR_LLM_PORT}/" \
+  "providers/session-auditor-${AUDITOR_PROVIDER_STYLE}-profile.yaml" > "$AUDITOR_PROFILE_TMPFILE"
 openshell provider profile import \
-  -f "providers/session-auditor-${AUDITOR_PROVIDER_STYLE}-profile.yaml" \
+  -f "$AUDITOR_PROFILE_TMPFILE" \
   --workspace "${USER_ID}" || true
+rm -f "$AUDITOR_PROFILE_TMPFILE"
 
 openshell provider create --name "session-auditor-${AUDITOR_PROVIDER_STYLE}" \
   --type "session-auditor-${AUDITOR_PROVIDER_STYLE}" \

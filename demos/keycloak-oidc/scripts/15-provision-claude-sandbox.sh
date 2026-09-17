@@ -52,8 +52,19 @@ IFS=',' read -ra SERVERS <<< "$SERVER_NAMES"
 [ ${#SERVERS[@]} -gt 0 ] || { echo "no server names given"; exit 1; }
 
 # In 0.0.106 the proxy only injects credentials for matching endpoints, so
-# the provider profile's <llm-host> placeholder must match the real host.
-LLM_HOST=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+# the provider profile's <llm-host>/<llm-port> placeholders must match the
+# real host/port. Defaults to 443 (the historical assumption, an external
+# HTTPS Route) if ANTHROPIC_BASE_URL doesn't specify a port — e.g. a plain
+# http://<svc>.<ns>.svc.cluster.local:<port> in-cluster endpoint (bypassing
+# an external Route's self-signed-cert forward-proxy path entirely, see
+# that section of the README) needs its real, non-443 port here.
+LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+LLM_HOST="${LLM_HOST_PORT%%:*}"
+if [[ "$LLM_HOST_PORT" == *:* ]]; then
+  LLM_PORT="${LLM_HOST_PORT##*:}"
+else
+  LLM_PORT=443
+fi
 
 # Claude Code is pre-installed in the chart's default sandbox image
 # (unlike Codex, which needs a newer custom image) — leave unset unless
@@ -72,7 +83,7 @@ cd "$DEMO_DIR"
 # time instead (OpenShell only injects credentials, not config values).
 # ---------------------------------------------------------------------------
 TMPFILE=$(mktemp --suffix=.yaml)
-sed "s/<llm-host>/${LLM_HOST}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" providers/byo-claude-profile.yaml > "$TMPFILE"
 # `|| true` only tolerates "already exists" on first run — confirmed live
 # that `import` against an already-imported profile ID is a hard error, not
 # a silent update, so editing this YAML and re-running this script does

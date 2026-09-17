@@ -47,8 +47,16 @@ config:
     required: false
 
 endpoints:
-  - host: "api.deepseek.com"
-    port: 443
+  # <llm-host>/<llm-port> are substituted by
+  # scripts/16-provision-audited-sandbox.sh from AUDITOR_LLM_BASE_URL (or
+  # ANTHROPIC_BASE_URL/OPENAI_BASE_URL if that's unset) — previously
+  # hardcoded to api.deepseek.com:443, which silently network-policy-denied
+  # every classification call once .env's LLM endpoint pointed elsewhere
+  # (confirmed live: SessionStart/heartbeat metrics arrived fine since
+  # those don't call this endpoint, but no risk-classification metric was
+  # ever pushed, with no error surfaced anywhere obvious).
+  - host: "<llm-host>"
+    port: <llm-port>
     protocol: rest
     access: read-write
     enforcement: enforce

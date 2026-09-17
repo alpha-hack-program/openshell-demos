@@ -13,8 +13,15 @@ credentials:
     header_name: x-api-key
 
 endpoints:
+  # <llm-host>/<llm-port> are both substituted by
+  # scripts/15-provision-claude-sandbox.sh from ANTHROPIC_BASE_URL — port
+  # defaults to 443 there if the URL doesn't specify one, but a plain
+  # http:// in-cluster endpoint (e.g. a KServe InferenceService's own
+  # ClusterIP Service, bypassing the external Route + forward-proxy TLS
+  # termination path entirely) needs its real port here, not a
+  # hardcoded 443.
   - host: "<llm-host>"
-    port: 443
+    port: <llm-port>
     protocol: rest
     access: read-write
     enforcement: enforce
