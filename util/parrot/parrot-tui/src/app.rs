@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use parrot_core::{
     tool_result_text, Agent, AgentEvent, LogEntry, ParrotClient, RunStatus, SessionState,
     StreamSource, StreamedExecOptions, TurnOptions,
@@ -55,16 +55,37 @@ pub async fn run_dashboard<B: Backend>(
         environment: &options.environment,
     };
 
+    let mut view = LogView::default();
+
     if let Some(prompt) = &options.one_shot_prompt {
-        run_turn(terminal, client, &ctx, prompt, &mut state, palette).await?;
-        return wait_for_keypress();
+        run_turn(
+            terminal, client, &ctx, prompt, &mut state, palette, &mut view,
+        )
+        .await?;
+        return wait_for_keypress(&mut state, palette, &mut view, terminal, sandbox);
     }
 
     let mut input = String::new();
     loop {
-        terminal.draw(|frame| draw_dashboard(frame, palette, &state, sandbox, Some(&input)))?;
+        terminal.draw(|frame| {
+            draw_dashboard(
+                frame,
+                palette,
+                &state,
+                sandbox,
+                Some(&input),
+                &mut view.scroll,
+            )
+        })?;
 
         if let Event::Key(key) = event::read()? {
+            if is_copy_log_shortcut(&key) {
+                copy_log_to_clipboard(&mut state, palette, &mut view.clipboard);
+                continue;
+            }
+            if handle_scroll_key(key.code, &mut view.scroll) {
+                continue;
+            }
             match key.code {
                 KeyCode::Enter => {
                     let prompt = input.trim().to_string();
@@ -72,8 +93,10 @@ pub async fn run_dashboard<B: Backend>(
                         continue;
                     }
                     input.clear();
-                    let keep_going =
-                        run_turn(terminal, client, &ctx, &prompt, &mut state, palette).await?;
+                    let keep_going = run_turn(
+                        terminal, client, &ctx, &prompt, &mut state, palette, &mut view,
+                    )
+                    .await?;
                     if !keep_going {
                         return Ok(());
                     }
@@ -87,6 +110,17 @@ pub async fn run_dashboard<B: Backend>(
             }
         }
     }
+}
+
+/// Log-pane UI state that outlives any single turn: how far the user has
+/// scrolled up from the tail, and the clipboard handle `Ctrl+Y` copies into.
+///
+/// `clipboard` is `None` until the first copy, then kept open for the rest
+/// of the session — see the comment on `copy_log_to_clipboard` for why.
+#[derive(Default)]
+struct LogView {
+    scroll: u16,
+    clipboard: Option<arboard::Clipboard>,
 }
 
 /// Turn-invariant settings, bundled so `run_turn` doesn't grow a parameter
@@ -109,6 +143,7 @@ async fn run_turn<B: Backend>(
     prompt: &str,
     state: &mut SessionState,
     palette: &TuiPalette,
+    view: &mut LogView,
 ) -> io::Result<bool> {
     let turn_opts = TurnOptions {
         prompt,
@@ -126,6 +161,7 @@ async fn run_turn<B: Backend>(
     };
 
     state.begin_turn();
+    state.push_user_prompt(prompt);
 
     let mut exec = match client
         .exec_streamed(ctx.sandbox, ctx.workspace, &command, exec_opts)
@@ -176,10 +212,17 @@ async fn run_turn<B: Backend>(
                 if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
                     return Ok(false);
                 }
+                if is_copy_log_shortcut(&key) {
+                    copy_log_to_clipboard(state, palette, &mut view.clipboard);
+                } else {
+                    handle_scroll_key(key.code, &mut view.scroll);
+                }
             }
         }
 
-        terminal.draw(|frame| draw_dashboard(frame, palette, state, ctx.sandbox, None))?;
+        terminal.draw(|frame| {
+            draw_dashboard(frame, palette, state, ctx.sandbox, None, &mut view.scroll)
+        })?;
 
         if stdout_done && stderr_done && outcome_done {
             return Ok(true);
@@ -187,9 +230,26 @@ async fn run_turn<B: Backend>(
     }
 }
 
-fn wait_for_keypress() -> io::Result<()> {
+/// After a one-shot turn finishes, let the user scroll the transcript and
+/// copy it before exiting on the first key that isn't a scroll/copy command.
+fn wait_for_keypress<B: Backend>(
+    state: &mut SessionState,
+    palette: &TuiPalette,
+    view: &mut LogView,
+    terminal: &mut Terminal<B>,
+    sandbox: &str,
+) -> io::Result<()> {
     loop {
-        if let Event::Key(_) = event::read()? {
+        terminal
+            .draw(|frame| draw_dashboard(frame, palette, state, sandbox, None, &mut view.scroll))?;
+        if let Event::Key(key) = event::read()? {
+            if is_copy_log_shortcut(&key) {
+                copy_log_to_clipboard(state, palette, &mut view.clipboard);
+                continue;
+            }
+            if handle_scroll_key(key.code, &mut view.scroll) {
+                continue;
+            }
             return Ok(());
         }
     }
@@ -201,6 +261,7 @@ fn draw_dashboard(
     state: &SessionState,
     sandbox: &str,
     composing_input: Option<&str>,
+    scroll_from_bottom: &mut u16,
 ) {
     let area = frame.area();
     frame.render_widget(
@@ -229,16 +290,24 @@ fn draw_dashboard(
         .iter()
         .flat_map(|entry| render_log_entry(entry, palette, inner_width))
         .collect();
-    let scroll = u16::try_from(lines.len())
-        .unwrap_or(u16::MAX)
-        .saturating_sub(inner_height);
 
-    let log = Paragraph::new(Text::from(lines)).scroll((scroll, 0)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("agent output")
-            .border_style(Style::default().fg(palette.muted)),
-    );
+    // `scroll_from_bottom` counts lines scrolled up from the tail; 0 always
+    // means "following the latest output". Clamped here (not at the point
+    // the user pressed a key) since the max depends on the log length and
+    // viewport height, both of which are only known once we're drawing.
+    let total_lines = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let max_offset = total_lines.saturating_sub(inner_height);
+    *scroll_from_bottom = (*scroll_from_bottom).min(max_offset);
+    let scroll_top = max_offset - *scroll_from_bottom;
+
+    let log = Paragraph::new(Text::from(lines))
+        .scroll((scroll_top, 0))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("agent output")
+                .border_style(Style::default().fg(palette.muted)),
+        );
     frame.render_widget(log, chunks[1]);
 
     let footer = match composing_input {
@@ -246,7 +315,8 @@ fn draw_dashboard(
             Span::styled("> ", Style::default().fg(palette.accent)),
             Span::styled(input.to_string(), Style::default().fg(palette.foreground)),
         ]),
-        None => Line::from("[q] quit").style(Style::default().fg(palette.muted)),
+        None => Line::from("[q] quit  [\u{2191}/\u{2193}/PgUp/PgDn/Home/End] scroll  [^Y] copy")
+            .style(Style::default().fg(palette.muted)),
     };
     frame.render_widget(Paragraph::new(footer), chunks[2]);
 }
@@ -270,8 +340,93 @@ fn header_line<'a>(palette: &TuiPalette, state: &SessionState, sandbox: &'a str)
     Paragraph::new(line)
 }
 
+/// Move the log viewport by `code`, if it's a recognized scroll key.
+/// Returns `false` (and leaves `scroll_from_bottom` untouched) for any
+/// other key, so callers can fall through to their own handling.
+fn handle_scroll_key(code: KeyCode, scroll_from_bottom: &mut u16) -> bool {
+    const PAGE: u16 = 10;
+    match code {
+        KeyCode::Up => *scroll_from_bottom = scroll_from_bottom.saturating_add(1),
+        KeyCode::Down => *scroll_from_bottom = scroll_from_bottom.saturating_sub(1),
+        KeyCode::PageUp => *scroll_from_bottom = scroll_from_bottom.saturating_add(PAGE),
+        KeyCode::PageDown => *scroll_from_bottom = scroll_from_bottom.saturating_sub(PAGE),
+        // Clamped against the real max in `draw_dashboard`, once the log
+        // length is known.
+        KeyCode::Home => *scroll_from_bottom = u16::MAX,
+        KeyCode::End => *scroll_from_bottom = 0,
+        _ => return false,
+    }
+    true
+}
+
+fn is_copy_log_shortcut(key: &crossterm::event::KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('y')
+}
+
+/// Copies the whole transcript so far (not just what's currently visible)
+/// to the system clipboard as plain text, and drops a status line in the
+/// log reporting success or failure.
+///
+/// Uses `arboard` (the native OS clipboard) rather than the OSC 52 terminal
+/// escape sequence: OSC 52 needs no extra dependency, but is unsupported in
+/// GNOME Terminal/VTE-based terminals and in stock macOS Terminal.app.
+/// `arboard` talks to the OS clipboard directly and works out of the box on
+/// macOS, on Linux/X11, and on Linux/Wayland desktops via the XWayland
+/// fallback that GNOME/KDE ship by default.
+///
+/// `clipboard` is reused across calls and kept alive for the rest of the
+/// session (not opened-and-dropped per call): on X11, and on Wayland's
+/// data-control protocol, the process that sets the selection has to stay
+/// around to answer paste requests, since neither has OS-level clipboard
+/// storage of its own. Dropping the handle right after `set_text` meant
+/// nothing was left to answer a paste even moments later while parrot was
+/// still running.
+fn copy_log_to_clipboard(
+    state: &mut SessionState,
+    palette: &TuiPalette,
+    clipboard: &mut Option<arboard::Clipboard>,
+) {
+    let text = state
+        .log
+        .iter()
+        .map(|entry| plain_log_line(entry, palette))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let line_count = state.log.len();
+
+    let result: Result<(), arboard::Error> = (|| {
+        if clipboard.is_none() {
+            *clipboard = Some(arboard::Clipboard::new()?);
+        }
+        clipboard
+            .as_mut()
+            .expect("just initialized above")
+            .set_text(text)
+    })();
+
+    let message = match result {
+        Ok(()) => format!("copied {line_count} log entries to clipboard"),
+        Err(err) => format!("clipboard error: {err}"),
+    };
+    state.log.push(LogEntry {
+        source: StreamSource::Stdout,
+        event: AgentEvent::Info(message),
+    });
+}
+
+fn plain_log_line(entry: &LogEntry, palette: &TuiPalette) -> String {
+    let (prefix, text, _color) = classify_entry(entry, palette);
+    format!("{prefix}{text}")
+}
+
 fn render_log_entry(entry: &LogEntry, palette: &TuiPalette, width: u16) -> Vec<Line<'static>> {
-    let (prefix, text, color) = match &entry.event {
+    let (prefix, text, color) = classify_entry(entry, palette);
+    wrap_entry(prefix, &text, width, color)
+}
+
+fn classify_entry(entry: &LogEntry, palette: &TuiPalette) -> (&'static str, String, Color) {
+    match &entry.event {
+        AgentEvent::UserPrompt(text) => ("> ", text.clone(), palette.accent),
         AgentEvent::AssistantText(text) => ("» ", text.clone(), palette.assistant_text),
         AgentEvent::ToolCall { name, .. } => {
             ("→ ", format!("tool call: {name}"), palette.tool_call)
@@ -306,8 +461,7 @@ fn render_log_entry(entry: &LogEntry, palette: &TuiPalette, width: u16) -> Vec<L
             palette.muted,
         ),
         AgentEvent::Unparseable(line) => ("  ", line.clone(), palette.muted),
-    };
-    wrap_entry(prefix, &text, width, color)
+    }
 }
 
 /// Best-effort label for a genuinely unclassified event, so the fallback
@@ -378,6 +532,7 @@ fn wrap_paragraph(paragraph: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
 
     fn plain(lines: &[Line<'_>]) -> Vec<String> {
         lines
@@ -417,5 +572,110 @@ mod tests {
             "item": {"id": "item_2", "type": "mcp_tool_call", "server": "mcp-portfolio"}
         });
         assert_eq!(unknown_label(&value), "item.completed/mcp_tool_call");
+    }
+
+    fn test_palette() -> TuiPalette {
+        TuiPalette {
+            background: Color::Black,
+            foreground: Color::White,
+            accent: Color::White,
+            muted: Color::White,
+            error: Color::White,
+            assistant_text: Color::White,
+            tool_call: Color::White,
+            tool_result: Color::White,
+            result: Color::White,
+        }
+    }
+
+    /// Every visible cell's symbol, concatenated — enough to check whether
+    /// a given line of text is anywhere on screen without caring exactly
+    /// where.
+    fn rendered_text(buffer: &ratatui::buffer::Buffer) -> String {
+        buffer.content().iter().map(|cell| cell.symbol()).collect()
+    }
+
+    fn log_with_numbered_lines(count: usize) -> SessionState {
+        let mut state = SessionState::new();
+        for i in 0..count {
+            state.push_user_prompt(&format!("line-{i:03}"));
+        }
+        state
+    }
+
+    #[test]
+    fn draw_dashboard_follows_the_tail_by_default() {
+        let palette = test_palette();
+        let state = log_with_numbered_lines(50);
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let mut scroll: u16 = 0;
+
+        terminal
+            .draw(|frame| draw_dashboard(frame, &palette, &state, "sandbox", None, &mut scroll))
+            .unwrap();
+
+        let text = rendered_text(terminal.backend().buffer());
+        assert!(text.contains("line-049"), "tail line missing:\n{text}");
+        assert!(!text.contains("line-000"), "unexpected head line:\n{text}");
+    }
+
+    #[test]
+    fn scroll_up_reveals_older_lines_and_end_returns_to_the_tail() {
+        let palette = test_palette();
+        let state = log_with_numbered_lines(50);
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let mut scroll: u16 = 0;
+
+        // Up doesn't move far enough on its own to change what's visible in
+        // a 10-line viewport with wrapped single-line entries, so scroll by
+        // a full page to make the shift unambiguous.
+        handle_scroll_key(KeyCode::PageUp, &mut scroll);
+        terminal
+            .draw(|frame| draw_dashboard(frame, &palette, &state, "sandbox", None, &mut scroll))
+            .unwrap();
+        let scrolled = rendered_text(terminal.backend().buffer());
+        assert!(
+            !scrolled.contains("line-049"),
+            "tail still visible after scrolling up:\n{scrolled}"
+        );
+
+        handle_scroll_key(KeyCode::End, &mut scroll);
+        terminal
+            .draw(|frame| draw_dashboard(frame, &palette, &state, "sandbox", None, &mut scroll))
+            .unwrap();
+        let followed = rendered_text(terminal.backend().buffer());
+        assert!(
+            followed.contains("line-049"),
+            "End didn't return to the tail:\n{followed}"
+        );
+    }
+
+    #[test]
+    fn scroll_up_is_clamped_at_the_top_of_the_log() {
+        let mut scroll: u16 = 0;
+        handle_scroll_key(KeyCode::Home, &mut scroll);
+        assert_eq!(scroll, u16::MAX, "Home requests max scroll pending clamp");
+
+        let palette = test_palette();
+        let state = log_with_numbered_lines(50);
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|frame| draw_dashboard(frame, &palette, &state, "sandbox", None, &mut scroll))
+            .unwrap();
+
+        // Clamped to the log's actual top instead of panicking or
+        // underflowing the scroll-top subtraction in draw_dashboard.
+        let text = rendered_text(terminal.backend().buffer());
+        assert!(
+            text.contains("line-000"),
+            "top line missing after clamp:\n{text}"
+        );
+    }
+
+    #[test]
+    fn handle_scroll_key_ignores_non_scroll_keys() {
+        let mut scroll: u16 = 3;
+        assert!(!handle_scroll_key(KeyCode::Char('y'), &mut scroll));
+        assert_eq!(scroll, 3);
     }
 }
