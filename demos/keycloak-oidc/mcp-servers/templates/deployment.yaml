@@ -138,6 +138,14 @@ spec:
               value: {{ $newsGen.openaiBaseUrl | quote }}
             - name: OPENAI_MODEL
               value: {{ $newsGen.openaiModel | quote }}
+            {{- if $newsGen.caConfigMapName }}
+            - name: OPENAI_CA_CERT_PATH
+              value: /etc/ssl/extra-ca/ca.crt
+            {{- end }}
+            {{- if $newsGen.chunkSize }}
+            - name: NEWS_GENERATION_CHUNK_SIZE
+              value: {{ $newsGen.chunkSize | quote }}
+            {{- end }}
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # news_generator also embeds each corpus item as it writes
             # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
@@ -152,6 +160,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            {{- if $newsGen.caConfigMapName }}
+            - name: openai-ca
+              mountPath: /etc/ssl/extra-ca
+              readOnly: true
+            {{- end }}
           resources: {}
         {{- end }}
       {{- if .newsGenerator }}
@@ -173,6 +186,14 @@ spec:
               value: {{ $newsGen.openaiBaseUrl | quote }}
             - name: OPENAI_MODEL
               value: {{ $newsGen.openaiModel | quote }}
+            {{- if $newsGen.caConfigMapName }}
+            - name: OPENAI_CA_CERT_PATH
+              value: /etc/ssl/extra-ca/ca.crt
+            {{- end }}
+            {{- if $newsGen.chunkSize }}
+            - name: NEWS_GENERATION_CHUNK_SIZE
+              value: {{ $newsGen.chunkSize | quote }}
+            {{- end }}
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # news_generator also embeds each corpus item as it writes
             # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
@@ -187,6 +208,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            {{- if $newsGen.caConfigMapName }}
+            - name: openai-ca
+              mountPath: /etc/ssl/extra-ca
+              readOnly: true
+            {{- end }}
           resources: {}
       {{- end }}
       volumes:
@@ -197,6 +223,11 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .name }}-data
+        {{- end }}
+        {{- if and .newsGenerator $newsGen.caConfigMapName }}
+        - name: openai-ca
+          configMap:
+            name: {{ $newsGen.caConfigMapName }}
         {{- end }}
 ---
 {{- if .newsGenerator }}

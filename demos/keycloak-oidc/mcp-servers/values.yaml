@@ -85,17 +85,36 @@ postgres:
 # it inside a `servers[N]` list entry would hit the documented `--set`
 # list-merge gotcha above.
 newsGenerator:
-  # Secret — intentionally left empty here, never commit a real key.
-  # 06-deploy-mcp-servers.sh passes it via --set, sourced from this demo's
-  # own .env (OPENAI_API_KEY), the same way keycloak.issuer above is
-  # derived from KEYCLOAK_HOST.
+  # No defaults for any of these three — all required, all passed via
+  # --set by 06-deploy-mcp-servers.sh, sourced from this demo's own .env
+  # (OPENAI_API_KEY/OPENAI_BASE_URL/OPENAI_MODEL — the same vars used by
+  # the "Codex + BYO LLM" recipe's endpoint, the same way keycloak.issuer
+  # above is derived from KEYCLOAK_HOST). Deliberately no fallback to a
+  # specific provider (previously defaulted to DeepSeek here) — that
+  # silently broke whenever .env's endpoint was pointed elsewhere (e.g. a
+  # local vLLM endpoint) without a real DeepSeek key set, since Helm would
+  # keep using this file's default instead of failing loudly. Leaving
+  # these empty makes the deploy script's own required-var checks the
+  # single source of truth.
   openaiApiKey: ""
-  # Reuses this demo's existing BYO-LLM DeepSeek endpoint (see
-  # demos/keycloak-oidc/.env and the README's "Codex + BYO LLM" recipe) —
-  # not secret, safe to default here; override via --set if you want a
-  # different provider/model.
-  openaiBaseUrl: "https://api.deepseek.com"
-  openaiModel: "deepseek-v4-flash"
+  openaiBaseUrl: ""
+  openaiModel: ""
+  # Optional. Name of a ConfigMap (key ca.crt) in this namespace with an
+  # extra CA to trust for the OPENAI_BASE_URL call — needed when that
+  # endpoint's Route rides the cluster's self-signed default ingress cert
+  # (same class of problem as the gateway's own server.oidc.caConfigMapName
+  # — see README's "OIDC issuer TLS trust" section). Empty = no extra trust
+  # (fine for a publicly-trusted endpoint like api.openai.com).
+  # 06-deploy-mcp-servers.sh auto-detects the openshell-oidc-ca ConfigMap
+  # step 2 may have already created and passes it here if present.
+  caConfigMapName: ""
+  # Optional. Max items requested per single LLM call (news_generator's own
+  # NEWS_GENERATION_CHUNK_SIZE, default 3 if unset here — see that binary's
+  # DEFAULT_GENERATION_CHUNK_SIZE comment for why: a slow/loaded BYO-LLM
+  # endpoint can take >30s per call, tripping the default OpenShift Route
+  # timeout). Raise this for a fast endpoint (e.g. real api.openai.com) to
+  # cut the number of calls; lower it if you still see 504s.
+  chunkSize: ""
   intervalMinutes: 5
   batchSize: 5
   pvcSize: "1Gi"
@@ -229,7 +248,7 @@ servers:
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "0.2.0"     # 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
+      tag: "0.2.3"     # 0.2.3 makes the chunk size configurable (NEWS_GENERATION_CHUNK_SIZE / newsGenerator.chunkSize above, default 3) and applies chunking to the loop drip-feed cycle too, not just batch 1 — 0.2.2 chunked only batch-1 generation to avoid a 504 from a 30s Route timeout on slower BYO-LLM endpoints (7 items/call still too slow against this cluster's endpoint) — 0.2.1 adds OPENAI_CA_CERT_PATH support in news_generator (see newsGenerator.caConfigMapName above) — 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)

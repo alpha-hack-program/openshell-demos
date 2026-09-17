@@ -38,6 +38,26 @@ const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
 const DEFAULT_JSONL_PATH: &str = "data/news.jsonl";
 const DEFAULT_TV_PATH: &str = "data/news.tv";
 
+/// Builds the HTTP client used for the `OPENAI_BASE_URL` call. If
+/// `OPENAI_CA_CERT_PATH` is set, its PEM contents are trusted as an
+/// additional root — needed when `OPENAI_BASE_URL` points at a Route riding
+/// a cluster's self-signed default ingress cert (the common case on a lab
+/// OpenShift cluster; see `mcp-servers/values.yaml`'s
+/// `newsGenerator.caConfigMapName`). Left unset, this is a plain client
+/// trusting only the standard webpki roots (the right default for a public
+/// endpoint like `api.openai.com`).
+fn build_http_client() -> anyhow::Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder();
+    if let Ok(ca_path) = std::env::var("OPENAI_CA_CERT_PATH") {
+        let pem = std::fs::read(&ca_path)
+            .map_err(|e| anyhow::anyhow!("failed to read OPENAI_CA_CERT_PATH {ca_path}: {e}"))?;
+        let cert = reqwest::Certificate::from_pem(&pem)
+            .map_err(|e| anyhow::anyhow!("failed to parse CA cert at {ca_path}: {e}"))?;
+        builder = builder.add_root_certificate(cert);
+    }
+    Ok(builder.build()?)
+}
+
 /// Shape of one item as returned by the LLM, before we assign an `id` and
 /// a real generation timestamp.
 #[derive(Debug, Deserialize)]
@@ -50,23 +70,59 @@ struct GeneratedNewsItem {
     sentiment: String,
 }
 
-/// Batch 1 prompt — background noise. `{tickers_and_sectors}` is filled in
-/// from `SELECT DISTINCT ticker, sector FROM positions` against the shared
-/// portfolio database. Reproduced verbatim in README.md.
-fn batch1_prompt(tickers_and_sectors: &str) -> String {
-    format!(
-        "Generate 35 short fictional financial news headlines for these tickers/sectors: \
-         {tickers_and_sectors}. Each item: `headline` (one sentence), `body` (2-3 sentences), \
-         `ticker` (can be null if sector-level), `sector`, `sentiment` (positive/negative/neutral). \
-         Most should be normal, low-impact market noise, not extraordinary events. Return only \
-         a JSON array, no extra text."
-    )
+/// Total background-noise items generated on first run (batch 1).
+const BATCH1_TOTAL_ITEMS: usize = 35;
+
+/// Default cap on items requested per `/v1/chat/completions` call, override
+/// with `NEWS_GENERATION_CHUNK_SIZE`. Confirmed live: asking for too many
+/// items in a single call can take well over 30s against a small/loaded
+/// BYO-LLM endpoint, longer than the default OpenShift Route backend
+/// timeout (`haproxy.router.openshift.io/timeout`, 30s unless overridden on
+/// that Route) — the request never finishes and the Route returns a 504
+/// HTML page, which then fails JSON-decoding as "expected value at line 1
+/// column 1". Even 7 items/call was observed to take ~30s against this
+/// endpoint (redhataigemma-4-26b-a4b-it-sml on a lab cluster); 3 leaves
+/// margin. This is inherently endpoint-speed-dependent, hence the env var
+/// rather than a single hardcoded value.
+const DEFAULT_GENERATION_CHUNK_SIZE: usize = 3;
+
+/// Requests `total` items in chunks of at most `chunk_size`, one
+/// `/v1/chat/completions` call per chunk — see
+/// `DEFAULT_GENERATION_CHUNK_SIZE`'s comment for why this isn't a single
+/// call. Reuses [`topup_prompt`]'s wording for every chunk, batch 1
+/// included — there's nothing batch-1-specific about the prompt itself,
+/// only the total item count differs.
+async fn generate_items_chunked(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    tickers_and_sectors: &str,
+    total: usize,
+    chunk_size: usize,
+) -> anyhow::Result<Vec<NewsItem>> {
+    let mut items = Vec::with_capacity(total);
+    let mut remaining = total;
+    while remaining > 0 {
+        let count = remaining.min(chunk_size);
+        let text = call_openai(
+            client,
+            base_url,
+            api_key,
+            model,
+            &topup_prompt(count, tickers_and_sectors),
+        )
+        .await?;
+        items.extend(to_news_items(parse_generated_items(&text)?));
+        remaining -= count;
+    }
+    Ok(items)
 }
 
-/// Drip-feed prompt used by `GENERATION_MODE=loop` — same shape as
-/// [`batch1_prompt`] but with a caller-supplied item count instead of a
-/// fixed 35, so `GENERATION_BATCH_SIZE` controls how much "new" news shows
-/// up each cycle.
+/// Background-noise prompt, parameterized by item count — used both for
+/// batch 1 (via [`generate_items_chunked`], `count` = a chunk of
+/// `BATCH1_TOTAL_ITEMS`) and for each `GENERATION_MODE=loop` drip-feed
+/// cycle (`count` = a chunk of `GENERATION_BATCH_SIZE`).
 fn topup_prompt(count: usize, tickers_and_sectors: &str) -> String {
     format!(
         "Generate {count} short fictional financial news headlines for these tickers/sectors: \
@@ -143,7 +199,11 @@ async fn call_openai(
 ) -> anyhow::Result<String> {
     let body = serde_json::json!({
         "model": model,
-        "max_tokens": 16000,
+        // Generous for the largest single call this makes (a
+        // BATCH1_CHUNK_SIZE-item JSON array) without being so large that a
+        // model that fails to stop cleanly runs long enough to trip an
+        // upstream proxy timeout (see BATCH1_CHUNK_SIZE's comment).
+        "max_tokens": 4000,
         "messages": [
             { "role": "user", "content": prompt }
         ]
@@ -272,6 +332,7 @@ async fn run_loop(
     tv_path: &str,
     interval: Duration,
     batch_size: usize,
+    chunk_size: usize,
 ) -> anyhow::Result<()> {
     let embedder = Embedder::new()?;
     let mut corpus = if std::path::Path::new(jsonl_path).exists() {
@@ -287,20 +348,20 @@ async fn run_loop(
     );
 
     loop {
-        tracing::info!(batch_size, "Generating drip-feed batch");
-        let cycle_result = call_openai(
+        tracing::info!(batch_size, chunk_size, "Generating drip-feed batch");
+        let cycle_result = generate_items_chunked(
             client,
             base_url,
             api_key,
             model,
-            &topup_prompt(batch_size, tickers_and_sectors),
+            tickers_and_sectors,
+            batch_size,
+            chunk_size,
         )
-        .await
-        .and_then(|text| parse_generated_items(&text));
+        .await;
 
         match cycle_result {
-            Ok(generated) => {
-                let new_items = to_news_items(generated);
+            Ok(new_items) => {
                 tracing::info!(count = new_items.len(), "Generated new items");
                 corpus.extend(new_items);
 
@@ -345,12 +406,16 @@ async fn main() -> anyhow::Result<()> {
     let jsonl_path =
         std::env::var("NEWS_JSONL_PATH").unwrap_or_else(|_| DEFAULT_JSONL_PATH.to_string());
     let tv_path = std::env::var("NEWS_TV_PATH").unwrap_or_else(|_| DEFAULT_TV_PATH.to_string());
+    let chunk_size: usize = std::env::var("NEWS_GENERATION_CHUNK_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_GENERATION_CHUNK_SIZE);
 
     tracing::info!("Reading distinct ticker/sector pairs from positions table");
     let tickers_and_sectors = load_tickers_and_sectors(&database_url).await?;
     tracing::info!(tickers_and_sectors, "Loaded tickers/sectors");
 
-    let client = reqwest::Client::new();
+    let client = build_http_client()?;
 
     let generation_mode = std::env::var("GENERATION_MODE").unwrap_or_else(|_| "once".to_string());
     if generation_mode == "loop" {
@@ -378,20 +443,27 @@ async fn main() -> anyhow::Result<()> {
             &tv_path,
             Duration::from_secs(interval_minutes * 60),
             batch_size,
+            chunk_size,
         )
         .await;
     }
 
-    tracing::info!(model, base_url, "Requesting batch 1 (background noise)");
-    let batch1_text = call_openai(
+    tracing::info!(
+        model,
+        base_url,
+        chunk_size,
+        "Requesting batch 1 (background noise)"
+    );
+    let batch1 = generate_items_chunked(
         &client,
         &base_url,
         &api_key,
         &model,
-        &batch1_prompt(&tickers_and_sectors),
+        &tickers_and_sectors,
+        BATCH1_TOTAL_ITEMS,
+        chunk_size,
     )
     .await?;
-    let batch1 = to_news_items(parse_generated_items(&batch1_text)?);
     tracing::info!(count = batch1.len(), "Batch 1 generated");
 
     tracing::info!("Requesting seeded item 1 (NDFR exact-ticker hit)");

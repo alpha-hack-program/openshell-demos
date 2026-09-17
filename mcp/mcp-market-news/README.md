@@ -233,9 +233,13 @@ GENERATION_BATCH_SIZE=5 \
 
 ### Generation prompts (verbatim)
 
-**Batch 1 — background noise (35 items):**
+**Batch 1 — background noise (`BATCH1_TOTAL_ITEMS` = 35 items total,
+requested in chunks of at most `NEWS_GENERATION_CHUNK_SIZE`, default 3 —
+i.e. 12 sequential calls by default). The same chunking applies to every
+`GENERATION_MODE=loop` drip-feed cycle's `GENERATION_BATCH_SIZE` items,
+not just batch 1:**
 
-> Generate 35 short fictional financial news headlines for these
+> Generate {count} short fictional financial news headlines for these
 > tickers/sectors: {tickers_and_sectors}. Each item: `headline` (one
 > sentence), `body` (2-3 sentences), `ticker` (can be null if
 > sector-level), `sector`, `sentiment` (positive/negative/neutral). Most
@@ -243,7 +247,24 @@ GENERATION_BATCH_SIZE=5 \
 > Return only a JSON array, no extra text.
 
 (`{tickers_and_sectors}` is rendered as a comma-separated list from the
-`SELECT DISTINCT ticker, sector FROM positions` query.)
+`SELECT DISTINCT ticker, sector FROM positions` query. `{count}` is
+`NEWS_GENERATION_CHUNK_SIZE`, or fewer on the last chunk of a batch.)
+
+Chunked rather than one big call (confirmed live, 2026-09-16): asking a
+small/loaded BYO-LLM endpoint for too many items in one call can take
+longer than 30s, the default `haproxy.router.openshift.io/timeout` on an
+OpenShift Route — the request never completes and the Route returns a 504
+HTML error page instead of JSON, which then fails
+`parse_generated_items`. Even 7 items/call was observed to take ~30s
+against one lab cluster's BYO-LLM endpoint (`redhataigemma-4-26b-a4b-it-sml`);
+3 leaves margin. Chunking keeps each call's generation time (and therefore
+exposure to a proxy timeout outside this service's control) roughly
+constant regardless of the total item count — see
+`DEFAULT_GENERATION_CHUNK_SIZE`'s doc comment in
+`src/bin/news_generator.rs`. Override `NEWS_GENERATION_CHUNK_SIZE` (or the
+Helm chart's `newsGenerator.chunkSize`) to raise it against a faster
+endpoint (e.g. real `api.openai.com`), or lower it further if you still
+see 504s.
 
 **Batch 2, seeded item 1 — guaranteed exact-ticker hit:**
 
