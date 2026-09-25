@@ -156,7 +156,7 @@ impl MarketNewsServer {
     /// Never returns the full feed — only the already-narrowed result of
     /// one or both stages.
     #[tool(
-        description = "Returns market news relevant to the given tickers/sectors (last 48h). Call this after resolving a client's portfolio positions (e.g. via mcp-portfolio) and pass that portfolio's tickers/sectors. Exact ticker/sector matches are always returned; if fewer than 2 exact matches are found, a semantic search over sector meaning is also run so ticker-agnostic sector news (e.g. a generic logistics regulation story) isn't missed."
+        description = "Returns market news relevant to the given tickers/sectors (last 48h). Only call this with tickers/sectors read directly from a client's real portfolio positions (mcp-portfolio's get_positions/get_top_client_by_aum), for a client already confirmed to be in your own book (mcp-portfolio's list_my_clients). Never guess, infer, or derive a ticker from a company name yourself — if the company isn't one of your resolved clients' positions, you have no ticker to pass here and must say so instead of calling this tool. Exact ticker/sector matches are always returned; if fewer than 2 exact matches are found, a semantic search over sector meaning is also run so ticker-agnostic sector news (e.g. a generic logistics regulation story) isn't missed."
     )]
     pub async fn get_relevant_news(
         &self,
