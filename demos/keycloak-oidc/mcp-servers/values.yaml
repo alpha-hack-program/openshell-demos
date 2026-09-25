@@ -161,6 +161,40 @@ embeddings:
       cpu: "1"
       memory: 4Gi
 
+# RHCL MCP Gateway integration. When enabled, the chart creates an HTTPRoute
+# and MCPServerRegistration per server in the gateway's namespace so the
+# ext_proc (MCP router) can route tools/call requests to the correct backend.
+#
+# How it works: each backend gets a unique internal hostname
+# (<server-name>.<internalDomain>, e.g. mcp-compatibility.mcp.local). The
+# ext_proc parses the JSON-RPC body, identifies the target server by the tool
+# prefix, sets the :authority header to that hostname, and clears the Envoy
+# route cache. Envoy re-evaluates the route and matches the per-server virtual
+# host, forwarding the request to the backend service on gatewayPort (8010).
+# The internal hostname is purely an Envoy routing label — no DNS entry is
+# needed. The actual TCP connection goes to the Kubernetes Service defined in
+# the HTTPRoute's backendRefs.
+#
+# Prerequisites:
+#   - The Gateway's MCP listener (sectionName) must NOT have a hostname field
+#     (so it accepts HTTPRoutes with any hostname). Set spec.publicHost on the
+#     MCPGatewayExtension instead.
+#   - The Gateway's allowedRoutes.namespaces must include registrationNamespace.
+mcpGateway:
+  enabled: false
+  # Gateway CR name and namespace
+  gatewayName: mcp-gateway
+  gatewayNamespace: openshift-ingress
+  # Listener name on the Gateway that the MCPGatewayExtension targets
+  sectionName: mcp
+  # Namespace where HTTPRoute + MCPServerRegistration CRs are created
+  # (must match the MCPGatewayExtension namespace)
+  registrationNamespace: mcp-gateway-system
+  # Domain suffix for internal routing hostnames (no DNS needed)
+  internalDomain: mcp.local
+  # Port on the envoy sidecar that the RHCL gateway connects to (no auth)
+  gatewayPort: 8010
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak

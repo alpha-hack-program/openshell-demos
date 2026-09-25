@@ -13,5 +13,8 @@ spec:
     - name: http
       port: {{ .port }}
       targetPort: {{ .port }}
+    - name: gateway
+      port: {{ $.Values.mcpGateway.gatewayPort | default 8010 }}
+      targetPort: {{ $.Values.mcpGateway.gatewayPort | default 8010 }}
 ---
 {{- end }}

@@ -45,6 +45,29 @@ if oc -n "$OPENSHELL_NAMESPACE" get configmap openshell-oidc-ca &>/dev/null; the
   HELM_SET_ARGS+=(--set "newsGenerator.caConfigMapName=openshell-oidc-ca")
 fi
 
+# RHCL MCP Gateway integration (optional). When MCP_GATEWAY_ENABLED=true,
+# the chart creates per-server HTTPRoute + MCPServerRegistration + a
+# ReferenceGrant in this namespace. Run 20-configure-mcp-gateway.sh
+# AFTER this script to patch the Gateway listener and MCPGatewayExtension.
+if [[ "${MCP_GATEWAY_ENABLED:-false}" == "true" ]]; then
+  : "${MCP_GATEWAY_NAME:=mcp-gateway}"
+  : "${MCP_GATEWAY_NAMESPACE:=openshift-ingress}"
+  : "${MCP_GATEWAY_SECTION:=mcp}"
+  : "${MCP_GATEWAY_REG_NAMESPACE:=mcp-gateway-system}"
+  : "${MCP_GATEWAY_INTERNAL_DOMAIN:=mcp.local}"
+  : "${MCP_GATEWAY_PORT:=8010}"
+  HELM_SET_ARGS+=(
+    --set "mcpGateway.enabled=true"
+    --set "mcpGateway.gatewayName=${MCP_GATEWAY_NAME}"
+    --set "mcpGateway.gatewayNamespace=${MCP_GATEWAY_NAMESPACE}"
+    --set "mcpGateway.sectionName=${MCP_GATEWAY_SECTION}"
+    --set "mcpGateway.registrationNamespace=${MCP_GATEWAY_REG_NAMESPACE}"
+    --set "mcpGateway.internalDomain=${MCP_GATEWAY_INTERNAL_DOMAIN}"
+    --set "mcpGateway.gatewayPort=${MCP_GATEWAY_PORT}"
+  )
+  echo "MCP Gateway integration enabled — HTTPRoute + MCPServerRegistration will be created."
+fi
+
 helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
   --namespace "$OPENSHELL_NAMESPACE" \
   "${HELM_SET_ARGS[@]}"

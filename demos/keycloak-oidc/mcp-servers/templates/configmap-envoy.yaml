@@ -96,6 +96,36 @@ data:
                       - name: envoy.filters.http.router
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+        # No-auth listener for the RHCL MCP gateway broker. The gateway's
+        # ext_proc routes tools/call here; no JWT/RBAC needed because the
+        # gateway itself enforces authentication upstream.
+        - name: gateway_listener
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ $.Values.mcpGateway.gatewayPort | default 8010 }} }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: gateway_http
+                    codec_type: AUTO
+                    route_config:
+                      name: gateway_route
+                      virtual_hosts:
+                        - name: backend
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route: { cluster: local_app }
+                              request_headers_to_add:
+                                - header:
+                                    key: Accept
+                                    value: "application/json, text/event-stream"
+                                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
       clusters:
         - name: local_app
           type: STATIC

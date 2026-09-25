@@ -1,0 +1,22 @@
+{{- if .Values.mcpGateway.enabled }}
+{{- $gw := .Values.mcpGateway -}}
+{{- range .Values.servers }}
+apiVersion: mcp.kuadrant.io/v1alpha1
+kind: MCPServerRegistration
+metadata:
+  name: {{ .name }}
+  namespace: {{ $gw.registrationNamespace }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  prefix: {{ .name | replace "-" "_" }}_
+  path: /mcp
+  state: Enabled
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: {{ .name }}-route
+---
+{{- end }}
+{{- end }}

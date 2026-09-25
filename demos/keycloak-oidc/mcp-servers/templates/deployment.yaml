@@ -40,6 +40,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .port }}
+            - name: gateway
+              containerPort: {{ $.Values.mcpGateway.gatewayPort | default 8010 }}
           volumeMounts:
             - name: envoy-config
               mountPath: /etc/envoy

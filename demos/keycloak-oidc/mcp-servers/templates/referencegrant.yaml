@@ -1,0 +1,17 @@
+{{- if .Values.mcpGateway.enabled }}
+{{- $gw := .Values.mcpGateway -}}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-mcp-gateway
+  labels:
+    app.kubernetes.io/part-of: mcp-servers
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ $gw.registrationNamespace }}
+  to:
+    - group: ""
+      kind: Service
+{{- end }}
