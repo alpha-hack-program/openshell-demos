@@ -159,7 +159,7 @@ if [ "$AGENT" = "claude" ]; then
   echo "  openshell sandbox exec -n $SANDBOX_NAME --workspace ${USER_ID} \\"
   echo "    --env ANTHROPIC_BASE_URL=\$ANTHROPIC_BASE_URL --env ANTHROPIC_MODEL=\$ANTHROPIC_MODEL \\"
   echo "    --env AUDITOR_LLM_BASE_URL=${AUDITOR_BASE_URL_VALUE} --env ${AUDITOR_MODEL_KEY}=${AUDITOR_MODEL_VALUE} \\"
-  echo "    -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config \\"
+  echo "    -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config --tools \"\" \\"
   echo "       -p \"...\" --permission-mode bypassPermissions --output-format text"
 else
   echo "  openshell sandbox exec -n $SANDBOX_NAME --workspace ${USER_ID} \\"

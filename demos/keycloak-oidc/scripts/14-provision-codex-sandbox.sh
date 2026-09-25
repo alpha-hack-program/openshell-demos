@@ -76,10 +76,19 @@ openshell provider create --name byo-inference --type openai \
   --config "OPENAI_BASE_URL=$OPENAI_BASE_URL" \
   --workspace "${USER_ID}" || true
 
+# --no-verify: when the gateway was installed with server.oidc.caConfigMapName
+# set (see README's "OIDC issuer TLS trust" section — needed whenever
+# Keycloak's Route rides a self-signed default ingress cert), the gateway's
+# outbound TLS trust for endpoint verification calls is scoped to that CA
+# only, not the public web PKI roots too — verifying a real CA-signed
+# endpoint like OPENAI_BASE_URL then fails even though the endpoint itself
+# is fine (confirmed live: a raw curl to the same URL succeeds). Endpoint
+# reachability is verified by the recipe's own test call later anyway.
 openshell inference set \
   --provider byo-inference \
   --model "$OPENAI_MODEL" \
   --timeout 120 \
+  --no-verify \
   --workspace "${USER_ID}"
 
 # ---------------------------------------------------------------------------
