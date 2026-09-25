@@ -15,21 +15,20 @@ metrics this reads.
 ## Prerequisites
 
 - [`../audit-collector/`](../audit-collector/) already deployed (this
-  chart reads what that one collects — deploy it first).
+  chart reads what that one collects — deploy it first), **including its
+  own user-workload-monitoring prerequisite** — this chart queries
+  Thanos-querier directly, so if that stack isn't enabled the graph stays
+  permanently empty with nothing to indicate why.
 - [`../audit-tempo/`](../audit-tempo/) already deployed — this chart
   queries its `tempo-audit` Service directly for the MCP-server graph
   edges.
 - At least one sandbox provisioned via
   `../scripts/16-provision-audited-sandbox.sh` and pushing metrics, or the
   graph will simply be empty (not an error — see "Verifying it works").
-- The built-in `cluster-monitoring-view` ClusterRole must exist —
-  **confirmed live (2026-09-08, sandbox268)** that binding it to this
-  chart's own `ServiceAccount` is sufficient for Thanos-querier to answer
-  namespace-scoped queries; no additional RBAC needed. This was the first
-  time this repo had a workload call `thanos-querier` in-cluster at all
-  (the only prior precedent, `../audit-collector/README.md`, is an
-  admin's `oc exec` straight into the Prometheus pod) — it works, but the
-  real blocker turned out to be TLS, not RBAC (see below).
+- The built-in `cluster-monitoring-view` ClusterRole must exist — binding
+  it to this chart's own `ServiceAccount` is sufficient for Thanos-querier
+  to answer namespace-scoped queries; no additional RBAC needed. In
+  practice, TLS trust is the more common blocker, not RBAC (see below).
 
 ## Install
 
@@ -63,9 +62,8 @@ If the page itself fails to load, check the pod's own logs
 (`oc logs -n "$OPENSHELL_NAMESPACE" deploy/audit-dashboard`). A
 `thanos-querier returned 403` points at the ClusterRoleBinding being
 missing/wrong. A `request to thanos-querier failed: ... certificate`
-error (confirmed live as the actual first-run failure mode, not RBAC)
-means the running image predates the `service-ca.crt` fix — rebuild
-against a current `util/audit-dashboard` checkout and redeploy.
+error means the running image predates the `service-ca.crt` fix —
+rebuild against a current `util/audit-dashboard` checkout and redeploy.
 
 ## Values reference
 
@@ -73,7 +71,7 @@ against a current `util/audit-dashboard` checkout and redeploy.
 |---|---|---|
 | `image.{repository,tag}` | `quay.io/atarazana/audit-dashboard:0.1.0` | Image to deploy. |
 | `route.host` | `""` | Optional fixed hostname; leave empty for an OpenShift-auto-generated one. |
-| `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL — confirmed live on sandbox268. |
+| `prometheus.thanosQuerierUrl` | `https://thanos-querier.openshift-monitoring.svc:9091` | In-cluster Thanos-querier base URL. |
 | `tempo.url` | `http://tempo-audit:3200` | In-cluster Tempo base URL (plain HTTP, no auth) — the sandbox→MCP-server graph edges are queried from here directly. |
 | `refreshIntervalSecs` | `5` | How often the backend re-polls Prometheus. |
 | `heartbeatStaleSecs` | `90` | How long since the last heartbeat before a sandbox renders dimmed/offline. |
@@ -82,13 +80,13 @@ against a current `util/audit-dashboard` checkout and redeploy.
 | `persistence.size` | `256Mi` | PVC size — this is a small JSON file of sandbox metadata, not audit log storage. |
 | `persistence.storageClassName` | `""` | Optional; leave empty to use the cluster default `StorageClass`. |
 
-Confirmed live end to end (2026-09-08, sandbox268): after a benign turn
-in an audited sandbox, its node showed `risk_level: none`; after
-repeating [Scene 4a](../README.md#scene-4a--bob-overreaches)'s forcing
-prompt in the same sandbox, it flipped to `risk_level: blocked_attempt`
-(`score: 2`). `mcp_servers` attribution has since moved from a
-`session-auditor`-pushed metric label to direct TraceQL queries against
-Tempo (see "Known limitations" below).
+After a benign turn in an audited sandbox, its node shows
+`risk_level: none`; after repeating
+[Scene 4a](../README.md#scene-4a--bob-overreaches)'s forcing prompt in
+the same sandbox, it flips to `risk_level: blocked_attempt` (`score: 2`).
+`mcp_servers` attribution comes from direct TraceQL queries against
+Tempo, not a `session-auditor`-pushed metric label (see "Known
+limitations" below).
 
 ## Known limitations
 

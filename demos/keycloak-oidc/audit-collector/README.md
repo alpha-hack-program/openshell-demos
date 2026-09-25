@@ -16,6 +16,39 @@ operator or its CRDs.
 [`../audit-tempo`](../audit-tempo/) must already be installed — this
 collector's `traces` pipeline forwards to its `tempo-audit` Service.
 
+**User-workload-monitoring must be enabled**, or the `ServiceMonitor` this
+chart creates has no Prometheus instance to scrape it at all — the metrics
+sit in the collector's own Prometheus exporter forever, never reaching
+Thanos-querier, and `audit-dashboard`'s graph stays permanently empty with
+no error anywhere to point at the cause. Not every cluster has this on by
+default — check first:
+
+```bash
+oc get pods -n openshift-user-workload-monitoring
+```
+
+If that namespace doesn't exist or has no pods, enable it (safe to apply
+even if `cluster-monitoring-config` doesn't exist yet — this creates it
+fresh rather than overwriting existing cluster monitoring settings; if it
+already exists, merge `enableUserWorkload: true` into its `data.config.yaml`
+instead of replacing the whole ConfigMap):
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+EOF
+```
+
+Wait for `prometheus-user-workload-0` and `thanos-ruler-user-workload-0`
+to reach `Running` (a minute or two) before deploying this chart.
+
 ## Install
 
 ```bash
@@ -52,18 +85,18 @@ oc exec -n openshift-user-workload-monitoring prometheus-user-workload-0 -c prom
   wget -qO- 'http://localhost:9090/api/v1/query?query=test_metric'
 ```
 
-Confirm the compliance-risk alert fires (Thanos Ruler, not Prometheus, evaluates
-`PrometheusRule` alerts for user-workload namespaces — confirmed live via its
-own API, port 9091 behind the standard cluster-monitoring auth):
+Confirm the compliance-risk alert fires (Thanos Ruler, not Prometheus,
+evaluates `PrometheusRule` alerts for user-workload namespaces — query its
+own API, port 9091, behind the standard cluster-monitoring auth):
 
 ```bash
 oc port-forward -n openshift-user-workload-monitoring svc/thanos-ruler 9091:9091 &
 curl -sk -H "Authorization: Bearer $(oc whoami --show-token)" \
   'https://localhost:9091/api/v1/alerts' | jq '.data.Alerts[] | select(.labels.alertname=="SessionComplianceRiskDetected")'
 ```
-Confirmed live: a real forced-overreach turn (`session_compliance_risk_score`
-reaching `2`) produced a `state: firing` entry here within ~15s, which then
-reached the platform `alertmanager-main` (same auth pattern, port 9094) with
+A forced-overreach turn (`session_compliance_risk_score` reaching `2`)
+produces a `state: firing` entry here within about 15s, which then reaches
+the platform `alertmanager-main` (same auth pattern, port 9094) with
 `status.state: active` — visible in the OpenShift console's own
 Observe → Alerting page with no further wiring needed.
 
@@ -76,12 +109,11 @@ for a compliance signal, that's a real risk: a flagged incident could
 vanish from the active-alerts list with nobody having actually seen it.
 `alerting.keepFiringFor` (default `15m`) holds the alert visibly firing
 for at least that long regardless, so an SRE has a real window to notice
-and act on it rather than it resolving by neglect. Confirmed live in this
-cluster's Prometheus Operator: setting `keep_firing_for` on the
-`PrometheusRule` object takes a normal reconciliation cycle (tens of
-seconds, not instant) before the actual rule file Thanos Ruler evaluates
-picks it up — check with the "Confirming it works" commands above if it
-doesn't seem to be applying yet.
+and act on it rather than it resolving by neglect. Setting
+`keep_firing_for` on the `PrometheusRule` object takes a normal
+reconciliation cycle (tens of seconds, not instant) before the actual
+rule file Thanos Ruler evaluates picks it up — check with the "Confirming
+it works" commands above if it doesn't seem to be applying yet.
 
 **Explicit silencing is the right tool for "I've seen this, stop paging
 me" — not automation.** Don't try to make the alert auto-suppress itself;
@@ -130,16 +162,15 @@ not just the one being looked at.
 ## Known limitations
 
 - Single `OpenTelemetryCollector` instance, `mode: deployment` (no HA) — fine for a demo, not sized for production load.
-- The ServiceMonitor's selector deliberately excludes the Operator's generated `-headless` and `-monitoring` Services (confirmed live: without this, they produce duplicate scrape targets for the same pod).
+- The ServiceMonitor's selector deliberately excludes the Operator's generated `-headless` and `-monitoring` Services — without this, they produce duplicate scrape targets for the same pod.
 - **The alert reaches Alertmanager but only the default catch-all
-  receiver.** Confirmed live: `enableUserWorkload: true` (already set on
-  this cluster) is enough for the `PrometheusRule` to be evaluated and for
-  the resulting alert to show up in the OpenShift console's own
-  Observe → Alerting page — no extra config needed for that. Routing it
-  somewhere specific (Slack, email, a webhook) needs a namespace-scoped
-  `AlertmanagerConfig`, which additionally requires
-  `enableUserAlertmanagerConfig: true` in the *cluster-wide*
-  `cluster-monitoring-config` ConfigMap in `openshift-monitoring` —
-  confirmed live this is **not** set on this cluster. Enabling it is a
+  receiver.** With user-workload-monitoring enabled (see Prerequisites
+  above), the `PrometheusRule` gets evaluated and the resulting alert
+  shows up in the OpenShift console's own Observe → Alerting page — no
+  extra config needed for that. Routing it somewhere specific (Slack,
+  email, a webhook) needs a namespace-scoped `AlertmanagerConfig`, which
+  additionally requires `enableUserAlertmanagerConfig: true` in the
+  *cluster-wide* `cluster-monitoring-config` ConfigMap in
+  `openshift-monitoring` — off by default. Enabling it is a
   platform-admin decision affecting every namespace's alerting posture,
   not something this chart can or should turn on by itself.
