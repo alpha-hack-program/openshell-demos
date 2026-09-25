@@ -57,6 +57,19 @@ impl SessionState {
         self.status = RunStatus::Running;
     }
 
+    /// Record the prompt that's about to start a turn, so it's visible in
+    /// the log alongside the response — call once per turn, right after
+    /// `begin_turn`. Both frontends call this for every turn (typed or
+    /// `--prompt`), not just auto-submitted ones, so the log reads as a
+    /// full conversation instead of showing responses with no visible
+    /// question above them.
+    pub fn push_user_prompt(&mut self, prompt: &str) {
+        self.log.push(LogEntry {
+            source: StreamSource::Stdout,
+            event: AgentEvent::UserPrompt(prompt.to_string()),
+        });
+    }
+
     pub fn push_stdout(&mut self, line: &str) {
         if let Some(session_id) = extract_session_id(line) {
             self.session_id = Some(session_id);

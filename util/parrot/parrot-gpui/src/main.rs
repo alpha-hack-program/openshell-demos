@@ -71,13 +71,18 @@ fn main() {
         })
         .detach();
 
-        let bounds = Bounds::centered(None, size(px(900.0), px(640.0)), cx);
+        // 25% bigger than the original 900x640 default.
+        let bounds = Bounds::centered(None, size(px(1125.0), px(800.0)), cx);
+        let font_size = cli.font_size;
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
             move |window, cx| {
+                if let Some(font_size) = font_size {
+                    window.set_rem_size(px(font_size));
+                }
                 let palette = resolve_palette(theme, window.appearance());
                 cx.new(|cx| {
                     ParrotWindow::new(

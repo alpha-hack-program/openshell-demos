@@ -8,6 +8,13 @@ use serde_json::Value;
 /// A classified line from an agent's streaming JSON stdout.
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
+    /// Not actually classified from agent stdout — synthesized locally by
+    /// `SessionState::push_user_prompt` so the prompt that started a turn
+    /// is visible in the log, not just the streamed response. Matters most
+    /// for `--prompt`, since an auto-submitted turn never has the user
+    /// physically typing it into the composer for it to already be
+    /// visible on screen.
+    UserPrompt(String),
     /// Free-form assistant text.
     AssistantText(String),
     /// The assistant invoked a tool.

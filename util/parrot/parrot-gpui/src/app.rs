@@ -18,12 +18,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, rgb, ClipboardItem, Context, FocusHandle, KeyDownEvent, Render, ScrollHandle,
-    SharedString, Window,
+    div, prelude::*, rgb, App, ClipboardItem, Context, FocusHandle, FontWeight, HighlightStyle,
+    KeyDownEvent, Render, ScrollHandle, SharedString, StyledText, Window,
 };
 use parrot_core::{
-    tool_result_text, Agent, AgentEvent, ExecOutcome, LogEntry, Palette, ParrotClient, Rgb,
-    RunStatus, SessionState, StreamSource, StreamedExecOptions, TurnOptions,
+    render_inline_markdown, tool_result_text, Agent, AgentEvent, ExecOutcome, InlineStyle,
+    LogEntry, Palette, ParrotClient, Rgb, RunStatus, SessionState, StreamSource,
+    StreamedExecOptions, TurnOptions,
 };
 use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
@@ -32,6 +33,62 @@ use crate::cli::Cli;
 
 /// Matches `parrot-tui`'s splash `AUTO_DISMISS`.
 const SPLASH_DURATION: Duration = Duration::from_millis(1300);
+
+/// Per-OS candidates for [`resolve_monospace_font`], most-preferred
+/// first. Each entry must be a real, literal installed font family name,
+/// not a CSS-style generic keyword: gpui's Linux backend
+/// (`font-kit`/`fontdb`) resolves `Font.family` by exact string match
+/// against installed family names (see `platform/linux/text_system.rs`'s
+/// `load_family`) — it does not go through fontconfig's generic-alias
+/// layer, so a value like `"monospace"` silently matches nothing and
+/// falls back to the default font with no error at all. `Font.fallbacks`
+/// doesn't rescue this either — on this backend it's only consulted for
+/// glyphs missing from an otherwise-valid family (e.g. CJK/emoji), not
+/// for resolving a missing family name in the first place — hence trying
+/// several literal candidates ourselves instead of naming just one.
+/// "Liberation Mono"/"DejaVu Sans Mono" are confirmed present via
+/// `fc-list` on Fedora/RHEL; the macOS and Windows lists are inferred
+/// from what those OSes bundle by default, not yet checked live on
+/// either.
+#[cfg(target_os = "macos")]
+const MONOSPACE_FONT_CANDIDATES: &[&str] = &["Menlo", "SF Mono", "Monaco"];
+#[cfg(target_os = "windows")]
+const MONOSPACE_FONT_CANDIDATES: &[&str] = &["Consolas", "Cascadia Mono", "Lucida Console"];
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
+    "Liberation Mono",
+    "DejaVu Sans Mono",
+    "Noto Sans Mono",
+    "Ubuntu Mono",
+    "Fira Mono",
+];
+
+/// Picks the first of [`MONOSPACE_FONT_CANDIDATES`] that's actually
+/// installed (queried live via gpui's own font system — see the
+/// candidates list's doc comment for why a single hardcoded name isn't
+/// safe), falling back to gpui's own UI-font marker (`.SystemUIFont`,
+/// proportional) if genuinely none of them are present. That fallback is
+/// deliberately not silent — better than repeating the exact "requested
+/// a font that doesn't exist, got the wrong one with no explanation"
+/// failure mode this function exists to avoid.
+fn resolve_monospace_font(cx: &App) -> SharedString {
+    let installed = cx.text_system().all_font_names();
+    MONOSPACE_FONT_CANDIDATES
+        .iter()
+        .find(|candidate| {
+            installed
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(candidate))
+        })
+        .map(|&name| SharedString::from(name))
+        .unwrap_or_else(|| {
+            eprintln!(
+                "parrot-gpui: none of {MONOSPACE_FONT_CANDIDATES:?} are installed \
+                 — falling back to the proportional UI font"
+            );
+            SharedString::from(".SystemUIFont")
+        })
+}
 
 fn rgb_u32(color: Rgb) -> u32 {
     (u32::from(color.0) << 16) | (u32::from(color.1) << 8) | u32::from(color.2)
@@ -57,6 +114,7 @@ pub struct ParrotWindow {
     identity_greeting: String,
     gateway_name: String,
     gateway_endpoint: String,
+    monospace_font: SharedString,
 }
 
 impl ParrotWindow {
@@ -89,8 +147,9 @@ impl ParrotWindow {
         let identity_greeting = client.identity.greeting();
         let gateway_name = client.gateway.name.clone();
         let gateway_endpoint = client.gateway.endpoint.clone();
+        let monospace_font = resolve_monospace_font(cx);
 
-        Self {
+        let mut this = Self {
             runtime,
             client,
             sandbox: cli.sandbox.clone(),
@@ -109,7 +168,19 @@ impl ParrotWindow {
             identity_greeting,
             gateway_name,
             gateway_endpoint,
+            monospace_font,
+        };
+
+        // --prompt: submit immediately rather than waiting for a keypress —
+        // runs concurrently with the splash timer above (submit_turn
+        // doesn't check show_splash), so the turn is already streaming by
+        // the time the splash dismisses.
+        if let Some(prompt) = &cli.prompt {
+            this.composing = prompt.clone();
+            this.submit_turn(cx);
         }
+
+        this
     }
 
     /// Enter submits (see `submit_turn`); Shift+Enter or Alt+Enter inserts a
@@ -253,8 +324,10 @@ impl ParrotWindow {
 
     /// Submit the composed prompt as one turn, mirroring `parrot-tui`'s
     /// `run_turn`: build the agent's argv, open the streaming exec, and
-    /// relay stdout/stderr/outcome into `state` as they arrive. Always
-    /// interactive — there is no one-shot mode here, that's `parrot-tui`.
+    /// relay stdout/stderr/outcome into `state` as they arrive. Called
+    /// both from a real Enter keypress and, for `--prompt`, once
+    /// automatically from `ParrotWindow::new` — either way the window
+    /// stays open afterward for further typed turns.
     fn submit_turn(&mut self, cx: &mut Context<Self>) {
         if self.turn_running {
             return;
@@ -267,6 +340,7 @@ impl ParrotWindow {
         self.cursor = 0;
         self.turn_running = true;
         self.state.begin_turn();
+        self.state.push_user_prompt(&prompt);
         self.scroll_handle.scroll_to_bottom();
         cx.notify();
 
@@ -402,7 +476,23 @@ impl ParrotWindow {
             .py_2()
             .children(self.state.log.iter().map(|entry| {
                 let (text, color) = render_log_entry(entry, &self.palette);
-                div().text_color(rgb(rgb_u32(color))).child(text)
+                // Markdown syntax is only meaningful in the assistant's own
+                // prose (its actual answer) — running it over this app's
+                // own synthetic log lines (tool-call/tool-result markers,
+                // thinking, errors, the user's echoed prompt, ...) would
+                // misrender any stray `*`/`` ` ``/`#` that shows up
+                // incidentally in a tool name or error message.
+                let (display, runs) = if matches!(entry.event, AgentEvent::AssistantText(_)) {
+                    render_inline_markdown(&text)
+                } else {
+                    (text, Vec::new())
+                };
+                let highlights = runs
+                    .into_iter()
+                    .map(|run| (run.range, inline_highlight_style(run.style, &self.palette)));
+                div()
+                    .text_color(rgb(rgb_u32(color)))
+                    .child(StyledText::new(display).with_highlights(highlights))
             }))
     }
 
@@ -454,6 +544,7 @@ impl Render for ParrotWindow {
             .size_full()
             .flex()
             .flex_col()
+            .font_family(self.monospace_font.clone())
             .bg(rgb(rgb_u32(self.palette.background)))
             .text_color(rgb(rgb_u32(self.palette.foreground)));
 
@@ -551,6 +642,7 @@ async fn drive_turn(
 /// manual wrapping to do here.
 fn render_log_entry(entry: &LogEntry, palette: &Palette) -> (String, Rgb) {
     match &entry.event {
+        AgentEvent::UserPrompt(text) => (format!("> {text}"), palette.accent),
         AgentEvent::AssistantText(text) => (format!("» {text}"), palette.assistant_text),
         AgentEvent::ToolCall { name, .. } => (format!("→ tool call: {name}"), palette.tool_call),
         AgentEvent::ToolResult {
@@ -581,6 +673,30 @@ fn render_log_entry(entry: &LogEntry, palette: &Palette) -> (String, Rgb) {
             palette.muted,
         ),
         AgentEvent::Unparseable(line) => (format!("  {line}"), palette.muted),
+    }
+}
+
+/// Maps a backend-agnostic [`InlineStyle`] (from `parrot-core`'s markdown
+/// pass) onto gpui's own `HighlightStyle`. Bold/Header both bold the run —
+/// Header additionally recolors it to `accent`, matching the weight the
+/// rest of the app already uses for "notice this" (see `render_header`'s
+/// status line). Code gets no font swap (the whole app is already
+/// monospace — see `resolve_monospace_font`), just a distinguishing color.
+fn inline_highlight_style(style: InlineStyle, palette: &Palette) -> HighlightStyle {
+    match style {
+        InlineStyle::Bold => HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        },
+        InlineStyle::Header => HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            color: Some(rgb(rgb_u32(palette.accent)).into()),
+            ..Default::default()
+        },
+        InlineStyle::Code => HighlightStyle {
+            color: Some(rgb(rgb_u32(palette.tool_call)).into()),
+            ..Default::default()
+        },
     }
 }
 

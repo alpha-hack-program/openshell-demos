@@ -15,6 +15,7 @@ pub mod exec;
 pub mod gateway;
 pub mod identity;
 pub mod jsonl;
+pub mod markdown;
 pub mod state;
 pub mod theme;
 
@@ -25,6 +26,7 @@ pub use exec::{ExecOutcome, ExecStream, StreamedExecOptions};
 pub use gateway::GatewayContext;
 pub use identity::Identity;
 pub use jsonl::{tool_result_text, AgentEvent};
+pub use markdown::{render_inline_markdown, InlineRun, InlineStyle};
 pub use state::{LogEntry, RunStatus, SessionState, StreamSource};
 pub use theme::{Palette, Rgb, ThemeMode};
 

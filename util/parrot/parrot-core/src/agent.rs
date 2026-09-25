@@ -71,6 +71,16 @@ impl Agent {
                     args.push("--mcp-config".to_string());
                     args.push(mcp_config.to_string());
                     args.push("--strict-mcp-config".to_string());
+                    // Disables Claude Code's built-in tool set (Bash, Read,
+                    // WebSearch, ...), leaving only the MCP tools from
+                    // --mcp-config. Smaller models reach for WebSearch as a
+                    // fallback when they can't find the right MCP tool, and
+                    // it hard-fails against this demo's on-cluster vLLM
+                    // backends (they reject the web_search_20250305 server
+                    // tool type). Confirmed live against keycloak-oidc's
+                    // Lysmark tax scenario.
+                    args.push("--tools".to_string());
+                    args.push(String::new());
                 }
                 if let Some(session_id) = opts.session_id {
                     args.push("--resume".to_string());
@@ -144,6 +154,18 @@ mod tests {
         let args = Agent::ClaudeCode.build_turn(&opts);
         assert!(!args.iter().any(|a| a == "--resume"));
         assert!(args.iter().any(|a| a == "--mcp-config"));
+    }
+
+    #[test]
+    fn claude_code_with_mcp_config_disables_builtin_tools() {
+        let opts = TurnOptions {
+            prompt: "hi",
+            mcp_config: Some("/sandbox/.claude/mcp-servers.json"),
+            session_id: None,
+        };
+        let args = Agent::ClaudeCode.build_turn(&opts);
+        let tools_pos = args.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(args[tools_pos + 1], "");
     }
 
     #[test]
