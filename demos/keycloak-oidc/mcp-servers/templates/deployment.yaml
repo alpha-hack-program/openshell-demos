@@ -18,6 +18,8 @@ spec:
       app.kubernetes.io/name: {{ .name }}
   template:
     metadata:
+      annotations:
+        checksum/envoy-config: {{ include (print $.Template.BasePath "/configmap-envoy.yaml") $ | sha256sum }}
       labels:
         app.kubernetes.io/name: {{ .name }}
         app.kubernetes.io/part-of: mcp-servers
