@@ -1,6 +1,8 @@
 old/
 *.old
-.env
+.env*
+!.env.example
+!.env.sample
 .vagrant/
 .worktrees/
 .DS_Store
