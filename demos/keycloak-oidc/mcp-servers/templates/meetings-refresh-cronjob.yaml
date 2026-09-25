@@ -4,12 +4,15 @@
   {{- if .database -}}{{- $needed = true -}}{{- end -}}
 {{- end -}}
 {{- if $needed }}
-# Daily backstop for schema-init-job.yaml's one-shot meetings refresh: that
-# Job only runs on `helm install`/`upgrade`, so a demo left running for
-# several days without a redeploy would still go stale between deploys.
-# This CronJob runs the same idempotent 0003_meetings_refresh.sql query on
-# a schedule instead, so `get_upcoming_meetings` never stays empty for more
-# than a day regardless of when the demo was last deployed.
+# Hourly backstop for schema-init-job.yaml's one-shot meetings refresh: that
+# Job only runs on `helm install`/`upgrade`, so a demo left running for a
+# while without a redeploy would still go stale between deploys. This
+# CronJob runs the same idempotent 0003_meetings_refresh.sql query on a
+# schedule instead, so `get_upcoming_meetings` never stays empty for more
+# than about an hour regardless of when the demo was last deployed.
+# Hourly (not daily) because 0003's per-row rolling only pushes a stale
+# meeting to "tomorrow" — a daily cadence left up to ~24h where a banker's
+# one meeting had already lapsed but hadn't been revived yet.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -18,7 +21,7 @@ metadata:
     app.kubernetes.io/name: mcp-servers-meetings-refresh
     app.kubernetes.io/part-of: mcp-servers
 spec:
-  schedule: "0 0 * * *"
+  schedule: "0 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

@@ -169,33 +169,29 @@ data:
       ON CONFLICT (id) DO NOTHING;
   0003_meetings_refresh.sql: |
     -- Keeps `get_upcoming_meetings` non-empty indefinitely without ever
-    -- fabricating new data: for each banker with zero meetings still in
-    -- the future, roll their single stalest meeting forward to tomorrow,
-    -- at the same time-of-day it originally had. This recycles the
-    -- hand-authored client/notes content from 0002_meetings_seed.sql
-    -- (Clara Fontán, the port-tariff note, etc.) instead of generating
-    -- generic placeholder meetings, so the Scene walkthroughs in the
-    -- README stay narratively consistent no matter how long ago the demo
-    -- was deployed. Run by both schema-init-job.yaml (so a fresh `helm
-    -- upgrade` fixes staleness immediately) and meetings-refresh-cronjob.yaml
-    -- (so it also self-heals daily between deploys, at 00:00 UTC).
-    -- No-op for any banker who already has an upcoming meeting.
-    WITH stale_bankers AS (
-      SELECT b.id AS banker_id
-      FROM bankers b
-      WHERE NOT EXISTS (
-        SELECT 1 FROM meetings m WHERE m.banker_id = b.id AND m.datetime > NOW()
-      )
-    ),
-    next_meeting AS (
-      SELECT DISTINCT ON (m.banker_id)
-        m.id, m.banker_id, m.datetime::time AS old_time
-      FROM meetings m
-      JOIN stale_bankers sb ON sb.banker_id = m.banker_id
-      ORDER BY m.banker_id, m.datetime ASC
-    )
+    -- fabricating new data: any meeting row whose datetime has already
+    -- passed is rolled forward to tomorrow, at the same time-of-day it
+    -- originally had. This recycles the hand-authored client/notes
+    -- content from 0002_meetings_seed.sql (Clara Fontán, the port-tariff
+    -- note, etc.) instead of generating generic placeholder meetings, so
+    -- the Scene walkthroughs in the README stay narratively consistent no
+    -- matter how long ago the demo was deployed.
+    --
+    -- Per-row, not per-banker: an earlier version only revived a banker's
+    -- single stalest meeting once ALL of their meetings had gone stale
+    -- (gated on "zero future meetings for this banker"), which meant a
+    -- banker with two seeded meetings (Bob) only ever had one alive at a
+    -- time. Rolling every stale row forward independently, regardless of
+    -- what else that banker has, avoids that — and works the same whether
+    -- a banker has one meeting or several.
+    --
+    -- Run by both schema-init-job.yaml (so a fresh `helm upgrade` fixes
+    -- staleness immediately) and meetings-refresh-cronjob.yaml (hourly —
+    -- see that file — so the worst-case gap between a meeting's
+    -- time-of-day passing and it being rolled forward again is about an
+    -- hour, not a full day). No-op (touches zero rows) once every meeting
+    -- is already in the future.
     UPDATE meetings
-    SET datetime = (CURRENT_DATE + INTERVAL '1 day') + next_meeting.old_time
-    FROM next_meeting
-    WHERE meetings.id = next_meeting.id;
+    SET datetime = (CURRENT_DATE + INTERVAL '1 day') + datetime::time
+    WHERE datetime <= NOW();
 {{- end }}
