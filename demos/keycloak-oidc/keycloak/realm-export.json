@@ -7,18 +7,56 @@
       { "name": "openshell-user", "description": "Standard OpenShell gateway access" },
       {
         "name": "banker",
-        "description": "Baseline role for every Meridian private banker — composite over the four banking data-service roles",
+        "description": "Baseline role for every Meridian private banker — composite over realm roles (Envoy sidecar) and client roles (MCP gateway authz)",
         "composite": true,
         "composites": {
-          "realm": ["mcp-portfolio-user", "mcp-crm-calendar-user", "mcp-market-news-user", "mcp-kyc-compliance-user"]
+          "realm": ["mcp-portfolio-user", "mcp-crm-calendar-user", "mcp-market-news-user", "mcp-kyc-compliance-user"],
+          "client": {
+            "mcp-gateway-system/mcp-portfolio": ["tool:list_my_clients", "tool:get_positions", "tool:get_performance", "tool:get_top_client_by_aum"],
+            "mcp-gateway-system/mcp-crm-calendar": ["tool:get_upcoming_meetings", "tool:get_meeting_notes"],
+            "mcp-gateway-system/mcp-market-news": ["tool:get_relevant_news"],
+            "mcp-gateway-system/mcp-kyc-compliance": ["tool:get_risk_profile", "tool:check_suitability", "tool:search_regulatory_guidance"]
+          }
         }
       },
-      { "name": "compatibility-user", "description": "Extra permission granted via the compatibility-users group — access to the mcp-compatibility server" },
+      {
+        "name": "compatibility-user",
+        "description": "Extra permission granted via the compatibility-users group — access to the mcp-compatibility server (both Envoy sidecar and MCP gateway authz)",
+        "composite": true,
+        "composites": {
+          "client": {
+            "mcp-gateway-system/mcp-compatibility": ["tool:calc_tax"]
+          }
+        }
+      },
       { "name": "mcp-portfolio-user", "description": "Access to mcp-portfolio (client holdings/performance)" },
       { "name": "mcp-crm-calendar-user", "description": "Access to mcp-crm-calendar (banker meetings)" },
       { "name": "mcp-market-news-user", "description": "Access to mcp-market-news (public market news)" },
       { "name": "mcp-kyc-compliance-user", "description": "Access to mcp-kyc-compliance (risk profile, suitability, regulatory-guidance search)" }
-    ]
+    ],
+    "client": {
+      "mcp-gateway-system/mcp-portfolio": [
+        { "name": "tool:list_my_clients", "description": "List the banker's assigned clients with AUM and risk profile" },
+        { "name": "tool:get_positions", "description": "Get portfolio positions for a specific client" },
+        { "name": "tool:get_performance", "description": "Get portfolio performance metrics for a specific client" },
+        { "name": "tool:get_top_client_by_aum", "description": "Get the top client by assets under management" }
+      ],
+      "mcp-gateway-system/mcp-crm-calendar": [
+        { "name": "tool:get_upcoming_meetings", "description": "Get upcoming meetings for the banker" },
+        { "name": "tool:get_meeting_notes", "description": "Get notes from a specific meeting" }
+      ],
+      "mcp-gateway-system/mcp-market-news": [
+        { "name": "tool:get_relevant_news", "description": "Search market news by semantic relevance" }
+      ],
+      "mcp-gateway-system/mcp-kyc-compliance": [
+        { "name": "tool:get_risk_profile", "description": "Get risk profile and KYC status for a client" },
+        { "name": "tool:check_suitability", "description": "Check product suitability for a client" },
+        { "name": "tool:search_regulatory_guidance", "description": "Search regulatory guidance corpus" }
+      ],
+      "mcp-gateway-system/mcp-compatibility": [
+        { "name": "tool:calc_tax", "description": "Calculate tax for a given income" }
+      ]
+    }
   },
   "groups": [
     {
@@ -57,8 +95,10 @@
       "protocol": "openid-connect",
       "secret": "openshell-gateway-demo-secret",
       "serviceAccountsEnabled": true,
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://127.0.0.1/*", "http://localhost/*"],
+      "webOrigins": ["+"]
     },
     {
       "clientId": "openshell-onboarding-web",
@@ -81,6 +121,121 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": ["<openclaw-base-url>/oauth2/callback"]
+    },
+    {
+      "clientId": "mcp-gateway-system/mcp-compatibility",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "mcp-compatibility-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mcp-gateway-system/mcp-compatibility",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mcp-gateway-system/mcp-portfolio",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "mcp-portfolio-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mcp-gateway-system/mcp-portfolio",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mcp-gateway-system/mcp-crm-calendar",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "mcp-crm-calendar-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mcp-gateway-system/mcp-crm-calendar",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mcp-gateway-system/mcp-market-news",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "mcp-market-news-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mcp-gateway-system/mcp-market-news",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mcp-gateway-system/mcp-kyc-compliance",
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "mcp-kyc-compliance-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mcp-gateway-system/mcp-kyc-compliance",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [

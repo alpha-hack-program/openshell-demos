@@ -192,8 +192,42 @@ mcpGateway:
   registrationNamespace: mcp-gateway-system
   # Domain suffix for internal routing hostnames (no DNS needed)
   internalDomain: mcp.local
+  # Public hostname of the MCP Gateway (the OpenShift Route).
+  # Used in the authn AuthPolicy's WWW-Authenticate header to point MCP
+  # clients at /.well-known/oauth-protected-resource for OAuth discovery.
+  publicHost: ""
   # Port on the envoy sidecar that the RHCL gateway connects to (no auth)
   gatewayPort: 8010
+  # Two-listener auth pattern (RHCL 1.4 — Register PDF Ch.4-5).
+  #
+  # Listener `mcp` (sectionName above) handles external traffic. An authn-only
+  # AuthPolicy validates the caller's JWT here.
+  #
+  # Listener `mcps` (authzSectionName below) handles internal tool/prompt
+  # routing. Per-server HTTPRoutes attach here so the authz AuthPolicy's CEL
+  # rules fire AFTER the ext_proc has parsed the JSON-RPC body and set
+  # x-mcp-servername / x-mcp-toolname / x-mcp-promptname headers. Both
+  # listeners must be on the same port for ext_proc's route-cache-clear +
+  # :authority change to reach mcps routes.
+  #
+  # CEL checks resource_access.<servername>.roles for tool:<name> entries.
+  # Non-tool requests (initialize, tools/list) skip authz via `when` guards.
+  #
+  # Keycloak client IDs: <registrationNamespace>/<serverName> per RHCL 1.4
+  # (e.g. mcp-gateway-system/mcp-portfolio) — must match x-mcp-servername.
+  #
+  # Requires:
+  #   - Kuadrant operator installed
+  #   - mcp-gateway-authn-ssl EnvoyFilter (created by 21-configure-mcp-gateway-auth.sh)
+  #   - Gateway with both mcp and mcps listeners on the same port
+  #   - Keycloak clients named <registrationNamespace>/<serverName> with
+  #     tool:-prefixed client roles matching each server's MCP tools
+  auth:
+    enabled: false
+    # Gateway listener for authorization (per-server routes attach here).
+    # Must be on the same port as sectionName above so ext_proc's
+    # route-cache-clear + :authority change can reach these routes.
+    authzSectionName: mcps
 
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
@@ -224,6 +258,10 @@ servers:
     port: 8000
     internalPort: 8001      # [VERIFY] not individually confirmed for this image
     requiredRole: "compatibility-user"
+    # MCP tool names exposed by this server (without server prefix). Used to
+    # document what tool:-prefixed client roles the Keycloak client needs.
+    # [VERIFY] mcp-compatibility may expose additional tools beyond calc_tax.
+    tools: ["calc_tax"]
     statefulMode: false
     resources: {}
   # The three servers below are this repo's own Rust MCP servers (./mcp/),
@@ -247,6 +285,7 @@ servers:
     port: 8000
     internalPort: 8001      # Containerfile: ARG PORT=8001 (confirmed)
     requiredRole: "mcp-portfolio-user"
+    tools: ["list_my_clients", "get_positions", "get_performance", "get_top_client_by_aum"]
     statefulMode: false
     database: true
     resources: {}
@@ -259,6 +298,7 @@ servers:
     port: 8000
     internalPort: 8004      # Containerfile: ENV BIND_ADDRESS=0.0.0.0:8004 (confirmed)
     requiredRole: "mcp-crm-calendar-user"
+    tools: ["get_upcoming_meetings", "get_meeting_notes"]
     statefulMode: false
     database: true
     resources: {}
@@ -287,6 +327,7 @@ servers:
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
     requiredRole: "mcp-market-news-user"
+    tools: ["get_relevant_news"]
     statefulMode: false
     database: false
     newsGenerator: true
@@ -307,6 +348,7 @@ servers:
     port: 8000
     internalPort: 8003
     requiredRole: "mcp-kyc-compliance-user"
+    tools: ["get_risk_profile", "check_suitability", "search_regulatory_guidance"]
     statefulMode: false
     database: true
     needsEmbeddings: true

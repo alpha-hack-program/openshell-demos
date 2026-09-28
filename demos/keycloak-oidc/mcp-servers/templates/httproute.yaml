@@ -14,7 +14,11 @@ spec:
   parentRefs:
     - name: {{ $gw.gatewayName }}
       namespace: {{ $gw.gatewayNamespace }}
+      {{- if and $gw.auth.enabled $gw.auth.authzSectionName }}
+      sectionName: {{ $gw.auth.authzSectionName }}
+      {{- else }}
       sectionName: {{ $gw.sectionName }}
+      {{- end }}
   hostnames:
     - '{{ .name }}.{{ $gw.internalDomain }}'
   rules:

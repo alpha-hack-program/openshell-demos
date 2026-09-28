@@ -1,0 +1,115 @@
+{{- if and .Values.mcpGateway.enabled .Values.mcpGateway.auth.enabled }}
+{{- $gw := .Values.mcpGateway -}}
+{{- $keycloak := .Values.keycloak -}}
+{{/*
+  Two-listener auth pattern (RHCL 1.4 docs, Register PDF Ch.4-5):
+
+  1. AUTHN AuthPolicy → targets Gateway sectionName: mcp
+     - Validates JWT on external traffic (the mcp-gateway-route)
+     - Skips /.well-known paths (OAuth discovery)
+     - Returns 401 with resource_metadata pointer on failure
+
+  2. AUTHZ AuthPolicy → targets Gateway sectionName: mcps
+     - Validates JWT again (each listener needs its own authn)
+     - CEL authorization checks x-mcp-toolname / x-mcp-promptname headers
+       (set by ext_proc DURING body processing — only visible on the mcps
+       listener because per-server routes land here AFTER ext_proc routing)
+     - Checks resource_access.<servername>.roles for tool:<name> / prompt:<name>
+     - Returns 403 on insufficient permissions
+
+  Per-server HTTPRoutes must reference sectionName: mcps (see httproute.yaml).
+  The mcp and mcps listeners must both be on the same port so ext_proc's
+  route-cache-clear + :authority change can reach mcps routes.
+*/}}
+---
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  name: mcp-gateway-authn
+  namespace: {{ $gw.gatewayNamespace }}
+  labels:
+    app.kubernetes.io/name: mcp-gateway-authn
+    app.kubernetes.io/part-of: mcp-servers
+    app.kubernetes.io/component: auth
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ $gw.gatewayName }}
+    sectionName: {{ $gw.sectionName }}
+  defaults:
+    when:
+      - predicate: "!request.path.contains('/.well-known')"
+    rules:
+      authentication:
+        keycloak:
+          jwt:
+            issuerUrl: {{ $keycloak.issuer | quote }}
+      response:
+        unauthenticated:
+          code: 401
+          headers:
+            "WWW-Authenticate":
+              {{- if $gw.publicHost }}
+              value: "Bearer resource_metadata=https://{{ $gw.publicHost }}/.well-known/oauth-protected-resource"
+              {{- else }}
+              value: "Bearer"
+              {{- end }}
+          body:
+            value: |
+              {"error": "Unauthorized", "message": "Authentication required."}
+---
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  name: mcp-gateway-authz
+  namespace: {{ $gw.gatewayNamespace }}
+  labels:
+    app.kubernetes.io/name: mcp-gateway-authz
+    app.kubernetes.io/part-of: mcp-servers
+    app.kubernetes.io/component: auth
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ $gw.gatewayName }}
+    sectionName: {{ $gw.auth.authzSectionName }}
+  rules:
+    authentication:
+      sso-server:
+        jwt:
+          issuerUrl: {{ $keycloak.issuer | quote }}
+    authorization:
+      tool-access-check:
+        when:
+          - predicate: "request.headers.exists(h, h == 'x-mcp-toolname')"
+        patternMatching:
+          patterns:
+            - predicate: |
+                ('tool:' + request.headers['x-mcp-toolname']) in
+                (has(auth.identity.resource_access) &&
+                 auth.identity.resource_access.exists(p, p == request.headers['x-mcp-servername'])
+                 ? auth.identity.resource_access[request.headers['x-mcp-servername']].roles : [])
+      prompt-access-check:
+        when:
+          - predicate: "request.headers.exists(h, h == 'x-mcp-promptname')"
+        patternMatching:
+          patterns:
+            - predicate: |
+                ('prompt:' + request.headers['x-mcp-promptname']) in
+                (has(auth.identity.resource_access) &&
+                 auth.identity.resource_access.exists(p, p == request.headers['x-mcp-servername'])
+                 ? auth.identity.resource_access[request.headers['x-mcp-servername']].roles : [])
+    response:
+      unauthenticated:
+        headers:
+          "WWW-Authenticate":
+            value: "Bearer"
+        body:
+          value: |
+            {"error": "Unauthorized", "message": "MCP Access denied: Authentication required."}
+      unauthorized:
+        body:
+          value: |
+            {"error": "Forbidden", "message": "MCP Access denied: Insufficient permissions."}
+{{- end }}

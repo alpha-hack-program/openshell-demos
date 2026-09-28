@@ -66,6 +66,18 @@ if [[ "${MCP_GATEWAY_ENABLED:-false}" == "true" ]]; then
     --set "mcpGateway.gatewayPort=${MCP_GATEWAY_PORT}"
   )
   echo "MCP Gateway integration enabled — HTTPRoute + MCPServerRegistration will be created."
+
+  # MCP Gateway JWT auth (optional, requires Kuadrant + Authorino).
+  # When MCP_GATEWAY_AUTH_ENABLED=true, the chart creates a single AuthPolicy
+  # on mcp-gateway-route that validates Keycloak JWTs. Run
+  # 21-configure-mcp-gateway-auth.sh BEFORE enabling this to create the
+  # required mcp-gateway-authn-ssl EnvoyFilter.
+  if [[ "${MCP_GATEWAY_AUTH_ENABLED:-false}" == "true" ]]; then
+    HELM_SET_ARGS+=(
+      --set "mcpGateway.auth.enabled=true"
+    )
+    echo "MCP Gateway auth enabled — AuthPolicy on mcp-gateway-route will be created."
+  fi
 fi
 
 helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
