@@ -27,5 +27,16 @@ recipe: claude-code
 
 # MCP server short names this sandbox may reach. Each becomes its own
 # network_policies group, e.g. mcp-portfolio -> allow_mcp_portfolio,
-# granting <name>.<openshellNamespace>.svc.cluster.local:8000.
+# granting <name>.<openshellNamespace>.svc.cluster.local:8000. Mutually
+# exclusive with mcpGatewayHost below — set exactly one.
 mcpServers: []
+
+# Gateway-routed access instead of the per-server mcpServers list above:
+# grants egress to the RHCL MCP Gateway's single in-cluster broker
+# endpoint (../mcp-gateway's MCPGatewayExtension spec.privateHost,
+# scheme/path stripped — see scripts/lib-mcp-gateway.sh) as one
+# allow_mcp_gateway group, since every server's tools are reached through
+# this one /mcp endpoint instead of each server's own direct port. Set by
+# 14/15/16's --gw flag; mutually exclusive with mcpServers.
+mcpGatewayHost: ""
+mcpGatewayPort: 8080

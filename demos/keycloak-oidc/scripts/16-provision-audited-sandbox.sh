@@ -13,9 +13,14 @@ set -euo pipefail
 # and demos/keycloak-oidc/audit-collector/README.md for the collector this
 # pushes to (deploy that chart first).
 #
-# Usage: ./16-provision-audited-sandbox.sh <user-id> <claude|codex> <server-name>[,<server-name>...]
+# Usage: ./16-provision-audited-sandbox.sh [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]
 #   e.g. ./16-provision-audited-sandbox.sh bob claude mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 #   e.g. ./16-provision-audited-sandbox.sh bob codex mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+#   e.g. ./16-provision-audited-sandbox.sh --gw bob claude mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+#
+# --gw (bare flag, default off) is forwarded as-is to 14/15 — see either
+# script's own --gw note for what it changes (MCP Gateway routing instead
+# of direct per-server access).
 #
 # Requires CLAUDE_AUDIT_IMAGE (for claude) or CODEX_AUDIT_IMAGE (for
 # codex) set in .env — a published claude-audit/codex-audit image tag, see
@@ -56,10 +61,23 @@ if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
 
-USER_ID="${1:?usage: $0 <user-id> <claude|codex> <server-name>[,<server-name>...]}"
-AGENT="${2:?usage: $0 <user-id> <claude|codex> <server-name>[,<server-name>...]}"
-SERVER_NAMES="${3:?usage: $0 <user-id> <claude|codex> <server-name>[,<server-name>...]}"
+GW=false
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --gw) GW=true; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
+USER_ID="${1:?usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]}"
+AGENT="${2:?usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]}"
+SERVER_NAMES="${3:?usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]}"
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
+
+GW_ARGS=()
+[ "$GW" = true ] && GW_ARGS+=(--gw)
 
 AUDITOR_PROVIDER_STYLE="${AUDITOR_PROVIDER_STYLE:-anthropic}"
 
@@ -77,7 +95,7 @@ case "$AGENT" in
     AUDITOR_CREDENTIAL_KEY="AUDITOR_ANTHROPIC_API_KEY"
     AUDITOR_MODEL_KEY="AUDITOR_ANTHROPIC_MODEL"
     CLAUDE_IMAGE="$CLAUDE_AUDIT_IMAGE" SANDBOX_PREFIX="aud-" \
-      "$SCRIPT_DIR/15-provision-claude-sandbox.sh" "$USER_ID" "$SERVER_NAMES"
+      "$SCRIPT_DIR/15-provision-claude-sandbox.sh" "${GW_ARGS[@]}" "$USER_ID" "$SERVER_NAMES"
     if [ "$AUDITOR_PROVIDER_STYLE" = "anthropic" ]; then
       : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}"
       : "${ANTHROPIC_MODEL:?set ANTHROPIC_MODEL in .env}"
@@ -93,7 +111,7 @@ case "$AGENT" in
     AUDITOR_CREDENTIAL_KEY="AUDITOR_ANTHROPIC_API_KEY"
     AUDITOR_MODEL_KEY="AUDITOR_ANTHROPIC_MODEL"
     CODEX_IMAGE="$CODEX_AUDIT_IMAGE" SANDBOX_PREFIX="aud-" \
-      "$SCRIPT_DIR/14-provision-codex-sandbox.sh" "$USER_ID" "$SERVER_NAMES"
+      "$SCRIPT_DIR/14-provision-codex-sandbox.sh" "${GW_ARGS[@]}" "$USER_ID" "$SERVER_NAMES"
     if [ "$AUDITOR_PROVIDER_STYLE" = "anthropic" ]; then
       : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env (classification backend credential)}"
       : "${ANTHROPIC_MODEL:?set ANTHROPIC_MODEL in .env (classification backend model)}"
@@ -151,7 +169,11 @@ openshell sandbox provider attach "$SANDBOX_NAME" "session-auditor-${AUDITOR_PRO
   --workspace "${USER_ID}" || true
 
 echo
-echo "Audited $AGENT sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+if [ "$GW" = true ]; then
+  echo "Audited $AGENT sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, routed through the MCP Gateway to: ${SERVER_NAMES}"
+else
+  echo "Audited $AGENT sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+fi
 echo "session-auditor's SessionStart/UserPromptSubmit hooks need no further config."
 echo "Its Stop hook (compliance classification) needs its own model set per turn, ON TOP of"
 echo "whatever env vars the agent itself already needs (ANTHROPIC_*/OPENAI_*), e.g.:"
