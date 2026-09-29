@@ -47,34 +47,27 @@ connection goes to the Kubernetes Service defined in the HTTPRoute's
 
 ### Prerequisites
 
-Before enabling `mcpGateway`:
+Before enabling `mcpGateway`, install [`../mcp-gateway`](../mcp-gateway/)
+once per cluster — it declaratively creates the `Gateway`,
+`MCPGatewayExtension`, `GatewayClass`, and (with `auth.enabled`) the
+Authorino-TLS `EnvoyFilter` this chart's HTTPRoutes/
+MCPServerRegistrations/AuthPolicies attach to:
 
-1. **Install the RHCL operator** (Kagenti/Kuadrant MCP gateway, v0.7.1+).
+```bash
+helm upgrade --install mcp-gateway ../mcp-gateway \
+  --namespace "$OPENSHELL_NAMESPACE" \
+  --set gateway.publicHost="mcp.${CLUSTER_APPS_DOMAIN}" \
+  --set keycloak.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
+```
 
-2. **Gateway listener must NOT have a `hostname` field.** If the MCP
-   listener (the one MCPGatewayExtension targets via `sectionName`) has a
-   `hostname`, only HTTPRoutes matching that exact hostname are accepted —
-   internal hostnames like `mcp-compatibility.mcp.local` would be rejected.
-   Remove it:
-   ```bash
-   # Find the listener index (0-based) for your MCP listener
-   oc get gateway mcp-gateway -n openshift-ingress -o jsonpath='{.spec.listeners}' | python3 -m json.tool
-   # Remove the hostname field (adjust index as needed)
-   oc patch gateway mcp-gateway -n openshift-ingress \
-     --type='json' \
-     -p='[{"op": "remove", "path": "/spec/listeners/1/hostname"}]'
-   ```
+The RHCL operator (Kagenti/Kuadrant MCP gateway, v0.7.1+) — and, if
+`mcpGateway.auth.enabled` below, the Kuadrant operator too — must already
+be installed on the cluster; `../mcp-gateway` only creates CRs their CRDs
+define, never the operators themselves.
 
-3. **Set `spec.publicHost` on the MCPGatewayExtension** (required when the
-   listener has no hostname):
-   ```bash
-   oc patch mcpgatewayextension mcp-gateway-ext -n mcp-gateway-system \
-     --type='merge' \
-     -p '{"spec":{"publicHost":"mcp.apps.example.com"}}'
-   ```
-
-4. **Gateway's `allowedRoutes.namespaces`** must include
-   `registrationNamespace` (default: `mcp-gateway-system`).
+`mcpGateway.{gatewayName,gatewayNamespace,registrationNamespace,
+publicHost}` below must match `../mcp-gateway`'s `gateway.{name,namespace,
+publicHost}` / `extension.namespace`.
 
 ### Configuration
 

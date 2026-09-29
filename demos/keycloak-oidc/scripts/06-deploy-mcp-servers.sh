@@ -47,8 +47,10 @@ fi
 
 # RHCL MCP Gateway integration (optional). When MCP_GATEWAY_ENABLED=true,
 # the chart creates per-server HTTPRoute + MCPServerRegistration + a
-# ReferenceGrant in this namespace. Run 20-configure-mcp-gateway.sh
-# AFTER this script to patch the Gateway listener and MCPGatewayExtension.
+# ReferenceGrant in this namespace. The Gateway/MCPGatewayExtension
+# themselves come from ../mcp-gateway (a separate, cluster-scoped chart —
+# see its README) — install that once per cluster, before or after this
+# script, rather than patching anything by hand.
 if [[ "${MCP_GATEWAY_ENABLED:-false}" == "true" ]]; then
   : "${MCP_GATEWAY_NAME:=mcp-gateway}"
   : "${MCP_GATEWAY_NAMESPACE:=openshift-ingress}"
@@ -68,10 +70,11 @@ if [[ "${MCP_GATEWAY_ENABLED:-false}" == "true" ]]; then
   echo "MCP Gateway integration enabled — HTTPRoute + MCPServerRegistration will be created."
 
   # MCP Gateway JWT auth (optional, requires Kuadrant + Authorino).
-  # When MCP_GATEWAY_AUTH_ENABLED=true, the chart creates a single AuthPolicy
-  # on mcp-gateway-route that validates Keycloak JWTs. Run
-  # 21-configure-mcp-gateway-auth.sh BEFORE enabling this to create the
-  # required mcp-gateway-authn-ssl EnvoyFilter.
+  # When MCP_GATEWAY_AUTH_ENABLED=true, the chart creates the authn+authz
+  # AuthPolicy pair described in values.yaml's mcpGateway.auth comment.
+  # Install ../mcp-gateway with auth.enabled=true (its default) BEFORE
+  # enabling this — it creates the required mcp-gateway-authn-ssl
+  # EnvoyFilter and the two-listener Gateway these AuthPolicies target.
   if [[ "${MCP_GATEWAY_AUTH_ENABLED:-false}" == "true" ]]; then
     HELM_SET_ARGS+=(
       --set "mcpGateway.auth.enabled=true"

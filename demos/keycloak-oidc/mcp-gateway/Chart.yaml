@@ -1,0 +1,12 @@
+apiVersion: v2
+name: mcp-gateway
+description: >-
+  Cluster-scoped RHCL (Kuadrant) MCP Gateway resources that
+  ../mcp-servers attaches to via mcpGateway.enabled: the GatewayClass,
+  Gateway, MCPGatewayExtension, ClusterIP override ConfigMap, and (when
+  auth.enabled) the Authorino-TLS EnvoyFilter workaround. Confirmed live
+  against sandbox268 — this chart reproduces what was previously
+  hand-applied via oc patch/oc apply in scripts/20 and scripts/21.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,58 @@
+# RHCL (Kuadrant) MCP Gateway resources: cluster-scoped, shared by every
+# mcp-servers deployment that attaches via mcpGateway.enabled — not owned
+# by any single demo's namespace/release, hence its own chart instead of a
+# template inside mcp-servers. Install once per cluster, before any demo
+# enables mcpGateway.
+#
+# Prerequisite: RHCL operator (Kagenti/Kuadrant MCP gateway, v0.7.1+) and,
+# if auth.enabled, the Kuadrant operator — both installed on the cluster
+# already. This chart only creates CRs their CRDs define, never the
+# operators themselves. See README.md.
+
+gateway:
+  name: mcp-gateway
+  namespace: openshift-ingress
+  # OpenShift's own built-in Gateway API controller, not RHCL-specific —
+  # confirmed live (sandbox268): controllerName is literally this string,
+  # handled by the in-cluster Istio-based Gateway API implementation.
+  className: mcp-gateway-class
+  controllerName: openshift.io/gateway-controller/v1
+  # Both listeners share this port — required for the gateway's ext_proc
+  # to rewrite :authority and re-evaluate routing across listeners after
+  # parsing the JSON-RPC body (RHCL 1.4's two-listener pattern).
+  port: 8080
+  # Public hostname of the MCP Gateway Route — required, e.g.
+  # mcp.apps.<cluster-domain>.
+  publicHost: ""
+  # Namespaces allowed to attach HTTPRoutes/AuthPolicies to the listener(s)
+  # below — must include extension.namespace.
+  allowedNamespaces:
+    - openshift-ingress
+    - mcp-gateway-system
+
+extension:
+  name: mcp-gateway-ext
+  namespace: mcp-gateway-system
+
+keycloak:
+  issuer: "https://<keycloak-host>/realms/openshell"
+
+# Two-listener JWT authn+authz pattern (RHCL 1.4). Must match mcp-servers'
+# own mcpGateway.auth.enabled — that chart's AuthPolicy/HTTPRoute
+# templates assume these exact listener names already exist here
+# (sectionName: mcp, authzSectionName: mcps — both fixed, not
+# configurable, since mcp-servers hardcodes the same pair).
+#
+# true  (default): `mcp` listener (hostname set, external entry,
+#         authn-only via mcp-servers' mcp-gateway-authn AuthPolicy) +
+#         `mcps` listener (no hostname, internal post-routing,
+#         authn+authz via mcp-gateway-authz) on the same port.
+# false: single `mcp` listener, no hostname — unauthenticated at the
+#         gateway layer entirely (each server's own Envoy sidecar still
+#         enforces JWT+RBAC on its direct port, just not this one).
+auth:
+  enabled: true
+  # Namespace/Service Kuadrant's OWN generated EnvoyFilter targets for the
+  # Authorino gRPC check, but omits TLS for — see templates/envoyfilter.yaml.
+  authorinoNamespace: kuadrant-system
+  authorinoService: authorino-authorino-authorization

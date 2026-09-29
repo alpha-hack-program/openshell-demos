@@ -218,8 +218,9 @@ mcpGateway:
   #
   # Requires:
   #   - Kuadrant operator installed
-  #   - mcp-gateway-authn-ssl EnvoyFilter (created by 21-configure-mcp-gateway-auth.sh)
-  #   - Gateway with both mcp and mcps listeners on the same port
+  #   - mcp-gateway-authn-ssl EnvoyFilter (created by ../mcp-gateway with auth.enabled=true)
+  #   - Gateway with both mcp and mcps listeners on the same port (also
+  #     created by ../mcp-gateway with auth.enabled=true)
   #   - Keycloak clients named <registrationNamespace>/<serverName> with
   #     tool:-prefixed client roles matching each server's MCP tools
   auth:
