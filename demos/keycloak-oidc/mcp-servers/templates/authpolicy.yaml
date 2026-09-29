@@ -79,6 +79,66 @@ spec:
       sso-server:
         jwt:
           issuerUrl: {{ $keycloak.issuer | quote }}
+    {{- if $gw.auth.tokenExchange.enabled }}
+    {{- $tex := $gw.auth.tokenExchange }}
+    metadata:
+      # RFC 8693 token exchange, adapted from Red Hat's own MCP Gateway
+      # recipe (developers.redhat.com/articles/2025/12/12/advanced-
+      # authentication-authorization-mcp-gateway) to this repo's
+      # x-mcp-servername ("<namespace>/<name>") convention instead of
+      # their request.host-keyed one — x-mcp-servername already matches
+      # our Keycloak client IDs exactly, so no new client naming needed.
+      # Confirmed live on sandbox268 (standalone curl against Keycloak,
+      # not yet through this exact AuthPolicy path — the CEL expressions
+      # below are adapted, not themselves live-verified; check Authorino's
+      # logs on the first real request before trusting this silently):
+      #   - grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+      #     with subject_token/audience as below returns an access_token
+      #     whose aud/resource_access are narrowed to just that audience,
+      #     PROVIDED the target realm has Keycloak V2 Standard Token
+      #     Exchange set up (not V1 — V1 needs no code change here but
+      #     doesn't narrow anything without also disabling
+      #     fullScopeAllowed per-target, which is fragile and unnecessary
+      #     with V2). See docs/token-exchange-design.md.
+      oauth-token-exchange:
+        when:
+          - predicate: "request.headers.exists(h, h == 'x-mcp-servername')"
+        cache:
+          key:
+            expression: "auth.identity.sub + ':' + request.headers['x-mcp-servername']"
+          ttl: {{ $tex.cacheTtlSeconds }}
+        http:
+          url: "{{ $keycloak.issuer }}/protocol/openid-connect/token"
+          method: POST
+          credentials:
+            # Confirmed via the installed AuthPolicy CRD's own field
+            # description ("client credentials passed in the HTTP
+            # Authorization header and the 'Bearer' prefix expected
+            # PREPENDED TO THE SECRET VALUE" verbatim, no encoding done by
+            # Authorino): the referenced secret's value is sent as-is with
+            # "<prefix> " prepended. For real HTTP Basic auth this means
+            # the secret must hold base64("clientId:clientSecret")
+            # already computed — NOT the raw colon-joined string.
+            authorizationHeader:
+              prefix: Basic
+          # sharedSecretRef is a SIBLING of credentials under http, not
+          # nested inside it -- confirmed live: nesting it under
+          # credentials (as in a first draft here) was rejected outright
+          # by the installed AuthPolicy CRD's schema validation on `helm
+          # upgrade` ("field not declared in schema").
+          sharedSecretRef:
+            name: {{ $tex.credentialSecretName }}
+            key: {{ $tex.credentialSecretKey }}
+          bodyParameters:
+            grant_type:
+              value: urn:ietf:params:oauth:grant-type:token-exchange
+            subject_token:
+              expression: "request.headers['authorization'].split('Bearer ')[1]"
+            subject_token_type:
+              value: urn:ietf:params:oauth:token-type:access_token
+            audience:
+              expression: "request.headers['x-mcp-servername']"
+    {{- end }}
     authorization:
       tool-access-check:
         when:
@@ -101,6 +161,33 @@ spec:
                  auth.identity.resource_access.exists(p, p == request.headers['x-mcp-servername'])
                  ? auth.identity.resource_access[request.headers['x-mcp-servername']].roles : [])
     response:
+      {{- if $gw.auth.tokenExchange.enabled }}
+      success:
+        headers:
+          # Forward the exchanged (narrowly-scoped) token if the exchange
+          # above actually ran and produced one; otherwise fail OPEN to
+          # the original Authorization header unchanged, same as today —
+          # a missed/failed exchange (e.g. no x-mcp-servername on this
+          # request, or Keycloak unreachable) degrades to current
+          # pass-through behavior rather than breaking the request. This
+          # is a deliberate availability-over-strictness choice for a
+          # defense-in-depth control, not the primary authz gate (that's
+          # still tool-access-check/prompt-access-check above, evaluated
+          # against the ORIGINAL token either way) — revisit if stricter
+          # fail-closed behavior is wanted instead.
+          authorization:
+            plain:
+              # has() only accepts a field-selector chain (a.b.c), not map
+              # index access (a['b']) -- confirmed live: this rule failed
+              # every AuthConfig reconciliation with "invalid argument to
+              # has() macro" until switched to the `in` operator below,
+              # which is the correct way to test map-key existence in CEL.
+              expression: >-
+                ('oauth-token-exchange' in auth.metadata &&
+                 'access_token' in auth.metadata['oauth-token-exchange'])
+                  ? 'Bearer ' + auth.metadata['oauth-token-exchange'].access_token
+                  : request.headers['authorization']
+      {{- end }}
       unauthenticated:
         headers:
           "WWW-Authenticate":

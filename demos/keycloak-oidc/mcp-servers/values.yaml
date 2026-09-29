@@ -229,6 +229,58 @@ mcpGateway:
     # route-cache-clear + :authority change can reach these routes.
     authzSectionName: mcps
 
+    # RFC 8693 token exchange (defense-in-depth): before forwarding a
+    # tools/call to the backend, exchange the caller's original (broad)
+    # token for one scoped to just this server's audience via Keycloak V2
+    # Standard Token Exchange, confirmed live on sandbox268 -- see
+    # docs/token-exchange-design.md. Does NOT replace or change the
+    # tool-access-check/prompt-access-check authz rules above, which keep
+    # reading auth.identity.resource_access from the ORIGINAL token those
+    # checks were validated against; this only narrows what actually
+    # reaches the backend pod, which the mcps "gateway" Envoy listener
+    # never independently re-checks (see configmap-envoy.yaml's "No-auth
+    # listener" comment) -- exchange is what puts a real boundary back on
+    # that hop. Requires, on the Keycloak side (not created by this
+    # chart):
+    #   - clientId.attributes["standard.token.exchange.enabled"] = "true"
+    #     on the exchanging client
+    #   - an oidc-audience-mapper on the CLI client (openshell-cli) that
+    #     includes the exchanging client, so it's present in the subject
+    #     token's own aud (V2 requires this)
+    #   - a Secret named credentialSecretName, in the NAMESPACE WHERE
+    #     CONNECTIVITY LINK/AUTHORINO ITSELF IS DEPLOYED (kuadrant-system
+    #     on sandbox268) -- NOT registrationNamespace, NOT
+    #     gatewayNamespace. Confirmed live: putting it in
+    #     registrationNamespace produced a silent-looking failure that was
+    #     only visible in the Authorino pod's own logs ("Secret ... not
+    #     found"), with the AuthConfig stuck at Ready=false/HostsNotLinked
+    #     and no error surfaced anywhere on the AuthPolicy or Gateway
+    #     status. Authorino only resolves sharedSecretRef against its own
+    #     namespace, same as the authorino-oauth-client Secret in RHCL's
+    #     own Vault docs ("must be applied in the namespace of your
+    #     Connectivity Link deployment").
+    # Leave disabled=false (default) to keep the existing pass-through
+    # behavior -- nothing here is required for the demo's baseline flows.
+    tokenExchange:
+      enabled: false
+      # Keycloak client performing the exchange (must have standard token
+      # exchange enabled, and must appear in the subject token's own aud).
+      clientId: openshell-gateway
+      # Secret (already existing, NOT created by this chart) holding the
+      # HTTP Basic auth value Authorino sends to Keycloak's token
+      # endpoint for this client. MUST live in Authorino/Connectivity
+      # Link's own namespace (kuadrant-system on sandbox268) -- see the
+      # note above `enabled` for why. Authorino sends the secret's value
+      # verbatim with "Basic " prepended (no encoding done on its side --
+      # confirmed against the AuthPolicy CRD's own field description), so
+      # this key's value must already be base64("<clientId>:<clientSecret>"),
+      # not the raw colon-joined pair.
+      credentialSecretName: mcp-gateway-exchange-creds
+      credentialSecretKey: basic-auth
+      # Seconds to cache an exchanged token per (user, server) pair before
+      # re-exchanging.
+      cacheTtlSeconds: 60
+
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
 # (<name>.<namespace>.svc.cluster.local). `requiredRole` is the Keycloak
