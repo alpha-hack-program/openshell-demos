@@ -991,12 +991,13 @@ from the same source — `default-ingress-cert` in
 ConfigMap for the in-cluster pod, exported as `SSL_CERT_FILE` for the local
 CLI process.
 
-With those set, the command below creates the namespace and grants the
-sandbox SCC, computes `ROUTE_HOST`, then branches only on whether
-`LETSENCRYPT_CLUSTER_ISSUER` is set to build the `SAN_SET`/`ISSUER_SET`
-`--set` overrides (Route-only SANs plus `serverIssuerRef` pointing at your
-`ClusterIssuer`) before running `helm upgrade --install` against
-`helm/values-certmanager.yaml`:
+##### Install command
+
+This creates the namespace, grants the sandbox SCC, computes `ROUTE_HOST`,
+then branches only on whether `LETSENCRYPT_CLUSTER_ISSUER` is set to build
+the `SAN_SET`/`ISSUER_SET` `--set` overrides (Route-only SANs plus
+`serverIssuerRef` pointing at your `ClusterIssuer`) before running
+`helm upgrade --install` against `helm/values-certmanager.yaml`:
 
 ```bash
 source .env
