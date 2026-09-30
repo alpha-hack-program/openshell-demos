@@ -371,6 +371,7 @@ banker membership in a workspace that already has one.
 | Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
+| OpenShift cert-manager operator | Used to provision the gateway's TLS certificates — see [2a. Helm install](#2a-helm-install). The PKI-init-job alternative avoids this dependency but isn't walked through end to end in this guide |
 | RHCL operator (`rhcl-operator`, Red Hat Operators catalog) | **Optional** — only for gateway-routed MCP access (the default walkthrough below); direct access needs none of this. See [Installing RHCL](#installing-rhcl) below |
 | Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the `mcp-gateway` chart creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
@@ -863,95 +864,49 @@ and registers the gateway endpoint with the `openshell` CLI (2b).
 
 #### 2a. Helm install
 
-This demo provides two Helm values files:
+This guide provisions TLS certificates through the OpenShift cert-manager
+Operator (`helm/values-certmanager.yaml`, `CERT_MANAGER=true` in `.env`) —
+install that Operator first if you haven't (see
+[Prerequisites](#prerequisites)). Within that one path there's a single
+choice: leave `LETSENCRYPT_CLUSTER_ISSUER` empty for the chart's own
+self-signed CA (the simplest option — nothing else to create), or set it to
+an existing Let's Encrypt `ClusterIssuer` name for a publicly-trusted
+certificate on the Route instead. See
+[TLS with Let's Encrypt](docs/tls-lets-encrypt.md) for creating a
+`ClusterIssuer` and everything else ACME-specific — the command below is
+all you need either way.
 
-- **`helm/values.yaml`** — uses the PKI init job to generate TLS certificates
-  (default, no extra dependencies).
-- **`helm/values-certmanager.yaml`** — uses the OpenShift cert-manager
-  Operator to manage TLS certificates. Requires the cert-manager Operator to
-  be installed on the cluster. Set `CERT_MANAGER=true` in your `.env` to use
-  this path.
-
-Both files contain a `<keycloak-host>` placeholder in the OIDC issuer URL
-and `openshiftRoute.enabled: true`. Use `--set` to fill in your Keycloak
-hostname and the Route FQDN at install time. The chart creates the
-passthrough Route automatically — no manual `oc create route` needed.
+`helm/values-certmanager.yaml` contains a `<keycloak-host>` placeholder in
+the OIDC issuer URL and `openshiftRoute.enabled: true`. Use `--set` to fill
+in your Keycloak hostname and the Route FQDN at install time. The chart
+creates the passthrough Route automatically — no manual `oc create route`
+needed.
 
 The Route hostname must also be in the server certificate's SANs — without
 it, TLS handshakes will fail. The `--set` overrides below add it alongside
 the namespace-specific service DNS names.
 
-##### Let's Encrypt TLS (optional)
+<details>
+<summary>Alternative: PKI init job (no cert-manager dependency)</summary>
 
-When using the cert-manager path (`CERT_MANAGER=true`), you can get a
-publicly-trusted CA-signed certificate for the Route instead of the default
-self-signed CA. The chart's `serverIssuerRef` creates a **second** server
-certificate signed by your ACME issuer (for the Route FQDN) while the
-**internal** certificate stays signed by the chart's own CA — mTLS client
-auth keeps working unchanged. The gateway serves the right certificate via
-SNI.
-
-To use this:
-
-1. Set `LETSENCRYPT_CLUSTER_ISSUER` in your `.env` to the name of an
-   existing Let's Encrypt `ClusterIssuer` on your cluster (e.g.
-   `letsencrypt-prod`).
-
-2. If you don't have a ClusterIssuer yet, create one. DNS-01 is recommended
-   for passthrough Routes (HTTP-01 needs port 80, which passthrough doesn't
-   expose). The solver configuration depends on your DNS provider — this
-   example uses Route53, but cert-manager supports
-   [many providers](https://cert-manager.io/docs/configuration/acme/dns01/):
-
-   ```bash
-   oc apply -f - <<'EOF'
-   apiVersion: cert-manager.io/v1
-   kind: ClusterIssuer
-   metadata:
-     name: letsencrypt-prod
-   spec:
-     acme:
-       server: https://acme-v02.api.letsencrypt.org/directory
-       email: your-email@example.com        # Let's Encrypt notifications
-       privateKeySecretRef:
-         name: letsencrypt-prod-account-key
-       solvers:
-         - dns01:
-             route53:                        # replace with your DNS provider
-               region: us-east-1
-               # accessKeyID / secretAccessKeySecretRef or IRSA — see
-               # cert-manager docs for your provider
-   EOF
-
-   # Verify the issuer is ready
-   oc get clusterissuer letsencrypt-prod
-   ```
-
-The helm install snippet below automatically passes `serverIssuerRef` when
-`LETSENCRYPT_CLUSTER_ISSUER` is set. If left empty, the chart uses its own
-self-signed CA for all certificates (the default).
-
-When `serverIssuerRef` is set, `certManager.serverDnsNames` feeds **only**
-the external (ACME) certificate — the internal certificate's SANs come
-from the chart's own defaults automatically, regardless of this value. The
-external certificate's `dnsNames` are used as-is, with no filtering, so
-the list must contain **only** the externally-resolvable Route FQDN — no
-internal names (rejected by the chart's own guard), no IPs, and no bare
-single-label names (both silently accepted by the chart but rejected by
-ACME). That's why the two branches below differ: the self-signed-CA branch
-appends the Route host to the base internal-SAN list, while the Let's
-Encrypt branch replaces `serverDnsNames` wholesale with just the Route
-host. Also see the `OPENSHELL_NAMESPACE` naming constraint above — the
-Route host doubles the `openshell-` prefix if the namespace already starts
-with it, which can push the Let's Encrypt certificate's CommonName over
-the 64-byte X.509 limit.
-
-Recommended `.env` values for this optional path:
+`helm/values.yaml` with `CERT_MANAGER=false` uses a PKI init job to
+generate TLS certificates instead of cert-manager — no Operator to install.
+This guide only walks through the cert-manager path end to end; this
+alternative hasn't been exercised alongside the rest of this demo's
+Keycloak/OIDC setup, so treat it as untested and expect it may surface
+issues this guide's troubleshooting section doesn't cover. **[VERIFY]**
 
 ```bash
-CERT_MANAGER=true
-LETSENCRYPT_CLUSTER_ISSUER=letsencrypt-prod
+helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+  --version "$OPENSHELL_CHART_VERSION" \
+  --namespace "$OPENSHELL_NAMESPACE" \
+  -f helm/values.yaml \
+  --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  --set "openshiftRoute.host=${ROUTE_HOST}" \
+  --set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}"
 ```
+
+</details>
 
 ##### OIDC issuer TLS trust (self-signed default ingress cert)
 
@@ -1047,11 +1002,11 @@ the browser context needs the equivalent
 will fail navigating to the same self-signed Keycloak login page.
 
 With those set, the command below creates the namespace and grants the
-sandbox SCC, computes `ROUTE_HOST`, then branches on `CERT_MANAGER` /
-`LETSENCRYPT_CLUSTER_ISSUER` to pick the right values file
-(`helm/values-certmanager.yaml`) and build the `SAN_SET`/`ISSUER_SET`
-`--set` overrides described above (Route-only SANs plus `serverIssuerRef`
-pointing at your `ClusterIssuer`) before running `helm upgrade --install`:
+sandbox SCC, computes `ROUTE_HOST`, then branches only on whether
+`LETSENCRYPT_CLUSTER_ISSUER` is set to build the `SAN_SET`/`ISSUER_SET`
+`--set` overrides (Route-only SANs plus `serverIssuerRef` pointing at your
+`ClusterIssuer`) before running `helm upgrade --install` against
+`helm/values-certmanager.yaml`:
 
 ```bash
 source .env
@@ -1061,30 +1016,22 @@ oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$OPENSHELL_NAM
 
 ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
 
-if [[ "${CERT_MANAGER:-false}" == "true" ]]; then
-  VALUES_FILE=helm/values-certmanager.yaml
-  ISSUER_SET=()
-  if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
-    # serverDnsNames feeds ONLY the external (ACME) certificate when
-    # serverIssuerRef is set — replace it wholesale with just the
-    # externally-resolvable Route host (no internal names, no IPs, no
-    # bare names; ACME rejects all three).
-    SAN_SET=(--set "certManager.serverDnsNames={${ROUTE_HOST}}")
-    ISSUER_SET=(
-      --set "certManager.serverIssuerRef.name=${LETSENCRYPT_CLUSTER_ISSUER}"
-      --set "certManager.serverIssuerRef.kind=ClusterIssuer"
-      --set "certManager.serverIssuerRef.group=cert-manager.io"
-    )
-  else
-    SAN_SET=(
-      --set "certManager.serverDnsNames[2]=openshell.${OPENSHELL_NAMESPACE}.svc"
-      --set "certManager.serverDnsNames[3]=openshell.${OPENSHELL_NAMESPACE}.svc.cluster.local"
-      --set "certManager.serverDnsNames[4]=${ROUTE_HOST}"
-    )
-  fi
+if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
+  # serverDnsNames feeds ONLY the external (ACME) certificate when
+  # serverIssuerRef is set — replace it wholesale with just the
+  # externally-resolvable Route host. See docs/tls-lets-encrypt.md for why.
+  SAN_SET=(--set "certManager.serverDnsNames={${ROUTE_HOST}}")
+  ISSUER_SET=(
+    --set "certManager.serverIssuerRef.name=${LETSENCRYPT_CLUSTER_ISSUER}"
+    --set "certManager.serverIssuerRef.kind=ClusterIssuer"
+    --set "certManager.serverIssuerRef.group=cert-manager.io"
+  )
 else
-  VALUES_FILE=helm/values.yaml
-  SAN_SET=(--set "pkiInitJob.serverDnsNames[0]=${ROUTE_HOST}")
+  SAN_SET=(
+    --set "certManager.serverDnsNames[2]=openshell.${OPENSHELL_NAMESPACE}.svc"
+    --set "certManager.serverDnsNames[3]=openshell.${OPENSHELL_NAMESPACE}.svc.cluster.local"
+    --set "certManager.serverDnsNames[4]=${ROUTE_HOST}"
+  )
   ISSUER_SET=()
 fi
 
@@ -1097,7 +1044,7 @@ oc -n "$OPENSHELL_NAMESPACE" get configmap openshell-oidc-ca >/dev/null 2>&1 && 
 helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
   --version "$OPENSHELL_CHART_VERSION" \
   --namespace "$OPENSHELL_NAMESPACE" \
-  -f "$VALUES_FILE" \
+  -f helm/values-certmanager.yaml \
   --set "server.oidc.issuer=https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
   --set "openshiftRoute.host=${ROUTE_HOST}" \
   "${SAN_SET[@]}" \
@@ -1117,52 +1064,15 @@ Verify the Route was created:
 oc -n "$OPENSHELL_NAMESPACE" get route openshell
 ```
 
-**Confirmed** on a truly fresh cluster/`helm install` racing a real ACME
-issuance (Let's Encrypt production issuer, chart version
-`${OPENSHELL_CHART_VERSION}`): the `Certificate` resource name below
-(`openshell-server-external`) is correct, and the whole wait sequence
-(`oc wait --for=condition=Ready certificate/...` followed by the
-`openssl s_client` issuer-polling loop) completed cleanly end to end — the
-condition went `Ready` and the Route was already serving the Let's
-Encrypt-signed cert on the very first poll, no propagation delay observed.
-
-**If you're using the Let's Encrypt path** (`LETSENCRYPT_CLUSTER_ISSUER`
-set), wait for the ACME certificate to actually finish issuing before
-moving on to step 2b. `helm upgrade --install` returning success only means
-the `Certificate` object was *created*, not that cert-manager has finished
-the ACME challenge and rotated the Route onto the real Let's
-Encrypt-signed cert — the statefulset rollout above doesn't wait on this
-either, since it's a separate resource with no dependency the chart
-declares. If step 2b's mTLS extraction runs while the Route is still
-serving the chart's own self-signed cert (issuance can take a few
-minutes), the Let's Encrypt chain it appends to `ca.crt` ends up empty,
-and every later CLI command against this gateway fails with `invalid peer
-certificate: UnknownIssuer` once the cert *does* rotate — a failure mode
-that's easy to hit and confusing to diagnose after the fact, since
-`gateway add`/`whoami` may keep working for a while on the stale cert
-before it flips:
-
-```bash
-oc -n "$OPENSHELL_NAMESPACE" wait --for=condition=Ready \
-  certificate/openshell-server-external --timeout=300s
-```
-
-`Certificate: Ready` only confirms cert-manager finished the ACME
-challenge and wrote the cert into its Secret — it doesn't guarantee the
-pod behind the passthrough Route has already reloaded onto it (that's a
-separate propagation step with no condition to wait on). Confirm the Route
-is actually serving the Let's Encrypt cert before moving on:
-
-```bash
-ROUTE_HOST="openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}"
-for i in $(seq 1 30); do
-  ISSUER=$(echo | openssl s_client -connect "${ROUTE_HOST}:443" \
-    -servername "${ROUTE_HOST}" 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
-  echo "$ISSUER" | grep -q "Let's Encrypt" && { echo "Route is serving the Let's Encrypt cert."; break; }
-  echo "Still on the old cert ($ISSUER) — waiting..."
-  sleep 10
-done
-```
+**If you set `LETSENCRYPT_CLUSTER_ISSUER`,** don't move on to
+[step 2b](#2b-register-the-gateway-with-the-cli) yet — the ACME certificate
+needs to actually finish issuing, and the Route needs to actually be
+serving it, or 2b's mTLS extraction silently captures an incomplete CA
+chain. See
+[TLS with Let's Encrypt](docs/tls-lets-encrypt.md#waiting-for-the-certificate)
+for the exact wait commands and why `helm upgrade --install` succeeding
+isn't enough on its own. With the self-signed CA (the default, no
+`LETSENCRYPT_CLUSTER_ISSUER`), there's no such wait — move straight to 2b.
 
 #### 2b. Register the gateway with the CLI
 
@@ -3804,6 +3714,8 @@ trust as end-to-end verification.
 |---|---|---|
 | `OPENSHELL_CHART_VERSION` | `helm upgrade --install --version` | No `v` prefix — see [Prerequisites](#prerequisites) |
 | `CLUSTER_APPS_DOMAIN` | Route FQDN derivation | e.g. `apps.mycluster.example.com` |
+| `CERT_MANAGER` | [2a. Helm install](#2a-helm-install) | `true` (default) selects `helm/values-certmanager.yaml`; `false` is the untested PKI-init-job alternative |
+| `LETSENCRYPT_CLUSTER_ISSUER` | [2a. Helm install](#2a-helm-install) | Empty (default) = chart's self-signed CA; set to an existing `ClusterIssuer` name for a publicly-trusted cert — see [TLS with Let's Encrypt](docs/tls-lets-encrypt.md) |
 | `KEYCLOAK_HOST` | Helm overlay, provider profiles | e.g. `keycloak.apps.<cluster-domain>` |
 | `KEYCLOAK_REALM` | All Keycloak-facing config | `openshell` in this demo |
 | `KEYCLOAK_CLIENT_ID_CLI` | `server.oidc.audience` | Must match the Keycloak client ID exactly |
