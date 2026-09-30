@@ -1164,6 +1164,18 @@ openshell gateway list
 This is the `whoami` check every later step (starting with
 [step 3](#3-onboard-a-banker)) assumes already passes for Terminal A.
 
+**admin is now a registered identity, not just an exported env var pair.**
+Any time you need to re-point a *fresh* shell at it — a new terminal, a
+script, a later session — `source scripts/as.sh admin` does the
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME` export above for you, in one line, from
+here on. The same applies to alice/bob/charlie once each has logged in (see
+[Log in as each banker](#log-in-as-each-banker-one-time-per-terminal-before-scene-1)) —
+every `export XDG_CONFIG_HOME=...`/`XDG_STATE_HOME=...` line shown from
+[step 3](#3-onboard-a-banker) onward has this as a drop-in equivalent. See
+[`docs/identity-switching.md`](docs/identity-switching.md) for exactly
+what it does and its two limitations (can't perform the first-time login;
+only pre-loads OTel args for the default `claude-<user-id>` sandbox name).
+
 ### 3. Onboard a banker
 
 Onboarding needs a long-lived **offline refresh token** (not a short-lived

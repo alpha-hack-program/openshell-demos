@@ -28,6 +28,6 @@
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib-use-identity.sh"
 source "$script_dir/lib-otel-env.sh"
-use_identity "$1"
-otel_claude_env_args "$1" "claude-$1"
 unset script_dir
+use_identity "$1" || return 1
+otel_claude_env_args "$1" "claude-$1"
