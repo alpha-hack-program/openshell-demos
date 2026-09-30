@@ -3,7 +3,7 @@
 Deploys [`onboarding-web`](../../../util/onboarding-web/), the self-service
 token-attach app, as a single-replica Deployment + Service + Route in this
 demo's namespace. See
-[`demos/keycloak-oidc/README.md`, Step 3b](../README.md#step-3b--self-service-alternative-onboarding-web)
+[`demos/keycloak-oidc/README.md`, Step 3.1a](../README.md#step-31a--self-service-alternative-onboarding-web)
 for the full walkthrough and
 [`docs/self-service-onboarding.md`](../docs/self-service-onboarding.md)
 for the design rationale (Option B). This file covers the chart itself.
@@ -37,7 +37,7 @@ Both must already exist before installing this chart:
 2. The `onboarding-web-admin-session` Secret, produced by running
    [`../scripts/10-bootstrap-onboarding-web-admin.sh`](../scripts/10-bootstrap-onboarding-web-admin.sh)
    and `oc create secret generic onboarding-web-admin-session
-   --from-file=admin-session.tar.gz=...` — see Step 3b in the demo README
+   --from-file=admin-session.tar.gz=...` — see Step 3.1a in the demo README
    for the exact commands.
 
 ## Install

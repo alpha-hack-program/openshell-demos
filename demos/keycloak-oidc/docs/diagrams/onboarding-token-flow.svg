@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 880"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .line-default   { stroke: #475569 }
+    .line-indigo    { stroke: #4f46e5 }
+    .line-pink      { stroke: #db2777 }
+    .line-green     { stroke: #16a34a }
+
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .fill-pink      { fill: #fce7f3 }
+    .stroke-pink    { stroke: #db2777 }
+    .text-pink      { fill: #9d174d }
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+
+    .phase-bg-indigo   { fill: #eef2ff; stroke: #c7d2fe }
+    .phase-text-indigo { fill: #3730a3 }
+    .phase-bg-pink     { fill: #fdf2f8; stroke: #fbcfe8 }
+    .phase-text-pink   { fill: #9d174d }
+    .phase-bg-green    { fill: #f0fdf4; stroke: #bbf7d0 }
+    .phase-text-green  { fill: #166534 }
+
+    .alt-border     { stroke: #94a3b8 }
+    .alt-label-bg   { fill: #e2e8f0 }
+    .alt-label-text { fill: #475569 }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .line-default   { stroke: #94a3b8 }
+      .line-indigo    { stroke: #818cf8 }
+      .line-pink      { stroke: #f472b6 }
+      .line-green     { stroke: #4ade80 }
+
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .fill-pink      { fill: #4a1942 }
+      .stroke-pink    { stroke: #f472b6 }
+      .text-pink      { fill: #f9a8d4 }
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+
+      .phase-bg-indigo   { fill: #1e1b4b; stroke: #312e81 }
+      .phase-text-indigo { fill: #a5b4fc }
+      .phase-bg-pink     { fill: #3b0a2a; stroke: #831843 }
+      .phase-text-pink   { fill: #f9a8d4 }
+      .phase-bg-green    { fill: #052e16; stroke: #14532d }
+      .phase-text-green  { fill: #86efac }
+
+      .alt-border     { stroke: #475569 }
+      .alt-label-bg   { fill: #334155 }
+      .alt-label-text { fill: #94a3b8 }
+    }
+  </style>
+  <defs>
+    <marker id="arrow-indigo" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-default" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1000" height="880" rx="12" class="bg"/>
+  <rect x="0" y="0" width="1000" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1000" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="24" y="36" font-size="16" font-weight="700" class="header-text">Onboarding a Banker: Refresh Token → OpenShell Provider</text>
+  <text x="976" y="36" font-size="11" class="header-muted" text-anchor="end">keycloak-oidc demo</text>
+
+  <!-- Phase 0: workspace setup (once per banker) -->
+  <rect x="20" y="72" width="960" height="100" rx="10" class="phase-bg-indigo" stroke-width="1.5"/>
+  <text x="40" y="94" font-size="13" font-weight="700" class="phase-text-indigo">Step 3.0 — once per banker</text>
+
+  <rect x="300" y="104" width="400" height="54" rx="8" class="fill-indigo stroke-indigo" stroke-width="1.5"/>
+  <text x="500" y="126" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">Admin creates the banker's workspace</text>
+  <text x="500" y="141" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">and adds them as a member</text>
+
+  <!-- Branch down to the two paths -->
+  <line x1="440" y1="158" x2="260" y2="200" class="line-default" stroke-width="1.5" marker-end="url(#arrow-default)"/>
+  <line x1="560" y1="158" x2="740" y2="200" class="line-default" stroke-width="1.5" marker-end="url(#arrow-default)"/>
+
+  <!-- Phase 1: two alternative paths to an authorization code -->
+  <rect x="20" y="192" width="960" height="312" rx="10" class="phase-bg-pink" stroke-width="1.5"/>
+  <text x="40" y="214" font-size="13" font-weight="700" class="phase-text-pink">Two alternative paths — pick one per banker</text>
+
+  <text x="260" y="222" font-size="12" font-weight="700" class="text-pink" text-anchor="middle">Step 3.1a — onboarding-web (default, self-service)</text>
+  <text x="740" y="222" font-size="12" font-weight="700" class="text-pink" text-anchor="middle">Step 3.1b — onboard tool (alternative, admin-run)</text>
+
+  <!-- Divider + OR badge -->
+  <line x1="500" y1="230" x2="500" y2="486" stroke-dasharray="6,3" class="alt-border" stroke-width="1.5"/>
+  <rect x="480" y="346" width="40" height="20" rx="4" class="alt-label-bg"/>
+  <text x="500" y="360" font-size="10" font-weight="700" class="alt-label-text" text-anchor="middle">OR</text>
+
+  <!-- Column 1 (3.1a) boxes -->
+  <rect x="30" y="236" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="260" y="257" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Admin pre-provisions the provider</text>
+  <text x="260" y="272" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">(profile import + provider create, credential=pending)</text>
+  <line x1="260" y1="288" x2="260" y2="302" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="30" y="302" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="260" y="332" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Admin deploys onboarding-web</text>
+  <line x1="260" y1="354" x2="260" y2="368" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="30" y="368" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="260" y="389" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Banker visits onboarding-web's URL and logs</text>
+  <text x="260" y="404" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">into Keycloak themselves (real OAuth browser flow)</text>
+  <line x1="260" y1="420" x2="260" y2="434" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="30" y="434" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="260" y="455" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">onboarding-web's backend receives</text>
+  <text x="260" y="470" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">the authorization code</text>
+
+  <!-- Column 2 (3.1b) boxes -->
+  <rect x="510" y="236" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="740" y="266" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Admin runs the onboard binary for this banker</text>
+  <line x1="740" y1="288" x2="740" y2="302" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="510" y="302" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="740" y="323" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">onboard opens a browser; banker logs into</text>
+  <text x="740" y="338" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">Keycloak themselves (real OAuth browser flow)</text>
+  <line x1="740" y1="354" x2="740" y2="368" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="510" y="368" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="740" y="389" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">onboard's local callback receives</text>
+  <text x="740" y="404" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">the authorization code</text>
+  <line x1="740" y1="420" x2="740" y2="434" class="line-pink" stroke-width="1.5" marker-end="url(#arrow-pink)"/>
+
+  <rect x="510" y="434" width="460" height="52" rx="8" class="fill-pink stroke-pink" stroke-width="1.5"/>
+  <text x="740" y="455" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">onboard runs provider profile import +</text>
+  <text x="740" y="470" font-size="11" font-weight="600" class="text-pink" text-anchor="middle">provider create (credential=pending)</text>
+
+  <!-- Merge into shared final steps -->
+  <line x1="260" y1="486" x2="500" y2="516" class="line-default" stroke-width="1.5"/>
+  <line x1="740" y1="486" x2="500" y2="516" class="line-default" stroke-width="1.5" marker-end="url(#arrow-default)"/>
+
+  <!-- Phase 2: shared final steps -->
+  <rect x="20" y="522" width="960" height="336" rx="10" class="phase-bg-green" stroke-width="1.5"/>
+  <text x="40" y="544" font-size="13" font-weight="700" class="phase-text-green">Shared final steps — same for either path above</text>
+
+  <rect x="250" y="558" width="500" height="52" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="500" y="579" font-size="11" font-weight="600" class="text-green" text-anchor="middle">Exchange the authorization code for the</text>
+  <text x="500" y="594" font-size="11" font-weight="600" class="text-green" text-anchor="middle">banker's own offline refresh token</text>
+  <line x1="500" y1="610" x2="500" y2="624" class="line-green" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="250" y="624" width="500" height="52" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="500" y="645" font-size="11" font-weight="600" class="text-green" text-anchor="middle">openshell provider refresh configure</text>
+  <text x="500" y="660" font-size="11" font-weight="600" class="text-green" text-anchor="middle">(attach refresh_token + client_id)</text>
+  <line x1="500" y1="676" x2="500" y2="690" class="line-green" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="250" y="690" width="500" height="52" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+  <text x="500" y="711" font-size="11" font-weight="600" class="text-green" text-anchor="middle">openshell provider refresh rotate</text>
+  <text x="500" y="726" font-size="11" font-weight="600" class="text-green" text-anchor="middle">(mints the first real access token)</text>
+  <line x1="500" y1="742" x2="500" y2="756" class="line-green" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <rect x="230" y="756" width="540" height="60" rx="8" class="fill-green stroke-green" stroke-width="2.5"/>
+  <text x="500" y="780" font-size="11" font-weight="700" class="text-green" text-anchor="middle">USER_ACCESS_TOKEN credential is live</text>
+  <text x="500" y="796" font-size="11" font-weight="600" class="text-green" text-anchor="middle">Providers v2 refreshes it automatically from here on — no one touches it again</text>
+</svg>

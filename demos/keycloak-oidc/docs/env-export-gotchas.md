@@ -13,7 +13,7 @@ active) are visible to a child process.
 
 Two real instances of this surfaced during live testing of this demo:
 
-## 1. `onboard --keycloak-host` (Step 3a)
+## 1. `onboard --keycloak-host` (Step 3.1b)
 
 `onboard` is a separate Rust binary. It declares `keycloak_host` via clap
 as `#[arg(long, env = "KEYCLOAK_HOST")]` with **no default** — clap will
@@ -45,7 +45,7 @@ don't silently export *every* var in `.env` (including things like
 `ANTHROPIC_API_KEY` from optional recipes) into every child process for
 the rest of the shell session.
 
-## 2. `ROUTE_HOST` for `10-bootstrap-onboarding-web-admin.sh` (Step 3b)
+## 2. `ROUTE_HOST` for `10-bootstrap-onboarding-web-admin.sh` (Step 3.1a)
 
 `10-bootstrap-onboarding-web-admin.sh` is a standalone script, invoked as
 `./scripts/10-bootstrap-onboarding-web-admin.sh` — a separate process. It
@@ -59,7 +59,7 @@ guards on `ROUTE_HOST` with:
 in [step 2a](../README.md#2a-helm-install) as
 `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}` and used
 directly in that same shell (`helm --set`). If you're in a fresh terminal
-by the time you reach step 3b, `ROUTE_HOST` doesn't exist yet, and even
+by the time you reach step 3.1a, `ROUTE_HOST` doesn't exist yet, and even
 after recomputing it, a plain assignment still isn't visible to the child
 script:
 
@@ -68,7 +68,7 @@ script:
 ```
 
 **First fix (superseded):** `export ROUTE_HOST=...` before invoking the
-script, mirroring Step 3a's explicit-flag fix. That papered over the
+script, mirroring Step 3.1b's explicit-flag fix. That papered over the
 symptom in the README but left the same trap for the very next standalone
 script (`11-deploy-onboarding-web.sh`'s `ONBOARDING_WEB_ROUTE_HOST` hit it
 immediately after). **Actual fix:** push the derivation into the scripts
@@ -115,6 +115,6 @@ When adding or reviewing a README step:
   (`OPENSHELL_NAMESPACE`, `CLUSTER_APPS_DOMAIN`), the way `ROUTE_HOST` and
   `ONBOARDING_WEB_ROUTE_HOST` are now. That's more robust than any
   README-level convention, because it can't be broken by running steps out
-  of order or in a fresh shell. Reach for the explicit-flag fix (Step 3a)
+  of order or in a fresh shell. Reach for the explicit-flag fix (Step 3.1b)
   when the value has no sane default and must come from the reader;
   reach for in-script derivation when it does.

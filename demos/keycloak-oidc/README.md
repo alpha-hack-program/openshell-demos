@@ -660,7 +660,7 @@ substituting before import: the `openshell-onboarding-web` client's
 Unlike `onboard`'s provider-profile placeholders (substituted by the
 `onboard` binary itself at onboarding time), nothing substitutes this one
 automatically — and since Keycloak enforces an exact redirect URI match,
-importing the raw file as-is will make [Step 3b](#step-3b--self-service-alternative-onboarding-web)
+importing the raw file as-is will make [Step 3.1a](#step-31a--self-service-alternative-onboarding-web)
 (the `onboarding-web` self-service app) fail at login time later, even
 though nothing about it looks broken yet. Run the helper script — not
 optional, unlike in earlier revisions of this guide — to render a real
@@ -673,12 +673,12 @@ copy with that placeholder filled in:
 This writes `keycloak/realm-export.rendered.json` (gitignored — never
 commit it) with `<onboarding-web-base-url>` replaced by
 `https://onboarding-web-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`,
-the same convention [Step 3b](#step-3b--self-service-alternative-onboarding-web)'s
+the same convention [Step 3.1a](#step-31a--self-service-alternative-onboarding-web)'s
 `ONBOARDING_WEB_ROUTE_HOST` derives independently later — so the two stay
 in sync without you setting anything by hand. If you need a different
 `onboarding-web` hostname, `export ONBOARDING_WEB_ROUTE_HOST=<your-host>`
 before re-running this script, and export the same value again before
-running `scripts/11-deploy-onboarding-web.sh` in step 3b.
+running `scripts/11-deploy-onboarding-web.sh` in step 3.1a.
 It also prints the `.env` values to confirm.
 
 #### 1b. Deploy Keycloak on the cluster
@@ -1186,11 +1186,25 @@ rotate, inject into sandboxes) but leaves *initial acquisition* to your
 identity plumbing — the upstream docs jump straight to `--material
 refresh_token=<value>` and assume you already have it.
 
-The `onboard` CLI tool below gets you one: it drives a real browser-based
-OAuth login as the banker themselves (the operator never sees their
-password) and wires the resulting token into OpenShell automatically. If
-you want the manual, step-by-step equivalent instead — useful for
-understanding what `onboard` does internally, onboarding without the
+Two tools get you that token and wire it into OpenShell automatically —
+they differ only in *who* triggers the token-attach step and *how* the
+banker's browser login gets there; underneath, both end up running the
+same four `openshell` CLI calls (`provider profile import` → `provider
+create` → `provider refresh configure` → `provider refresh rotate`):
+
+![Onboarding a banker: refresh token → OpenShell provider](docs/diagrams/onboarding-token-flow.svg)
+
+- **[Step 3.1a — `onboarding-web`](#step-31a--self-service-alternative-onboarding-web)
+  (default, self-service):** each banker visits a URL and logs in
+  themselves — no admin action at the moment they activate their own
+  credential.
+- **[Step 3.1b — the `onboard` tool](#step-31b--onboard-the-banker-with-the-onboard-tool)
+  (alternative, admin-run):** an admin runs one binary per banker instead
+  of deploying a web app — faster to set up for a one-off demo, at the
+  cost of an admin being in the loop for every banker's activation.
+
+If you want the manual, step-by-step equivalent instead of either tool —
+useful for understanding what they do internally, onboarding without any
 binary, or a fully-controlled demo/test environment where a
 password-grant shortcut is acceptable — see
 [`docs/manual-onboarding.md`](docs/manual-onboarding.md).
@@ -1207,9 +1221,10 @@ Platform Admin operations) and only needs to run once per banker:
 
 ```bash
 # Terminal A — admin
+source scripts/as.sh admin   # re-points this terminal at admin if it's a
+                              # fresh shell — a no-op if Terminal A is
+                              # already admin from step 2
 openshell whoami   # confirm: Name: openshell-admin — this whole step is admin-only
-
-source .env
 ```
 
 Set the banker to onboard — change this to switch bankers:
@@ -1244,18 +1259,97 @@ Repeat with `USER_ID="bob"` and `USER_ID="charlie"`. From here on, every
 `--workspace "${USER_ID}"` — don't drop it, and don't reuse one banker's
 workspace for another.
 
-#### Step 3a — Onboard the banker with the `onboard` tool
+#### Step 3.1a — Self-service alternative: `onboarding-web`
 
-> **NOTICE.** The `onboard` binary below still has an admin run a tool on
-> each banker's behalf, once per banker, from an admin's own terminal.
-> That's fine for a demo, but it doesn't match how an enterprise identity
-> team typically wants onboarding to work — self-service, with no admin
-> action required at the moment a user activates their own credential. If
-> that's closer to what you need, skip ahead to
-> [Step 3b — Self-service alternative: `onboarding-web`](#step-3b--self-service-alternative-onboarding-web),
-> which replaces just this token-attach step with a small web app the
-> banker visits and logs into themselves. Admin-side provisioning (steps
-> 3.0/4/5) is unchanged either way.
+**This is the default, recommended path.** Each banker visits a URL, logs
+in via Keycloak, and ends up with a working provider — with no admin
+running anything on their behalf at the moment they activate their own
+credential. If you'd rather an admin run one binary per banker from their
+own terminal instead — faster to set up for a one-off demo, no separate
+web app to deploy, at the cost of an admin being in the loop every time —
+skip ahead to
+[Step 3.1b — Onboard the banker with the `onboard` tool](#step-31b--onboard-the-banker-with-the-onboard-tool).
+
+**It does not replace step 3.0 or steps 4/5's provisioning.** Admin still
+does everything through creating the provider (with its `pending`
+placeholder credential) — see
+[`docs/manual-onboarding.md`](docs/manual-onboarding.md#store-the-refresh-token-in-openshell)'s
+`provider profile import` and `provider create` commands (the same
+provider-creation calls Step 3.1b's `onboard` binary would otherwise make
+automatically, bundled together with the token-attach part), stopping
+there rather than continuing to `refresh configure`/`refresh rotate` —
+plus the sandbox creation, MCP config, policy authorization, and agent
+harness provisioning in steps 4 and 5. Once that's done, the banker
+visits `onboarding-web`'s URL, logs in as themselves, and the web app
+runs the `refresh configure`/`refresh rotate` calls that `onboard` would
+otherwise run on their behalf.
+
+**Who runs this:** Terminal A — admin, for all of the following (the
+`openshell-onboarding-svc` browser login in step 1 below is a *service*
+identity admin logs into on the app's behalf, not a banker).
+
+Both scripts below derive `ROUTE_HOST`/`ONBOARDING_WEB_ROUTE_HOST`
+themselves (same formulas as step 1a/2a) from `OPENSHELL_NAMESPACE` and
+`CLUSTER_APPS_DOMAIN` — nothing to set by hand unless you rendered the
+realm in step 1a with a non-default `ONBOARDING_WEB_ROUTE_HOST`, in which
+case `export` the same value again before running `11-deploy-onboarding-web.sh`.
+
+1. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
+   session — the credential the backend uses to run `provider refresh
+   configure`/`refresh rotate` on behalf of whoever logs in through the web
+   app. This opens a browser; log in as **`openshell-onboarding-svc`** /
+   `openshell-onboarding-svc` (see the credentials note in
+   [step 1a](#1a-render-the-realm-json)), not the human admin account. This
+   script manages its own standalone session internally (it doesn't care
+   which identity your terminal is currently pointed at), so plain
+   `source .env` is all it needs — not `as.sh`:
+
+   ```bash
+   source .env
+   ./scripts/10-bootstrap-onboarding-web-admin.sh
+   ```
+
+   It packages the resulting session into `admin-session.tar.gz` and prints
+   the exact `oc create secret` command to run next — copy/paste it as
+   shown, or run it directly:
+
+   ```bash
+   oc -n "$OPENSHELL_NAMESPACE" create secret generic onboarding-web-admin-session \
+     --from-file=admin-session.tar.gz=./onboarding-web-admin-session/admin-session.tar.gz
+   ```
+
+2. Deploy the chart — this waits on the Deployment rollout and prints the
+   app's URL when done:
+
+   ```bash
+   ./scripts/11-deploy-onboarding-web.sh
+   ```
+
+Once deployed, each banker visits `https://${ONBOARDING_WEB_ROUTE_HOST}/`,
+logs in as themselves, and activates the provider an admin already
+pre-provisioned for them (step 3.0, the manual provider-creation steps
+from `docs/manual-onboarding.md`, plus steps 4/5, stopping short of
+`refresh configure`/`refresh rotate` as described above).
+
+See
+[`docs/self-service-onboarding.md`](docs/self-service-onboarding.md) for
+the full design rationale and
+[`util/onboarding-web/README.md`](../../util/onboarding-web/README.md) for
+the service itself. **Verified end to end against a live cluster**: a
+test user logged in via a real browser, activated his pre-provisioned
+provider, and a real MCP call from inside his sandbox using the resulting
+credential succeeded.
+
+#### Step 3.1b — Onboard the banker with the `onboard` tool
+
+This is the simpler alternative to
+[Step 3.1a](#step-31a--self-service-alternative-onboarding-web)'s
+`onboarding-web` app: one admin-run binary does the whole token-attach
+step per banker, with no separate web app to deploy. The tradeoff: an
+admin still runs a tool on each banker's behalf, once per banker, from an
+admin's own terminal — not self-service the way 3.1a is. If that
+tradeoff doesn't matter for your use case (e.g. a quick demo), this is
+the faster path to set up.
 
 **Who runs this:** the `onboard` binary itself runs in **Terminal A —
 admin** (it shells out to `openshell provider create`/`refresh
@@ -1285,11 +1379,13 @@ at the provider profile that defines the credential refresh strategy:
 
 ```bash
 # Terminal A — admin
+source scripts/as.sh admin   # re-points this terminal at admin if it's a
+                              # fresh shell — a no-op if Terminal A is
+                              # already admin from step 2
 openshell whoami   # confirm: Name: openshell-admin — the tool's own
                     # `provider create` call needs this, even though the
                     # browser tab it's about to open is the banker logging
                     # in as themselves, not admin
-source .env
 ```
 
 Set the banker to onboard — change this to switch bankers:
@@ -1349,83 +1445,10 @@ Useful flags:
 
 Once all three bankers are onboarded, skip to [step 4](#4-deploy-mcp-servers).
 
-#### Step 3b — Self-service alternative: `onboarding-web`
-
-Step 3a above still requires an admin to run a binary once per banker. If
-you'd rather each banker onboard themselves — visiting a URL, logging in
-via Keycloak, and ending up with a working provider, with no admin running
-anything on their behalf at onboarding time — deploy
-[`onboarding-web`](onboarding-web/) instead of running `onboard` for the
-token-attach step.
-
-**It does not replace step 3.0 or the provisioning parts of steps 3a/4/5.**
-Admin still does everything through creating the provider (with its
-`pending` placeholder credential) — see
-[`docs/manual-onboarding.md`](docs/manual-onboarding.md#store-the-refresh-token-in-openshell)'s
-`provider profile import` and `provider create` commands, stopping there
-rather than continuing to `refresh configure`/`refresh rotate` — plus the
-sandbox creation, MCP config, policy authorization, and agent harness
-provisioning in steps 4 and 5. Once that's done, the banker visits
-`onboarding-web`'s URL, logs in as themselves, and the web app runs the
-`refresh configure`/`refresh rotate` calls that `onboard` would otherwise
-run on their behalf.
-
-**Who runs this:** Terminal A — admin, for all of the following (the
-`openshell-onboarding-svc` browser login in step 1 below is a *service*
-identity admin logs into on the app's behalf, not a banker).
-
-Both scripts below derive `ROUTE_HOST`/`ONBOARDING_WEB_ROUTE_HOST`
-themselves (same formulas as step 1a/2a) from `OPENSHELL_NAMESPACE` and
-`CLUSTER_APPS_DOMAIN` — nothing to set by hand unless you rendered the
-realm in step 1a with a non-default `ONBOARDING_WEB_ROUTE_HOST`, in which
-case `export` the same value again before running `11-deploy-onboarding-web.sh`.
-
-1. Bootstrap `onboarding-web`'s own standing Platform-Admin `openshell`
-   session — the credential the backend uses to run `provider refresh
-   configure`/`refresh rotate` on behalf of whoever logs in through the web
-   app. This opens a browser; log in as **`openshell-onboarding-svc`** /
-   `openshell-onboarding-svc` (see the credentials note in
-   [step 1a](#1a-render-the-realm-json)), not the human admin account:
-
-   ```bash
-   source .env
-   ./scripts/10-bootstrap-onboarding-web-admin.sh
-   ```
-
-   It packages the resulting session into `admin-session.tar.gz` and prints
-   the exact `oc create secret` command to run next — copy/paste it as
-   shown, or run it directly:
-
-   ```bash
-   oc -n "$OPENSHELL_NAMESPACE" create secret generic onboarding-web-admin-session \
-     --from-file=admin-session.tar.gz=./onboarding-web-admin-session/admin-session.tar.gz
-   ```
-
-2. Deploy the chart — this waits on the Deployment rollout and prints the
-   app's URL when done:
-
-   ```bash
-   ./scripts/11-deploy-onboarding-web.sh
-   ```
-
-Once deployed, each banker visits `https://${ONBOARDING_WEB_ROUTE_HOST}/`,
-logs in as themselves, and activates the provider an admin already
-pre-provisioned for them (steps 3.0/3a/4/5, stopping short of `refresh
-configure`/`refresh rotate` as described above).
-
-See
-[`docs/self-service-onboarding.md`](docs/self-service-onboarding.md) for
-the full design rationale and
-[`util/onboarding-web/README.md`](../../util/onboarding-web/README.md) for
-the service itself. **Verified end to end against a live cluster**: a
-test user logged in via a real browser, activated his pre-provisioned
-provider, and a real MCP call from inside his sandbox using the resulting
-credential succeeded.
-
 #### Useful commands: verify all bankers are onboarded
 
-Regardless of which onboarding path was used per banker (`onboard` in step
-3a, `onboarding-web` in step 3b, or the manual steps in
+Regardless of which onboarding path was used per banker (`onboarding-web`
+in step 3.1a, `onboard` in step 3.1b, or the manual steps in
 [`docs/manual-onboarding.md`](docs/manual-onboarding.md)), admin can check
 onboarding state from Terminal A without needing any banker's own session:
 
@@ -1969,7 +1992,7 @@ the cluster again. This isn't just a shortcut — it's closer to correct:
   automated step outside the OpenShell CLI entirely** — e.g. pushed via
   MDM/config management to each banker's machine, downloaded through an
   authenticated portal (a natural extension of
-  [`onboarding-web`](#step-3b--self-service-alternative-onboarding-web),
+  [`onboarding-web`](#step-31a--self-service-alternative-onboarding-web),
   which already handles each banker's *OIDC* side of onboarding but not
   yet this mTLS bundle), or baked into a provisioned client image. Copying
   from admin's directory here is a stand-in for that pipeline, not the
