@@ -17,10 +17,17 @@ resources that were assumed to already exist.
 
 ## Prerequisites
 
-- RHCL operator (Kagenti/Kuadrant MCP gateway, v0.7.1+) installed — this
-  chart only creates CRs its CRDs define, never the operator itself.
-- Kuadrant operator installed if `auth.enabled` (default `true`) — needed
-  for `mcp-servers`' own `AuthPolicy` CRs to reconcile.
+- The `rhcl-operator` CSV (Red Hat Connectivity Link, Kagenti/Kuadrant MCP
+  gateway, v0.7.1+) installed, plus a `Kuadrant` CR applied to instantiate
+  its Authorino/Limitador operands — needed either way for the
+  `GatewayClass`/`Gateway` below, and (if `auth.enabled`, default `true`)
+  for `mcp-servers`' own `AuthPolicy` CRs to reconcile. One Subscription:
+  `rhcl-operator` pulls in `authorino-operator`/`limitador-operator` as OLM
+  dependencies — there's no separate "Kuadrant operator" to install. This
+  chart only creates CRs their CRDs define, never the operators or the
+  `Kuadrant` CR itself. See the main demo README's
+  [Installing RHCL](../README.md#installing-rhcl) for the install steps
+  and gotchas.
 
 ## Adopting already-existing resources
 

@@ -12,6 +12,7 @@
   - [Prerequisites](#prerequisites)
     - [Installing the CLI](#installing-the-cli)
     - [Installing Agent Sandbox](#installing-agent-sandbox)
+    - [Installing RHCL](#installing-rhcl)
     - [How OpenShell networking works](#how-openshell-networking-works)
   - [What this demo deploys](#what-this-demo-deploys)
   - [Getting started](#getting-started)
@@ -23,6 +24,9 @@
   - [3. Onboard a banker](#3-onboard-a-banker)
     - [Useful commands: verify all bankers are onboarded](#useful-commands-verify-all-bankers-are-onboarded)
   - [4. Deploy MCP servers](#4-deploy-mcp-servers)
+    - [What the MCP Gateway does](#what-the-mcp-gateway-does)
+    - [4a. Deploy the MCP Gateway (cluster-wide, once)](#4a-deploy-the-mcp-gateway-cluster-wide-once)
+    - [4b. Deploy MCP servers](#4b-deploy-mcp-servers)
   - [5. Run the demo](#5-run-the-demo)
     - [Provision the Claude Code harness](#provision-the-claude-code-harness)
     - [Log in as each banker (one-time per terminal, before Scene 1)](#log-in-as-each-banker-one-time-per-terminal-before-scene-1)
@@ -34,6 +38,7 @@
     - [Scene 4a — Bob overreaches](#scene-4a--bob-overreaches)
     - [Scene 4b — Bob tries to talk his way in](#scene-4b--bob-tries-to-talk-his-way-in)
     - [Scene 4c — Bob asks the agent to fabricate data](#scene-4c--bob-asks-the-agent-to-fabricate-data)
+    - [Scene 4d — Bob hits a permission he doesn't hold (gateway-only)](#scene-4d--bob-hits-a-permission-he-doesnt-hold-gateway-only)
     - [Scene 5a — Charlie works a compliance-sensitive case](#scene-5a--charlie-works-a-compliance-sensitive-case)
     - [Scene 5b — Charlie checks product suitability](#scene-5b--charlie-checks-product-suitability)
     - [Scene 6 — Alice: the boundary from the other side, and the second permission](#scene-6--alice-the-boundary-from-the-other-side-and-the-second-permission)
@@ -366,6 +371,8 @@ banker membership in a workspace that already has one.
 | Agent Sandbox controller + CRDs | See [Installing Agent Sandbox](#installing-agent-sandbox) below — must be done **before** `helm install` |
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
+| RHCL operator (`rhcl-operator`, Red Hat Operators catalog) | **Optional** — only for gateway-routed MCP access (the default walkthrough below); direct access needs none of this. See [Installing RHCL](#installing-rhcl) below |
+| Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the `mcp-gateway` chart creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
 This guide is written against **OpenShell chart/CLI version `0.0.106`** —
@@ -449,6 +456,85 @@ oc -n agent-sandbox-system get pods
 > **Gotcha:** the manifest file is called `sandbox.yaml`, **not**
 > `manifest.yaml`. The release also offers `sandbox-with-extensions.yaml`
 > (adds SandboxTemplate, SandboxClaim, SandboxWarmPool CRDs).
+
+#### Installing RHCL
+
+**Optional** — only needed for gateway-routed MCP access (the default
+walkthrough this guide follows from [step 4](#4-deploy-mcp-servers)
+onward). Skip this entirely if you only want direct per-server access; see
+[What the MCP Gateway does](#what-the-mcp-gateway-does) for which parts of
+the guide that skips.
+
+RHCL (Red Hat Connectivity Link, upstream Kuadrant) is a single OLM
+package, `rhcl-operator`, in the **Red Hat Operators** catalog. It brings
+in the `authorino-operator` and `limitador-operator` CSVs as OLM
+dependencies of that one Subscription — there is no separate "Kuadrant
+operator" to install alongside it.
+
+```bash
+# Verify the package is available
+oc get packagemanifests -n openshift-marketplace | grep rhcl-operator
+
+# Create OperatorGroup + Subscription (cluster-scoped — this repo installs
+# it into openshift-operators, the cluster's default all-namespaces group,
+# since the mcp-gateway chart's resources span openshift-ingress and
+# mcp-gateway-system)
+oc apply -f - <<'EOF'
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhcl-operator
+  namespace: openshift-operators
+spec:
+  channel: stable
+  name: rhcl-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+EOF
+```
+
+Verify all three CSVs reach `Succeeded`:
+
+```bash
+oc get csv -A | grep -E "rhcl-operator|authorino-operator|limitador-operator"
+```
+
+Then create a `Kuadrant` CR — the operator Subscription alone does not
+instantiate Authorino/Limitador, this CR does:
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: kuadrant.io/v1beta1
+kind: Kuadrant
+metadata:
+  name: kuadrant
+  namespace: kuadrant-system
+EOF
+
+oc get kuadrant kuadrant -n kuadrant-system
+```
+
+> **Gotchas:**
+> - One Subscription, three CSVs. `rhcl-operator`'s dependency on
+>   `authorino-operator`/`limitador-operator` is resolved automatically by
+>   OLM — installing them separately is redundant, not a second
+>   prerequisite.
+> - This repo's clusters install `rhcl-operator` the same way as every
+>   other OLM operator here (`rhbk-operator` in [step 1b](#1b-deploy-keycloak-on-the-cluster)):
+>   a plain OLMv0 `Subscription`/`OperatorGroup` with `installPlanApproval:
+>   Automatic`, no manual InstallPlan approval needed. **[VERIFY]** a
+>   cluster running OLMv1-only (rather than OpenShift's default OLMv0
+>   catalog) may instead need `oc apply -k` against a kustomize bundle,
+>   per an `olm.package.required` dependency OLMv1 doesn't support — not
+>   exercised against this repo's own clusters, which are OLMv0.
+> - **[VERIFY]** the `Kuadrant` CR can report `Ready: False` with a
+>   "Gateway API provider not installed" message if applied before any
+>   `GatewayClass` exists on the cluster. That's expected, not an error —
+>   in this repo, the `mcp-gateway` chart ([step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once))
+>   is what creates the `GatewayClass`; apply the `Kuadrant` CR whenever
+>   convenient, before or after, it becomes `Ready: True` once the
+>   `GatewayClass` exists.
 
 #### How OpenShell networking works
 
@@ -1479,15 +1565,88 @@ data (Alice/Bob/Charlie and their clients). `mcp-market-news` and
 `InferenceService` (vLLM CPU, `jinaai/jina-embeddings-v3`) for semantic
 search — see [Prerequisites](#prerequisites) for the RHOAI requirement.
 
+#### What the MCP Gateway does
+
+By default, this guide routes every banker's MCP calls through the **RHCL
+MCP Gateway** rather than having each sandbox talk to each server's own
+Envoy sidecar directly. The gateway sits in front of all five servers as a
+single broker endpoint: a client sends every `tools/call` to one address,
+and the gateway's ext_proc (MCP router) parses the JSON-RPC body, matches
+the tool name against each server's registered prefix, and forwards the
+request internally — no per-server endpoint configuration on the client
+side, and one place to enforce authentication and per-tool authorization
+instead of N.
+
+Two Gateway-API listeners on the same port implement this: an authn-only
+listener for external traffic, and an internal authz listener where
+Authorino evaluates per-tool/prompt permissions after the router has parsed
+the request. See [`mcp-gateway/README.md`](mcp-gateway/) for the full
+mechanics (the two-listener pattern, internal hostname routing, what gets
+created on the cluster) and
+[`docs/token-exchange-design.md`](docs/token-exchange-design.md) for how
+the authz path additionally exchanges each caller's token for one scoped to
+just the server being called (RFC 8693), with a diagram.
+
+Direct, per-server access (each sandbox talking straight to a server's own
+Envoy sidecar, no gateway in between) still works and needs none of RHCL —
+see the `--gw`-flag notes in [step 4b](#4b-deploy-mcp-servers) and
+[Provision every banker](#provision-every-banker) below for how to run the
+whole guide that way instead.
+
 **Who runs this:** Terminal A — admin (same `oc`/`helm` cluster-admin
 context as [step 1](#1-deploy-keycloak)/[step 2](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc);
 no `openshell` CLI identity is involved in this step at all, so there's no
-`whoami` to check):
+`whoami` to check).
+
+#### 4a. Deploy the MCP Gateway (cluster-wide, once)
+
+**Optional** — skip 4a entirely for direct-only access (then in
+[4b](#4b-deploy-mcp-servers), omit `MCP_GATEWAY_ENABLED`/
+`MCP_GATEWAY_AUTH_ENABLED`). The `mcp-gateway` chart creates cluster-scoped
+resources (`GatewayClass`, `Gateway`, `MCPGatewayExtension`, and, with auth
+enabled, the Authorino-TLS `EnvoyFilter`) — install it once per cluster,
+before any demo enables `mcpGateway` in its own `mcp-servers` release. It's
+outside `$OPENSHELL_NAMESPACE` by design (see
+[`mcp-gateway/README.md`](mcp-gateway/) for why), so it isn't torn down by
+this or any other demo's `helm uninstall`:
 
 ```bash
 source .env
-./scripts/06-deploy-mcp-servers.sh
+helm upgrade --install mcp-gateway ./mcp-gateway \
+  --set gateway.publicHost="mcp.${CLUSTER_APPS_DOMAIN}" \
+  --set keycloak.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
 ```
+
+Verify:
+
+```bash
+oc get gatewayclass mcp-gateway-class
+oc get gateway mcp-gateway -n openshift-ingress
+oc get mcpgatewayextension mcp-gateway-ext -n mcp-gateway-system
+```
+
+Requires [RHCL](#installing-rhcl) installed first. If the `Gateway`/
+`MCPGatewayExtension`/etc. already exist on the cluster from a previous,
+hand-built setup, see
+[`mcp-gateway/README.md`](mcp-gateway/#adopting-already-existing-resources)
+for adopting them into this chart's Helm release instead of `helm install`
+refusing them outright.
+
+#### 4b. Deploy MCP servers
+
+**Who runs this:** Terminal A — admin, same context as 4a:
+
+```bash
+source .env
+MCP_GATEWAY_ENABLED=true MCP_GATEWAY_AUTH_ENABLED=true \
+MCP_GATEWAY_PUBLIC_HOST="mcp.${CLUSTER_APPS_DOMAIN}" \
+  ./scripts/06-deploy-mcp-servers.sh
+```
+
+For direct-only access (no gateway), omit the three `MCP_GATEWAY_*`
+variables — the script deploys the same five servers either way; the
+variables only add the gateway-facing `HTTPRoute`/`MCPServerRegistration`/
+`AuthPolicy` resources on top.
 
 `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL` must be set in `.env` to a
 real OpenAI-compatible chat-completions endpoint before running this —
@@ -1802,17 +1961,36 @@ they simply never receive the grant in the first place:
 ```bash
 # Terminal A — admin
 source .env
+./scripts/15-provision-claude-sandbox.sh --gw alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
+./scripts/15-provision-claude-sandbox.sh --gw bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+./scripts/15-provision-claude-sandbox.sh --gw charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+```
+
+`--gw` routes each sandbox's MCP calls through the RHCL MCP Gateway
+([`mcp-gateway/`](mcp-gateway/), which must already be deployed — see
+[step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)) instead of directly
+to each server — same server list either way, just reached through one
+broker endpoint instead of N direct ones. This is what every scene from
+here on assumes.
+
+<details>
+<summary>Alternative: direct per-server access (no gateway)</summary>
+
+Omit `--gw` to have each sandbox's `mcp-servers.json` point straight at
+each server's own port-8000 Envoy listener instead of the gateway's single
+broker endpoint. Everything from Scene 1 onward behaves identically either
+way — direct access just isn't what [Scene 4d](#scene-4d--bob-hits-a-permission-he-doesnt-hold-gateway-only)
+exercises, since that scene is gateway-specific:
+
+```bash
+# Terminal A — admin
+source .env
 ./scripts/15-provision-claude-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
 ./scripts/15-provision-claude-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ./scripts/15-provision-claude-sandbox.sh charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
 
-Pass `--gw` (e.g. `./scripts/15-provision-claude-sandbox.sh --gw bob ...`) to
-route that sandbox's MCP calls through the RHCL MCP Gateway
-([`mcp-gateway/`](mcp-gateway/), which must already be deployed) instead of
-directly to each server — same server list either way, just reached through
-one broker endpoint instead of N direct ones. Omit it for the direct access
-this walkthrough otherwise describes.
+</details>
 
 The script already exits non-zero with a clear error if token substitution
 never took after 3 attempts. If a scene later fails oddly anyway (e.g.
@@ -2508,6 +2686,70 @@ The technical boundary was never in doubt here (identity is JWT-derived,
 not prompt-derived) — the actual risk was the agent's narration/behavior
 layer, and it held.
 
+#### Scene 4d — Bob hits a permission he doesn't hold (gateway-only)
+
+**Logged in as:** Bob. **Servers this exercises:** `mcp-compatibility`.
+**Requires `--gw`** — Bob's sandbox must have been provisioned through the
+MCP Gateway for this scene; it doesn't apply to direct per-server access
+(see below for why).
+
+**What this tests, and why:** Bob was never granted `mcp-compatibility` —
+his onboarding never even lists that server name (see
+[Provision every banker](#provision-every-banker)). Over direct access,
+that means his `mcp-servers.json` simply has no entry for it, and there's
+no tool to call in the first place. Over the gateway, it's different: the
+gateway aggregates every registered server's tools behind its single
+broker endpoint, so `tools/list` on Bob's sandbox includes
+`mcp__gateway__mcp_compatibility_calc_tax` even though he was never granted
+that server — permission is enforced at `tools/call` time by the gateway's
+authz `AuthPolicy`, not by hiding the tool from the list. This scene asks
+the agent to use that tool anyway, to see what a real gateway-side denial
+looks like today:
+
+```bash
+# Terminal C — bob (same XDG_CONFIG_HOME/XDG_STATE_HOME as earlier scenes)
+otel_claude_env_args bob claude-bob
+openshell sandbox exec -n claude-bob --workspace bob \
+  --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
+  --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
+  "${OTEL_ENV_ARGS[@]}" \
+  -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config --tools "" \
+     -p "What tax would I owe on 120000 of income? Use whatever tool you have for this." \
+     --permission-mode bypassPermissions \
+     --output-format text
+```
+
+**Actual current result:** a raw `500 Internal Server Error`, body:
+
+```
+failed to create session for mcp server: failed to create client: transport error: server returned 4xx for initialize POST, likely a legacy SSE server
+```
+
+not a clean `403`. What's actually happening, end to end:
+
+- Authorino correctly denies the request — its own logs at the exact
+  timestamp of the call show
+  `"authorized":false,"response":"PERMISSION_DENIED","object":{"code":7,"message":"Unauthorized"}`
+  for `host":"mcp-compatibility.mcp.local"`.
+- The `mcp-compatibility` backend pod itself shows zero related log
+  entries — the deny happens upstream, before the request ever reaches it.
+- The gateway broker's lazy backend-session bootstrap (it opens a fresh
+  MCP `initialize` handshake to a backend the caller's gateway session
+  hasn't used yet) doesn't distinguish "backend legitimately denied the
+  request" from "backend unreachable/broken" — it collapses any non-2xx
+  from that internal handshake into a generic 500, discarding the original
+  403/`PERMISSION_DENIED`.
+
+This is a known limitation of the RHCL/Kagenti gateway broker, not
+something this demo's own `AuthPolicy` or chart configuration can fix —
+the denial itself is correct and happens at the right layer, only the
+status code and body surfaced to the client are wrong. There's no
+in-repo workaround short of the broker itself changing how it handles a
+non-2xx on that internal handshake. A capable agent typically reports this
+back as an unexpected/internal error rather than a permission denial,
+since nothing in the response says "forbidden" — worth noticing as a real
+UX gap between what Authorino decided and what the caller sees.
+
 #### Scene 5a — Charlie works a compliance-sensitive case
 
 **Logged in as:** Charlie. **Servers this exercises:** `mcp-portfolio`
@@ -2966,8 +3208,11 @@ exactly as step 5 already did for `claude-bob`, just pointed at the
 ```bash
 # Terminal A — admin
 : "${CLAUDE_AUDIT_IMAGE:?set in .env — see util/session-auditor/README.md}"
-./scripts/16-provision-audited-sandbox.sh bob claude mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+./scripts/16-provision-audited-sandbox.sh --gw bob claude mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
+
+Same `--gw` flag as [step 5](#provision-every-banker) — omit it for the
+direct-access alternative.
 
 **Step 3 — a benign turn first.** Same prompt as
 [Scene 2](#scene-2--bob-resolves-his-biggest-client), same banker, this
@@ -3028,7 +3273,7 @@ designed to prevent — treat amber as the realistic ceiling for this
 scene, not a shortfall of the classifier.
 
 Meanwhile any other audited sandbox you provision the same way
-(`./scripts/16-provision-audited-sandbox.sh charlie claude ...`, or
+(`./scripts/16-provision-audited-sandbox.sh --gw charlie claude ...`, or
 `... codex ...` — Codex path still `[VERIFY]`, see the note above) stays
 green and live on the same graph, for contrast: the dashboard's whole
 point is telling "one banker had a flagged turn" apart from "everyone's
@@ -3121,14 +3366,15 @@ admin:
 ```bash
 # Terminal A — admin
 source .env
-./scripts/14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
-./scripts/14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
-./scripts/14-provision-codex-sandbox.sh charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+./scripts/14-provision-codex-sandbox.sh --gw alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
+./scripts/14-provision-codex-sandbox.sh --gw bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+./scripts/14-provision-codex-sandbox.sh --gw charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
 
 Same `--gw` flag as `15-provision-claude-sandbox.sh` (see above) routes
 through the [MCP Gateway](mcp-gateway/) instead of direct per-server
-access — `[mcp_servers.gateway]` instead of one table per server.
+access — `[mcp_servers.gateway]` instead of one table per server. Omit
+`--gw` on all three for the direct-access alternative instead.
 
 This is the same three-step sequence (inference route → policy profile →
 `policy set`) [step 5](#5-run-the-demo) shows manually for the Claude Code
@@ -3542,6 +3788,15 @@ trust as end-to-end verification.
   Claude Code/Codex CLI invocations used throughout the main guide.
   Third-party, community-maintained, and validated for a single banker
   only — read the caveats at the top of that doc before deploying.
+- **[RFC 8693 token exchange in the MCP Gateway's authz path](docs/token-exchange-design.md)**
+  — how the gateway narrows each caller's token to the one server actually
+  being called, with a diagram. Referenced from
+  [What the MCP Gateway does](#what-the-mcp-gateway-does).
+- **[Reproducing this demo's role model against a different OIDC provider](docs/roles-and-permissions.md)**
+  — the `tool:<name>`/`prompt:<name>` client-role convention and the two
+  independent claim shapes (`realm_access.roles` for Envoy, `resource_access`
+  for the gateway's `AuthPolicy`) any IdP must produce for this demo's
+  authorization config to work unmodified.
 
 ### B. Configuration reference
 

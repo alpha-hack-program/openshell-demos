@@ -60,10 +60,14 @@ helm upgrade --install mcp-gateway ../mcp-gateway \
   --set keycloak.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
 ```
 
-The RHCL operator (Kagenti/Kuadrant MCP gateway, v0.7.1+) — and, if
-`mcpGateway.auth.enabled` below, the Kuadrant operator too — must already
-be installed on the cluster; `../mcp-gateway` only creates CRs their CRDs
-define, never the operators themselves.
+The `rhcl-operator` CSV (Red Hat Connectivity Link, Kagenti/Kuadrant MCP
+gateway, v0.7.1+) and a `Kuadrant` CR must already exist on the cluster —
+one Subscription brings in `authorino-operator`/`limitador-operator` as OLM
+dependencies, so there's no separate "Kuadrant operator" to install even
+when `mcpGateway.auth.enabled` below is set. `../mcp-gateway` only creates
+CRs their CRDs define, never the operators or the `Kuadrant` CR itself. See
+the main demo README's [Installing RHCL](../README.md#installing-rhcl) for
+the install steps and gotchas.
 
 `mcpGateway.{gatewayName,gatewayNamespace,registrationNamespace,
 publicHost}` below must match `../mcp-gateway`'s `gateway.{name,namespace,

@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    .bg             { fill: #f8fafc }
+    .card           { fill: #ffffff }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .line-subtle    { stroke: #cbd5e1 }
+    .line-default   { stroke: #475569 }
+
+    .fill-blue      { fill: #dbeafe }
+    .stroke-blue    { stroke: #2563eb }
+    .text-blue      { fill: #1e40af }
+    .line-blue      { stroke: #2563eb }
+
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .line-indigo    { stroke: #4f46e5 }
+
+    .fill-teal      { fill: #ccfbf1 }
+    .stroke-teal    { stroke: #0d9488 }
+    .text-teal      { fill: #115e59 }
+    .line-teal      { stroke: #0d9488 }
+
+    .fill-amber     { fill: #fef3c7 }
+    .stroke-amber   { stroke: #d97706 }
+    .text-amber     { fill: #92400e }
+    .line-amber     { stroke: #d97706 }
+
+    .fill-purple    { fill: #f3e8ff }
+    .stroke-purple  { stroke: #9333ea }
+    .text-purple    { fill: #6b21a8 }
+    .line-purple    { stroke: #9333ea }
+
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+    .line-green     { stroke: #16a34a }
+
+    .actor-sandbox  { fill: #1e293b }
+
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .card           { fill: #1e293b }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .line-subtle    { stroke: #475569 }
+      .line-default   { stroke: #94a3b8 }
+
+      .fill-blue      { fill: #1e3a5f }
+      .stroke-blue    { stroke: #60a5fa }
+      .text-blue      { fill: #93c5fd }
+      .line-blue      { stroke: #60a5fa }
+
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .line-indigo    { stroke: #818cf8 }
+
+      .fill-teal      { fill: #0f3d3a }
+      .stroke-teal    { stroke: #2dd4bf }
+      .text-teal      { fill: #5eead4 }
+      .line-teal      { stroke: #2dd4bf }
+
+      .fill-amber     { fill: #3b2f10 }
+      .stroke-amber   { stroke: #fbbf24 }
+      .text-amber     { fill: #fcd34d }
+      .line-amber     { stroke: #fbbf24 }
+
+      .fill-purple    { fill: #2e1a47 }
+      .stroke-purple  { stroke: #a78bfa }
+      .text-purple    { fill: #c4b5fd }
+      .line-purple    { stroke: #a78bfa }
+
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+      .line-green     { stroke: #4ade80 }
+
+      .actor-sandbox  { fill: #334155 }
+    }
+  </style>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0d9488"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#9333ea"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="620" rx="12" class="bg"/>
+  <rect x="0" y="0" width="1200" height="56" rx="12" fill="url(#header-grad)"/>
+  <rect x="0" y="40" width="1200" height="16" fill="url(#header-grad)"/>
+
+  <!-- Title -->
+  <text x="24" y="36" font-size="16" font-weight="700" class="header-text">RFC 8693 Token Exchange — MCP Gateway Authz Path</text>
+  <text x="1176" y="36" font-size="11" class="header-muted" text-anchor="end">keycloak-oidc demo</text>
+
+  <!-- Actor pills -->
+  <g font-size="12" font-weight="600" text-anchor="middle">
+    <rect x="20" y="72" width="160" height="34" rx="17" class="actor-sandbox"/>
+    <text x="100" y="94" class="header-text">Client Sandbox</text>
+
+    <rect x="260" y="72" width="160" height="34" rx="17" class="actor-sandbox"/>
+    <text x="340" y="94" class="header-text">Gateway</text>
+
+    <rect x="500" y="72" width="160" height="34" rx="17" class="actor-sandbox"/>
+    <text x="580" y="94" class="header-text">Authorino</text>
+
+    <rect x="740" y="72" width="160" height="34" rx="17" class="actor-sandbox"/>
+    <text x="820" y="94" class="header-text">Keycloak</text>
+
+    <rect x="980" y="72" width="180" height="34" rx="17" class="actor-sandbox"/>
+    <text x="1070" y="94" class="header-text">Backend MCP Server</text>
+  </g>
+
+  <!-- Lifelines -->
+  <g stroke-dasharray="4,4" stroke-width="1.5" class="line-subtle">
+    <line x1="100" y1="106" x2="100" y2="600"/>
+    <line x1="340" y1="106" x2="340" y2="600"/>
+    <line x1="580" y1="106" x2="580" y2="600"/>
+    <line x1="820" y1="106" x2="820" y2="600"/>
+    <line x1="1070" y1="106" x2="1070" y2="600"/>
+  </g>
+
+  <!-- Step 1: Sandbox -> Gateway -->
+  <text x="220" y="132" font-size="11" font-weight="600" class="text-blue" text-anchor="middle">1. tools/call, Authorization: Bearer &lt;original token&gt;</text>
+  <line x1="100" y1="140" x2="336" y2="140" class="line-blue" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Note: authn AuthPolicy -->
+  <rect x="200" y="158" width="280" height="36" rx="6" class="fill-indigo stroke-indigo" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="340" y="180" font-size="10.5" class="text-indigo" text-anchor="middle">2. authn AuthPolicy validates the JWT (mcp listener)</text>
+
+  <!-- Note: ext_proc -->
+  <rect x="190" y="204" width="300" height="48" rx="6" class="fill-indigo stroke-indigo" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="340" y="222" font-size="10.5" class="text-indigo" text-anchor="middle">3. ext_proc parses the JSON-RPC body, sets :authority +</text>
+  <text x="340" y="236" font-size="10.5" class="text-indigo" text-anchor="middle">x-mcp-servername / x-mcp-toolname, reroutes to mcps</text>
+
+  <!-- Step 4: Gateway -> Authorino -->
+  <text x="460" y="280" font-size="11" font-weight="600" class="text-indigo" text-anchor="middle">4. mcps listener → mcp-gateway-authz AuthPolicy</text>
+  <line x1="340" y1="288" x2="576" y2="288" class="line-indigo" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Step 5: Authorino -> Keycloak (token exchange request) -->
+  <text x="700" y="308" font-size="10.5" font-weight="600" class="text-teal" text-anchor="middle">5. POST /protocol/openid-connect/token — grant_type=token-exchange,</text>
+  <text x="700" y="321" font-size="10.5" font-weight="600" class="text-teal" text-anchor="middle">subject_token=&lt;original&gt;, audience=x-mcp-servername (HTTP Basic)</text>
+  <line x1="580" y1="330" x2="816" y2="330" class="line-teal" stroke-width="1.5" marker-end="url(#arrow-teal)"/>
+
+  <!-- Step 6: Keycloak -> Authorino (return, narrowed token) -->
+  <text x="700" y="352" font-size="10.5" font-weight="600" class="text-teal" text-anchor="middle">6. access_token narrowed to that server's audience</text>
+  <line x1="820" y1="360" x2="584" y2="360" class="line-teal" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-teal)"/>
+
+  <!-- Note: CEL check reads ORIGINAL token -->
+  <rect x="420" y="378" width="320" height="48" rx="6" class="fill-amber stroke-amber" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="580" y="396" font-size="10.5" class="text-amber" text-anchor="middle">7. tool-access-check / prompt-access-check CEL reads the</text>
+  <text x="580" y="410" font-size="10.5" font-weight="700" class="text-amber" text-anchor="middle">ORIGINAL token's resource_access.&lt;server&gt;.roles</text>
+
+  <!-- Step 8: Authorino -> Gateway (return, exchanged token forwarded) -->
+  <text x="460" y="446" font-size="10.5" font-weight="600" class="text-purple" text-anchor="middle">8. Authorization: Bearer &lt;exchanged token&gt;</text>
+  <text x="460" y="459" font-size="10" class="text-muted" text-anchor="middle">(fails open to the original token if the exchange above didn't run)</text>
+  <line x1="580" y1="468" x2="344" y2="468" class="line-purple" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow-purple)"/>
+
+  <!-- Step 9: Gateway -> Backend -->
+  <text x="705" y="494" font-size="11" font-weight="600" class="text-green" text-anchor="middle">9. tools/call forwarded with the narrowly-scoped token</text>
+  <line x1="340" y1="502" x2="1066" y2="502" class="line-green" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- Note: backend receipt -->
+  <rect x="930" y="520" width="260" height="36" rx="6" class="fill-green stroke-green" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1060" y="542" font-size="10.5" class="text-green" text-anchor="middle">Receives only the narrowly-scoped token</text>
+
+  <!-- Footer caption -->
+  <text x="20" y="600" font-size="9.5" class="text-muted">Source: mcp-servers/templates/authpolicy.yaml — the mcp-gateway-authz AuthPolicy's oauth-token-exchange metadata block</text>
+</svg>
