@@ -109,7 +109,7 @@
 
   <!-- Phase 1: two alternative paths to an authorization code -->
   <rect x="20" y="192" width="960" height="312" rx="10" class="phase-bg-pink" stroke-width="1.5"/>
-  <text x="40" y="214" font-size="13" font-weight="700" class="phase-text-pink">Two alternative paths — pick one per banker</text>
+  <!-- <text x="40" y="214" font-size="13" font-weight="700" class="phase-text-pink">Two alternative paths — pick one per banker</text> -->
 
   <text x="260" y="222" font-size="12" font-weight="700" class="text-pink" text-anchor="middle">Step 3.1a — onboarding-web (default, self-service)</text>
   <text x="740" y="222" font-size="12" font-weight="700" class="text-pink" text-anchor="middle">Step 3.1b — onboard tool (alternative, admin-run)</text>
