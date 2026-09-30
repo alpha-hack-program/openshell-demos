@@ -903,12 +903,13 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 
 ##### OIDC issuer TLS trust (self-signed default ingress cert)
 
-**If Keycloak's Route (step 1b) serves a self-signed certificate — the
-default on most fresh/lab clusters — everything that does OIDC discovery
-against it needs the same fix: trust the cluster's ingress CA.** That's two
-places, both below, before proceeding. Skip both entirely if Keycloak's
-Route already serves a publicly/CA-trusted certificate (a real cert on the
-IngressController, or Keycloak's own `tlsSecret`).
+Keycloak's Route (step 1b) rides the cluster's default IngressController
+certificate — self-signed on most fresh/lab clusters. **If that's your
+cluster, the OpenShell gateway pod will crash-loop forever at startup, and
+every `openshell`/`onboard` command will fail the same TLS handshake
+locally, unless you fix both of the following first.** Skip both entirely
+only if Keycloak's Route already serves a publicly/CA-trusted certificate
+(a real cert on the IngressController, or Keycloak's own `tlsSecret`).
 
 **1. The OpenShell gateway pod** — before running
 [step 2a](#2a-helm-install)'s install command:
@@ -974,19 +975,15 @@ needs the browser-context equivalent —
 `context = await browser.newContext({ ignoreHTTPSErrors: true })` — or it
 fails navigating to the same self-signed Keycloak login page.
 
-**Why this is one problem, not two:** Keycloak's Route has no certificate
-of its own — it rides the cluster's default IngressController certificate,
-self-signed by `ingress-operator` on most fresh/lab clusters. Both the
-OpenShell gateway pod (at startup) and the `openshell` CLI (on every
-command) do real OIDC discovery against that same Route, and neither has a
-soft-fail path: the gateway pod crashes with `configuration error: OIDC
-initialization failed: OIDC discovery request failed: error sending
-request for url
+**Why this is one problem, not two:** both the OpenShell gateway pod (at
+startup) and the `openshell` CLI (on every command) do real OIDC discovery
+against that same Route, and neither has a soft-fail path — the gateway pod
+crashes with `configuration error: OIDC initialization failed: OIDC
+discovery request failed: error sending request for url
 (https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration)`
 and CrashLoopBackOffs indefinitely (unlike the embeddings race in
-[step 4](#4-deploy-mcp-servers), there's no dependency here to wait out);
-the CLI just fails the same TLS handshake locally. Both fixes above pull
-from the same source — `default-ingress-cert` in
+[step 4](#4-deploy-mcp-servers), there's no dependency here to wait out).
+Both fixes above pull from the same source — `default-ingress-cert` in
 `openshift-config-managed` — just deliver it differently: mounted as a
 ConfigMap for the in-cluster pod, exported as `SSL_CERT_FILE` for the local
 CLI process.
