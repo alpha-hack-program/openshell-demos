@@ -910,32 +910,24 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 
 ##### OIDC issuer TLS trust (self-signed default ingress cert)
 
-**Whichever path you pick above, this is a separate concern: it's about
-Keycloak's own Route (created in step 1b), not the gateway's.** Keycloak's
-Route gets no explicit certificate of its own — it rides on your cluster's
-default IngressController certificate. On most fresh/lab clusters, that
-default certificate is self-signed by `ingress-operator`, not publicly
-trusted.
+Separate from the TLS choice above: this is about **Keycloak's own Route**
+(step 1b), not the OpenShell gateway's. Keycloak's Route has no certificate
+of its own — it rides the cluster's default IngressController certificate,
+which on most fresh/lab clusters is self-signed by `ingress-operator`.
 
-The gateway does real TLS verification when it discovers the OIDC issuer's
-`.well-known/openid-configuration` at startup — it does **not** silently
-trust a self-signed chain, and it does not treat this as a soft failure.
-Against a self-signed Keycloak Route, it crashes on every start with
-`configuration error: OIDC initialization failed: OIDC discovery request
-failed: error sending request for url (https://<keycloak-host>/realms/
-<realm>/.well-known/openid-configuration)`, and the StatefulSet
-CrashLoopBackOffs indefinitely — it does not self-heal like the embeddings
-race in [step 4](#4-deploy-mcp-servers), because there's no dependency to
-wait out.
+The **OpenShell gateway** (the `openshell` pod) verifies TLS for real when
+it discovers the OIDC issuer's `.well-known/openid-configuration` at
+startup. Against a self-signed Keycloak Route, that's not a soft failure —
+it crashes on every start with `configuration error: OIDC initialization
+failed: OIDC discovery request failed: error sending request for url
+(https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration)`,
+and CrashLoopBackOffs indefinitely (unlike the embeddings race in
+[step 4](#4-deploy-mcp-servers), there's no dependency here to wait out).
 
-The chart has `server.oidc.caConfigMapName` for exactly this: a ConfigMap
-(key `ca.crt`) with a CA bundle the gateway should additionally trust for
-OIDC discovery. The cluster already publishes the right bundle for its own
-default ingress cert at `default-ingress-cert` in
-`openshift-config-managed` — pull it into your namespace and point the
-chart at it. Skip this if your Keycloak Route already serves a
-publicly/CA-trusted certificate (e.g. you gave the default
-IngressController a real cert, or Keycloak has its own `tlsSecret`):
+Fix it with `server.oidc.caConfigMapName`: a ConfigMap (key `ca.crt`) of
+CA(s) the OpenShell gateway should additionally trust for OIDC discovery.
+The cluster already publishes the right bundle for its default ingress
+cert at `default-ingress-cert` in `openshift-config-managed`:
 
 ```bash
 oc get configmap default-ingress-cert -n openshift-config-managed \
@@ -945,12 +937,16 @@ oc -n "$OPENSHELL_NAMESPACE" create configmap openshell-oidc-ca \
 rm -f /tmp/ingress-ca.crt
 ```
 
-Add `--set server.oidc.caConfigMapName=openshell-oidc-ca` to the
-`helm upgrade --install` command below (already included in the command as
-written). If the gateway pod is already crash-looping on this error from an
+Skip this if Keycloak's Route already serves a publicly/CA-trusted
+certificate (e.g. a real cert on the IngressController, or Keycloak's own
+`tlsSecret`). [Step 2a](#2a-helm-install)'s `helm upgrade --install` already
+passes `--set server.oidc.caConfigMapName=openshell-oidc-ca` once this
+ConfigMap exists — nothing else to wire up.
+
+If the OpenShell gateway pod is already crash-looping on this from an
 earlier attempt, re-running `helm upgrade --install` after creating the
-ConfigMap is not enough by itself — StatefulSets don't always replace an
-already-failing pod-0 promptly on a spec change; force it with
+ConfigMap isn't enough by itself — StatefulSets don't always replace an
+already-failing pod-0 promptly on a spec change. Force it:
 `oc -n "$OPENSHELL_NAMESPACE" delete pod openshell-0`.
 
 **This same self-signed chain also breaks the `openshell` CLI itself**
@@ -959,7 +955,7 @@ already-failing pod-0 promptly on a spec change; force it with
 same URL, with no CA-trust flag of its own. Fix by exporting `SSL_CERT_FILE`
 to a bundle containing both the system trust store and the same ingress CA,
 for every terminal/session running `openshell` or `onboard` against this
-gateway.
+OpenShell gateway.
 
 Write that bundle under `$XDG_CACHE_HOME` (falling back to `$HOME/.cache`
 if unset — works the same way on Linux and macOS) instead of `/tmp`: it's
