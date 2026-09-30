@@ -1052,15 +1052,24 @@ Verify the Route was created:
 oc -n "$OPENSHELL_NAMESPACE" get route openshell
 ```
 
-**If you set `LETSENCRYPT_CLUSTER_ISSUER`,** don't move on to
-[step 2b](#2b-register-the-gateway-with-the-cli) yet — the ACME certificate
-needs to actually finish issuing, and the Route needs to actually be
-serving it, or 2b's mTLS extraction silently captures an incomplete CA
-chain. See
+**If you set `LETSENCRYPT_CLUSTER_ISSUER`,** wait for the certificate to
+actually finish issuing before moving on to
+[step 2b](#2b-register-the-gateway-with-the-cli) — `helm upgrade --install`
+succeeding only means the `Certificate` object was *created*, not that the
+Route is already serving it. Skipping this risks 2b's mTLS extraction
+silently capturing an incomplete CA chain:
+
+```bash
+oc -n "$OPENSHELL_NAMESPACE" wait --for=condition=Ready \
+  certificate/openshell-server-external --timeout=300s
+```
+
+`Certificate: Ready` confirms the cert was issued, but not that the Route
+has picked it up yet — see
 [TLS with Let's Encrypt](docs/tls-lets-encrypt.md#waiting-for-the-certificate)
-for the exact wait commands and why `helm upgrade --install` succeeding
-isn't enough on its own. With the self-signed CA (the default, no
-`LETSENCRYPT_CLUSTER_ISSUER`), there's no such wait — move straight to 2b.
+for the follow-up command that checks the Route itself, and why both checks
+matter. With the self-signed CA (the default, no `LETSENCRYPT_CLUSTER_ISSUER`),
+there's no such wait — move straight to 2b.
 
 #### 2b. Register the gateway with the CLI
 
