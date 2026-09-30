@@ -29,9 +29,14 @@ set -euo pipefail
 # --agent claude|codex provisions only that agent's audited sandbox; omit
 # it to provision both, the original behavior.
 #
-# Usage: ./17-provision-scene7-both-agents.sh [--agent claude|codex] <user-id>
+# --gw (bare flag, default off) is forwarded as-is to 16 (and from there to
+# 14/15) — see 15-provision-claude-sandbox.sh's own --gw note for what it
+# changes (MCP Gateway routing instead of direct per-server access).
+#
+# Usage: ./17-provision-scene7-both-agents.sh [--agent claude|codex] [--gw] <user-id>
 #   e.g. ./17-provision-scene7-both-agents.sh bob
 #   e.g. ./17-provision-scene7-both-agents.sh --agent claude bob
+#   e.g. ./17-provision-scene7-both-agents.sh --gw bob
 #
 # 16 in turn hands off to 15-provision-claude-sandbox.sh /
 # 14-provision-codex-sandbox.sh (CLAUDE_IMAGE/CODEX_IMAGE pointed at the
@@ -57,6 +62,7 @@ if [[ -f "$DEMO_ENV" ]]; then
 fi
 
 AGENT=""
+GW=false
 USER_ID=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,17 +70,24 @@ while [[ $# -gt 0 ]]; do
       AGENT="${2:?--agent requires a value: claude or codex}"
       shift 2
       ;;
+    --gw)
+      GW=true
+      shift
+      ;;
     *)
       USER_ID="$1"
       shift
       ;;
   esac
 done
-: "${USER_ID:?usage: $0 [--agent claude|codex] <user-id>}"
+: "${USER_ID:?usage: $0 [--agent claude|codex] [--gw] <user-id>}"
 case "$AGENT" in
   ""|claude|codex) ;;
   *) echo "invalid --agent '$AGENT' (expected claude or codex)" >&2; exit 1 ;;
 esac
+
+GW_ARGS=()
+[ "$GW" = true ] && GW_ARGS+=(--gw)
 
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
 : "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
@@ -145,10 +158,10 @@ openshell whoami   # confirm: Name: openshell-admin
 SERVERS="mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance"
 
 if [[ "$AGENT" != "codex" ]]; then
-  "$SCRIPT_DIR/16-provision-audited-sandbox.sh" "$USER_ID" claude "$SERVERS"
+  "$SCRIPT_DIR/16-provision-audited-sandbox.sh" "${GW_ARGS[@]}" "$USER_ID" claude "$SERVERS"
 fi
 if [[ "$AGENT" != "claude" ]]; then
-  "$SCRIPT_DIR/16-provision-audited-sandbox.sh" "$USER_ID" codex "$SERVERS"
+  "$SCRIPT_DIR/16-provision-audited-sandbox.sh" "${GW_ARGS[@]}" "$USER_ID" codex "$SERVERS"
 fi
 
 echo

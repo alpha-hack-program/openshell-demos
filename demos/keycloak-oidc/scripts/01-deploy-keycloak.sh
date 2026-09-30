@@ -83,6 +83,10 @@ echo "and offline_access scope. Passwords match usernames"
 echo "(alice/alice, bob/bob, charlie/charlie). Alice additionally"
 echo "belongs to the compatibility-users group (compatibility-user role)."
 echo
+echo "The realm also includes bearer-only clients for each MCP server:"
+echo "  mcp-compatibility, mcp-portfolio, mcp-crm-calendar, mcp-market-news, mcp-kyc-compliance"
+echo "These serve as audience targets for potential future token exchange support."
+echo
 echo "======================================================================"
 echo "Ensure these values are in your demos/keycloak-oidc/.env file:"
 echo "======================================================================"

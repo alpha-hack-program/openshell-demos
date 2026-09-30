@@ -192,8 +192,95 @@ mcpGateway:
   registrationNamespace: mcp-gateway-system
   # Domain suffix for internal routing hostnames (no DNS needed)
   internalDomain: mcp.local
+  # Public hostname of the MCP Gateway (the OpenShift Route).
+  # Used in the authn AuthPolicy's WWW-Authenticate header to point MCP
+  # clients at /.well-known/oauth-protected-resource for OAuth discovery.
+  publicHost: ""
   # Port on the envoy sidecar that the RHCL gateway connects to (no auth)
   gatewayPort: 8010
+  # Two-listener auth pattern (RHCL 1.4 — Register PDF Ch.4-5).
+  #
+  # Listener `mcp` (sectionName above) handles external traffic. An authn-only
+  # AuthPolicy validates the caller's JWT here.
+  #
+  # Listener `mcps` (authzSectionName below) handles internal tool/prompt
+  # routing. Per-server HTTPRoutes attach here so the authz AuthPolicy's CEL
+  # rules fire AFTER the ext_proc has parsed the JSON-RPC body and set
+  # x-mcp-servername / x-mcp-toolname / x-mcp-promptname headers. Both
+  # listeners must be on the same port for ext_proc's route-cache-clear +
+  # :authority change to reach mcps routes.
+  #
+  # CEL checks resource_access.<servername>.roles for tool:<name> entries.
+  # Non-tool requests (initialize, tools/list) skip authz via `when` guards.
+  #
+  # Keycloak client IDs: <registrationNamespace>/<serverName> per RHCL 1.4
+  # (e.g. mcp-gateway-system/mcp-portfolio) — must match x-mcp-servername.
+  #
+  # Requires:
+  #   - Kuadrant operator installed
+  #   - mcp-gateway-authn-ssl EnvoyFilter (created by ../mcp-gateway with auth.enabled=true)
+  #   - Gateway with both mcp and mcps listeners on the same port (also
+  #     created by ../mcp-gateway with auth.enabled=true)
+  #   - Keycloak clients named <registrationNamespace>/<serverName> with
+  #     tool:-prefixed client roles matching each server's MCP tools
+  auth:
+    enabled: false
+    # Gateway listener for authorization (per-server routes attach here).
+    # Must be on the same port as sectionName above so ext_proc's
+    # route-cache-clear + :authority change can reach these routes.
+    authzSectionName: mcps
+
+    # RFC 8693 token exchange (defense-in-depth): before forwarding a
+    # tools/call to the backend, exchange the caller's original (broad)
+    # token for one scoped to just this server's audience via Keycloak V2
+    # Standard Token Exchange, confirmed live on sandbox268 -- see
+    # docs/token-exchange-design.md. Does NOT replace or change the
+    # tool-access-check/prompt-access-check authz rules above, which keep
+    # reading auth.identity.resource_access from the ORIGINAL token those
+    # checks were validated against; this only narrows what actually
+    # reaches the backend pod, which the mcps "gateway" Envoy listener
+    # never independently re-checks (see configmap-envoy.yaml's "No-auth
+    # listener" comment) -- exchange is what puts a real boundary back on
+    # that hop. Requires, on the Keycloak side (not created by this
+    # chart):
+    #   - clientId.attributes["standard.token.exchange.enabled"] = "true"
+    #     on the exchanging client
+    #   - an oidc-audience-mapper on the CLI client (openshell-cli) that
+    #     includes the exchanging client, so it's present in the subject
+    #     token's own aud (V2 requires this)
+    #   - a Secret named credentialSecretName, in the NAMESPACE WHERE
+    #     CONNECTIVITY LINK/AUTHORINO ITSELF IS DEPLOYED (kuadrant-system
+    #     on sandbox268) -- NOT registrationNamespace, NOT
+    #     gatewayNamespace. Confirmed live: putting it in
+    #     registrationNamespace produced a silent-looking failure that was
+    #     only visible in the Authorino pod's own logs ("Secret ... not
+    #     found"), with the AuthConfig stuck at Ready=false/HostsNotLinked
+    #     and no error surfaced anywhere on the AuthPolicy or Gateway
+    #     status. Authorino only resolves sharedSecretRef against its own
+    #     namespace, same as the authorino-oauth-client Secret in RHCL's
+    #     own Vault docs ("must be applied in the namespace of your
+    #     Connectivity Link deployment").
+    # Leave disabled=false (default) to keep the existing pass-through
+    # behavior -- nothing here is required for the demo's baseline flows.
+    tokenExchange:
+      enabled: false
+      # Keycloak client performing the exchange (must have standard token
+      # exchange enabled, and must appear in the subject token's own aud).
+      clientId: openshell-gateway
+      # Secret (already existing, NOT created by this chart) holding the
+      # HTTP Basic auth value Authorino sends to Keycloak's token
+      # endpoint for this client. MUST live in Authorino/Connectivity
+      # Link's own namespace (kuadrant-system on sandbox268) -- see the
+      # note above `enabled` for why. Authorino sends the secret's value
+      # verbatim with "Basic " prepended (no encoding done on its side --
+      # confirmed against the AuthPolicy CRD's own field description), so
+      # this key's value must already be base64("<clientId>:<clientSecret>"),
+      # not the raw colon-joined pair.
+      credentialSecretName: mcp-gateway-exchange-creds
+      credentialSecretKey: basic-auth
+      # Seconds to cache an exchanged token per (user, server) pair before
+      # re-exchanging.
+      cacheTtlSeconds: 60
 
 # One entry per MCP server. `name` becomes the Deployment/Service/
 # ServiceAccount name and the in-cluster DNS name
@@ -224,6 +311,10 @@ servers:
     port: 8000
     internalPort: 8001      # [VERIFY] not individually confirmed for this image
     requiredRole: "compatibility-user"
+    # MCP tool names exposed by this server (without server prefix). Used to
+    # document what tool:-prefixed client roles the Keycloak client needs.
+    # [VERIFY] mcp-compatibility may expose additional tools beyond calc_tax.
+    tools: ["calc_tax"]
     statefulMode: false
     resources: {}
   # The three servers below are this repo's own Rust MCP servers (./mcp/),
@@ -247,6 +338,7 @@ servers:
     port: 8000
     internalPort: 8001      # Containerfile: ARG PORT=8001 (confirmed)
     requiredRole: "mcp-portfolio-user"
+    tools: ["list_my_clients", "get_positions", "get_performance", "get_top_client_by_aum"]
     statefulMode: false
     database: true
     resources: {}
@@ -259,6 +351,7 @@ servers:
     port: 8000
     internalPort: 8004      # Containerfile: ENV BIND_ADDRESS=0.0.0.0:8004 (confirmed)
     requiredRole: "mcp-crm-calendar-user"
+    tools: ["get_upcoming_meetings", "get_meeting_notes"]
     statefulMode: false
     database: true
     resources: {}
@@ -287,6 +380,7 @@ servers:
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)
     requiredRole: "mcp-market-news-user"
+    tools: ["get_relevant_news"]
     statefulMode: false
     database: false
     newsGenerator: true
@@ -307,6 +401,7 @@ servers:
     port: 8000
     internalPort: 8003
     requiredRole: "mcp-kyc-compliance-user"
+    tools: ["get_risk_profile", "check_suitability", "search_regulatory_guidance"]
     statefulMode: false
     database: true
     needsEmbeddings: true

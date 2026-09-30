@@ -7,6 +7,12 @@
 {{- if not (has .Values.recipe (list "claude-code" "codex")) }}
 {{- fail (printf "recipe must be claude-code or codex, got %q" .Values.recipe) }}
 {{- end }}
+{{- if and .Values.mcpGatewayHost .Values.mcpServers }}
+{{- fail "mcpServers and mcpGatewayHost are mutually exclusive — set exactly one" }}
+{{- end }}
+{{- if and (not .Values.mcpGatewayHost) (not .Values.mcpServers) }}
+{{- fail "either mcpServers or mcpGatewayHost is required" }}
+{{- end }}
 ## Rendered by `helm template` from demos/keycloak-oidc/policies — do not
 ## hand-edit the output. Apply with:
 ##   openshell policy set <sandbox> --policy <this-file> --workspace <ws> --wait
@@ -80,6 +86,23 @@ network_policies:
 {{- end }}
 {{- $recipe := .Values.recipe }}
 {{- $namespace := .Values.openshellNamespace }}
+{{- if .Values.mcpGatewayHost }}
+  allow_mcp_gateway:
+    name: allow_mcp_gateway
+    binaries:
+      - path: /usr/bin/curl
+      {{- if eq $recipe "claude-code" }}
+      - path: /usr/local/bin/claude
+      {{- else }}
+      - path: /usr/local/bin/codex
+      {{- end }}
+    endpoints:
+      - host: {{ .Values.mcpGatewayHost | quote }}
+        port: {{ .Values.mcpGatewayPort }}
+        protocol: rest
+        access: read-write
+        enforcement: enforce
+{{- else }}
 {{- range .Values.mcpServers }}
   allow_{{ . | replace "-" "_" }}:
     name: allow_{{ . | replace "-" "_" }}
@@ -96,4 +119,5 @@ network_policies:
         protocol: rest
         access: read-write
         enforcement: enforce
+{{- end }}
 {{- end }}

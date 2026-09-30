@@ -8,9 +8,18 @@ set -euo pipefail
 # time via --upload — no `sandbox exec` needed to configure it), and the
 # codex-recipe policy.
 #
-# Usage: ./14-provision-codex-sandbox.sh <user-id> <server-name>[,<server-name>...]
+# Usage: ./14-provision-codex-sandbox.sh [--gw] <user-id> <server-name>[,<server-name>...]
 #   e.g. ./14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 #   e.g. ./14-provision-codex-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
+#   e.g. ./14-provision-codex-sandbox.sh --gw bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+#
+# --gw (bare flag, default off) routes this sandbox's MCP calls through the
+# RHCL MCP Gateway (../mcp-gateway, which must already be deployed with
+# auth.enabled) instead of directly to each server's own port-8000 Envoy
+# listener — see 15-provision-claude-sandbox.sh's own --gw note for the
+# full rationale (config.toml gets one [mcp_servers.gateway] table instead
+# of one per server; the policy gets one allow_mcp_gateway group instead
+# of one per server).
 #
 # The README's own example wires up the same server set as the Claude Code
 # harness — the two sandboxes are meant to be equivalent, not a narrower
@@ -46,9 +55,25 @@ if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
 
-USER_ID="${1:?usage: $0 <user-id> <server-name>[,<server-name>...]}"
-SERVER_NAMES="${2:?usage: $0 <user-id> <server-name>[,<server-name>...]}"
+GW=false
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --gw) GW=true; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
+USER_ID="${1:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
+SERVER_NAMES="${2:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
+
+if [ "$GW" = true ]; then
+  # shellcheck source=lib-mcp-gateway.sh
+  source "$SCRIPT_DIR/lib-mcp-gateway.sh"
+  MCP_GATEWAY_URL=$(mcp_gateway_url) || exit 1
+fi
 : "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}"
 : "${OPENAI_BASE_URL:?set OPENAI_BASE_URL in .env}"
 : "${OPENAI_MODEL:?set OPENAI_MODEL in .env}"
@@ -142,15 +167,24 @@ endpoint = "http://audit-collector:4318/v1/traces"
 protocol = "binary"
 EOF
 
-for SERVER in "${SERVERS[@]}"; do
-  SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER" -o jsonpath='{.spec.ports[0].port}')
+if [ "$GW" = true ]; then
   cat >> "$CODEX_CONFIG" <<EOF
+
+[mcp_servers.gateway]
+url = "${MCP_GATEWAY_URL}/mcp"
+bearer_token_env_var = "USER_ACCESS_TOKEN"
+EOF
+else
+  for SERVER in "${SERVERS[@]}"; do
+    SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER" -o jsonpath='{.spec.ports[0].port}')
+    cat >> "$CODEX_CONFIG" <<EOF
 
 [mcp_servers.${SERVER}]
 url = "http://${SERVER}.${OPENSHELL_NAMESPACE}.svc.cluster.local:${SERVER_PORT}/mcp"
 bearer_token_env_var = "USER_ACCESS_TOKEN"
 EOF
-done
+  done
+fi
 
 # Note: if $SANDBOX_NAME already exists, this is a no-op — the
 # --upload'd config.toml only takes effect at creation time. Re-running
@@ -168,15 +202,35 @@ openshell sandbox create --name "$SANDBOX_NAME" \
 rm -f "$CODEX_CONFIG"
 
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-helm template "${SANDBOX_NAME}-policy" policies \
-  --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
-  --set llmHost=inference.local \
-  --set recipe=codex \
-  --set "mcpServers={${SERVER_NAMES}}" \
+POLICY_SET_ARGS=(
+  --set openshellNamespace="${OPENSHELL_NAMESPACE}"
+  --set llmHost=inference.local
+  --set recipe=codex
+)
+if [ "$GW" = true ]; then
+  GW_HOST_PORT="${MCP_GATEWAY_URL#http://}"
+  GW_HOST_PORT="${GW_HOST_PORT#https://}"
+  if [[ "$GW_HOST_PORT" == *:* ]]; then
+    GW_PORT="${GW_HOST_PORT##*:}"
+  else
+    GW_PORT=443
+  fi
+  POLICY_SET_ARGS+=(
+    --set "mcpGatewayHost=${GW_HOST_PORT%%:*}"
+    --set "mcpGatewayPort=${GW_PORT}"
+  )
+else
+  POLICY_SET_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
+fi
+helm template "${SANDBOX_NAME}-policy" policies "${POLICY_SET_ARGS[@]}" \
   > "${POLICY_TMPFILE}"
 openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
 
-echo "Codex sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+if [ "$GW" = true ]; then
+  echo "Codex sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, routed through the MCP Gateway (${MCP_GATEWAY_URL}) to: ${SERVER_NAMES}"
+else
+  echo "Codex sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+fi
 openshell sandbox list --workspace "${USER_ID}"

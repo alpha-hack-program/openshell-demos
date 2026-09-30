@@ -1807,6 +1807,13 @@ source .env
 ./scripts/15-provision-claude-sandbox.sh charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
 
+Pass `--gw` (e.g. `./scripts/15-provision-claude-sandbox.sh --gw bob ...`) to
+route that sandbox's MCP calls through the RHCL MCP Gateway
+([`mcp-gateway/`](mcp-gateway/), which must already be deployed) instead of
+directly to each server — same server list either way, just reached through
+one broker endpoint instead of N direct ones. Omit it for the direct access
+this walkthrough otherwise describes.
+
 The script already exits non-zero with a clear error if token substitution
 never took after 3 attempts. If a scene later fails oddly anyway (e.g.
 `401`/`403` from an MCP server that should be authorized), check it
@@ -3118,6 +3125,10 @@ source .env
 ./scripts/14-provision-codex-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ./scripts/14-provision-codex-sandbox.sh charlie mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 ```
+
+Same `--gw` flag as `15-provision-claude-sandbox.sh` (see above) routes
+through the [MCP Gateway](mcp-gateway/) instead of direct per-server
+access — `[mcp_servers.gateway]` instead of one table per server.
 
 This is the same three-step sequence (inference route → policy profile →
 `policy set`) [step 5](#5-run-the-demo) shows manually for the Claude Code

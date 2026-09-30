@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.gateway.name }}-override-config
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    app.kubernetes.io/part-of: mcp-gateway
+data:
+  # Confirmed live: without this, the GatewayClass controller's default
+  # Service type for the gateway's own managed Deployment isn't ClusterIP
+  # — this keeps the gateway internal-only, reached via its own OpenShift
+  # Route instead of a cloud LoadBalancer that may not exist on-cluster.
+  service: |
+    spec:
+      type: ClusterIP

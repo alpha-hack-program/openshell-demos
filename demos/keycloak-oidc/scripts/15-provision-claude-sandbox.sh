@@ -8,9 +8,23 @@ set -euo pipefail
 # attached at creation, /sandbox/.claude/mcp-servers.json baked in via
 # --upload, and the full claude-code-recipe policy applied at the end.
 #
-# Usage: ./15-provision-claude-sandbox.sh <user-id> <server-name>[,<server-name>...]
+# Usage: ./15-provision-claude-sandbox.sh [--gw] <user-id> <server-name>[,<server-name>...]
 #   e.g. ./15-provision-claude-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
 #   e.g. ./15-provision-claude-sandbox.sh alice mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance,mcp-compatibility
+#   e.g. ./15-provision-claude-sandbox.sh --gw bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
+#
+# --gw (bare flag, default off) routes this sandbox's MCP calls through the
+# RHCL MCP Gateway (../mcp-gateway, which must already be deployed with
+# auth.enabled) instead of directly to each server's own port-8000 Envoy
+# listener. mcp-servers.json gets ONE "gateway" entry instead of one entry
+# per server — every server's tools are still reachable, just through the
+# gateway's single /mcp broker, surfaced as e.g.
+# mcp__gateway__mcp_portfolio_list_my_clients instead of
+# mcp__portfolio__list_my_clients (the broker prefixes tool names by
+# server, see ../mcp-gateway/README.md). The policy's egress allow-list
+# gets one allow_mcp_gateway group instead of one per server — same
+# server-name list you'd otherwise pass, still validated the same way,
+# just not used for per-server endpoint grants in this mode.
 #
 # Run as admin — provider and policy management stay Platform-Admin
 # operations regardless of workspace. Assumes <user-id> was already
@@ -41,9 +55,25 @@ if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
 
-USER_ID="${1:?usage: $0 <user-id> <server-name>[,<server-name>...]}"
-SERVER_NAMES="${2:?usage: $0 <user-id> <server-name>[,<server-name>...]}"
+GW=false
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --gw) GW=true; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
+USER_ID="${1:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
+SERVER_NAMES="${2:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
 : "${OPENSHELL_NAMESPACE:?set OPENSHELL_NAMESPACE in .env}"
+
+if [ "$GW" = true ]; then
+  # shellcheck source=lib-mcp-gateway.sh
+  source "$SCRIPT_DIR/lib-mcp-gateway.sh"
+  MCP_GATEWAY_URL=$(mcp_gateway_url) || exit 1
+fi
 : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}"
 : "${ANTHROPIC_BASE_URL:?set ANTHROPIC_BASE_URL in .env}"
 : "${ANTHROPIC_MODEL:?set ANTHROPIC_MODEL in .env}"
@@ -110,19 +140,24 @@ openshell provider create --name byo-claude --type byo-claude \
 # is still a placeholder at creation time; step 3 substitutes it after.
 # ---------------------------------------------------------------------------
 MCP_CONFIG=$(mktemp --suffix=.json)
-{
-  printf '{"mcpServers":{'
-  FIRST=1
-  for SERVER in "${SERVERS[@]}"; do
-    SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER" -o jsonpath='{.spec.ports[0].port}')
-    KEY="${SERVER#mcp-}"
-    [ "$FIRST" -eq 1 ] || printf ','
-    FIRST=0
-    printf '"%s":{"type":"http","url":"http://%s.%s.svc.cluster.local:%s/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}' \
-      "$KEY" "$SERVER" "$OPENSHELL_NAMESPACE" "$SERVER_PORT"
-  done
-  printf '}}'
-} > "$MCP_CONFIG"
+if [ "$GW" = true ]; then
+  printf '{"mcpServers":{"gateway":{"type":"http","url":"%s/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}}}' \
+    "$MCP_GATEWAY_URL" > "$MCP_CONFIG"
+else
+  {
+    printf '{"mcpServers":{'
+    FIRST=1
+    for SERVER in "${SERVERS[@]}"; do
+      SERVER_PORT=$(oc -n "$OPENSHELL_NAMESPACE" get svc "$SERVER" -o jsonpath='{.spec.ports[0].port}')
+      KEY="${SERVER#mcp-}"
+      [ "$FIRST" -eq 1 ] || printf ','
+      FIRST=0
+      printf '"%s":{"type":"http","url":"http://%s.%s.svc.cluster.local:%s/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}' \
+        "$KEY" "$SERVER" "$OPENSHELL_NAMESPACE" "$SERVER_PORT"
+    done
+    printf '}}'
+  } > "$MCP_CONFIG"
+fi
 
 SANDBOX_CREATE_ARGS=(
   --name "$SANDBOX_NAME"
@@ -186,15 +221,35 @@ done
 # (recipe=claude-code instead of recipe=codex).
 # ---------------------------------------------------------------------------
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-helm template "${SANDBOX_NAME}-policy" policies \
-  --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
-  --set llmHost="${LLM_HOST}" \
-  --set recipe=claude-code \
-  --set "mcpServers={${SERVER_NAMES}}" \
+POLICY_SET_ARGS=(
+  --set openshellNamespace="${OPENSHELL_NAMESPACE}"
+  --set llmHost="${LLM_HOST}"
+  --set recipe=claude-code
+)
+if [ "$GW" = true ]; then
+  GW_HOST_PORT="${MCP_GATEWAY_URL#http://}"
+  GW_HOST_PORT="${GW_HOST_PORT#https://}"
+  if [[ "$GW_HOST_PORT" == *:* ]]; then
+    GW_PORT="${GW_HOST_PORT##*:}"
+  else
+    GW_PORT=443
+  fi
+  POLICY_SET_ARGS+=(
+    --set "mcpGatewayHost=${GW_HOST_PORT%%:*}"
+    --set "mcpGatewayPort=${GW_PORT}"
+  )
+else
+  POLICY_SET_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
+fi
+helm template "${SANDBOX_NAME}-policy" policies "${POLICY_SET_ARGS[@]}" \
   > "${POLICY_TMPFILE}"
 openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
 
-echo "Claude sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+if [ "$GW" = true ]; then
+  echo "Claude sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, routed through the MCP Gateway (${MCP_GATEWAY_URL}) to: ${SERVER_NAMES}"
+else
+  echo "Claude sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, wired to: ${SERVER_NAMES}"
+fi
 openshell sandbox list --workspace "${USER_ID}"

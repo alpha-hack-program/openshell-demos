@@ -1,0 +1,49 @@
+{{- if .Values.auth.enabled }}
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ .Values.gateway.name }}-authn-ssl
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  # Kuadrant's own generated EnvoyFilter adds the Authorino gRPC cluster
+  # but omits TLS — Authorino serves that endpoint over TLS (OpenShift
+  # service-CA cert), so without this every auth check fails with "gRPC
+  # status code is not OK" -> 500 to the client. Confirmed live.
+  configPatches:
+    - applyTo: CLUSTER
+      match:
+        cluster:
+          service: {{ .Values.auth.authorinoService }}.{{ .Values.auth.authorinoNamespace }}.svc.cluster.local
+      patch:
+        operation: ADD
+        value:
+          connect_timeout: 1s
+          http2_protocol_options: {}
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: kuadrant-auth-service
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: {{ .Values.auth.authorinoService }}.{{ .Values.auth.authorinoNamespace }}.svc.cluster.local
+                          port_value: 50051
+          name: kuadrant-auth-service
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              common_tls_context:
+                validation_context:
+                  trusted_ca:
+                    filename: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+          type: STRICT_DNS
+  priority: -1
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+{{- end }}
