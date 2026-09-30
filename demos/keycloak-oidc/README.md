@@ -769,21 +769,14 @@ OperatorHub on OpenShift. The package name is **`rhbk-operator`** (in the
    > in your `.env` to match.
 
    > **This CR has no database configured, so Keycloak runs on ephemeral
-   > (in-memory H2) storage — confirmed live: the RHBK Operator's own
-   > `installPlanApproval: Automatic` (set on the Subscription above)
-   > silently auto-upgraded the operator mid-session, which recreated
-   > `keycloak-0` and wiped the entire `openshell` realm with no warning,
-   > breaking every banker's workspace membership (keyed to a Keycloak
-   > subject ID that no longer existed) and provider refresh token.
-   > `99-teardown.sh keep-keycloak`'s promise of a stable Keycloak to
-   > iterate against is only as good as this pod never restarting — a node
-   > drain, OOM, or operator upgrade any time between runs has the same
-   > effect. Recovery is step 1c's re-import plus re-running step 3
-   > (`onboard`) for every banker and fixing `workspace member`
-   > entries — there is no fix short of that once it happens. For a demo
-   > you intend to leave running unattended for any length of time,
-   > consider adding a real `db:` block (external/persistent Postgres) to
-   > this CR instead of relying on the default ephemeral store.
+   > (in-memory H2) storage.** Any `keycloak-0` restart — a node drain,
+   > OOM, or an operator upgrade (this Subscription's own
+   > `installPlanApproval: Automatic` can trigger one silently) — wipes the
+   > entire `openshell` realm with no warning, breaking every banker's
+   > workspace membership and provider refresh token. There's no fix short
+   > of step 1c's re-import plus re-running step 3 (`onboard`) for every
+   > banker. For anything left running unattended, add a real `db:` block
+   > (external/persistent Postgres) to this CR instead.
 
 4. Wait for the pod to become ready:
 
@@ -910,24 +903,15 @@ helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 
 ##### OIDC issuer TLS trust (self-signed default ingress cert)
 
-Separate from the TLS choice above: this is about **Keycloak's own Route**
-(step 1b), not the OpenShell gateway's. Keycloak's Route has no certificate
-of its own — it rides the cluster's default IngressController certificate,
-which on most fresh/lab clusters is self-signed by `ingress-operator`.
+**If Keycloak's Route (step 1b) serves a self-signed certificate — the
+default on most fresh/lab clusters — everything that does OIDC discovery
+against it needs the same fix: trust the cluster's ingress CA.** That's two
+places, both below, before proceeding. Skip both entirely if Keycloak's
+Route already serves a publicly/CA-trusted certificate (a real cert on the
+IngressController, or Keycloak's own `tlsSecret`).
 
-The **OpenShell gateway** (the `openshell` pod) verifies TLS for real when
-it discovers the OIDC issuer's `.well-known/openid-configuration` at
-startup. Against a self-signed Keycloak Route, that's not a soft failure —
-it crashes on every start with `configuration error: OIDC initialization
-failed: OIDC discovery request failed: error sending request for url
-(https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration)`,
-and CrashLoopBackOffs indefinitely (unlike the embeddings race in
-[step 4](#4-deploy-mcp-servers), there's no dependency here to wait out).
-
-Fix it with `server.oidc.caConfigMapName`: a ConfigMap (key `ca.crt`) of
-CA(s) the OpenShell gateway should additionally trust for OIDC discovery.
-The cluster already publishes the right bundle for its default ingress
-cert at `default-ingress-cert` in `openshift-config-managed`:
+**1. The OpenShell gateway pod** — before running
+[step 2a](#2a-helm-install)'s install command:
 
 ```bash
 oc get configmap default-ingress-cert -n openshift-config-managed \
@@ -937,33 +921,26 @@ oc -n "$OPENSHELL_NAMESPACE" create configmap openshell-oidc-ca \
 rm -f /tmp/ingress-ca.crt
 ```
 
-Skip this if Keycloak's Route already serves a publicly/CA-trusted
-certificate (e.g. a real cert on the IngressController, or Keycloak's own
-`tlsSecret`). [Step 2a](#2a-helm-install)'s `helm upgrade --install` already
-passes `--set server.oidc.caConfigMapName=openshell-oidc-ca` once this
-ConfigMap exists — nothing else to wire up.
+Step 2a's `helm upgrade --install` already passes
+`--set server.oidc.caConfigMapName=openshell-oidc-ca` once this ConfigMap
+exists — nothing else to wire up.
 
-If the OpenShell gateway pod is already crash-looping on this from an
-earlier attempt, re-running `helm upgrade --install` after creating the
-ConfigMap isn't enough by itself — StatefulSets don't always replace an
-already-failing pod-0 promptly on a spec change. Force it:
-`oc -n "$OPENSHELL_NAMESPACE" delete pod openshell-0`.
+**Already crash-looping on this from an earlier attempt?** Creating the
+ConfigMap and re-running `helm upgrade --install` isn't enough by itself —
+force pod-0 to restart: `oc -n "$OPENSHELL_NAMESPACE" delete pod
+openshell-0`.
 
-**This same self-signed chain also breaks the `openshell` CLI itself**
-(`gateway add`, `gateway login`, and the `openshell` subprocess calls the
-`onboard` tool shells out to) — it does its own OIDC discovery against the
-same URL, with no CA-trust flag of its own. Fix by exporting `SSL_CERT_FILE`
-to a bundle containing both the system trust store and the same ingress CA,
-for every terminal/session running `openshell` or `onboard` against this
-OpenShell gateway.
-
-Write that bundle under `$XDG_CACHE_HOME` (falling back to `$HOME/.cache`
-if unset — works the same way on Linux and macOS) instead of `/tmp`: it's
-not identity-scoped like `XDG_CONFIG_HOME`/`XDG_STATE_HOME` elsewhere in
-this guide (it's just a CA bundle, the same one every banker's terminal
-needs), and `/tmp` can be cleared on reboot or be a per-boot tmpfs,
-silently breaking every already-open terminal's next token refresh.
-Generate it once (needs `oc` access, so typically admin does this):
+**2. The `openshell` CLI** — every terminal/session running `openshell` or
+`onboard` against this gateway (`gateway add`, `gateway login`, and every
+`openshell` subprocess call `onboard` shells out to) needs `SSL_CERT_FILE`
+pointed at a bundle containing both the system trust store and the same
+ingress CA; the CLI has no CA-trust flag of its own. Write that bundle
+under `$XDG_CACHE_HOME` (falling back to `$HOME/.cache`, works the same on
+Linux/macOS) instead of `/tmp`: it's not identity-scoped like
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME` elsewhere in this guide (it's the same
+bundle every banker's terminal needs), and `/tmp` can be cleared on reboot
+or be a per-boot tmpfs, silently breaking every already-open terminal's
+next token refresh. Generate it once (needs `oc` access, typically admin):
 
 ```bash
 CA_BUNDLE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/openshell-demos"
@@ -987,15 +964,32 @@ export SSL_CERT_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/openshell-demos/keycloak-o
 automatically (pointing at the same shared path, generating nothing itself
 — see that script for what it does if the bundle doesn't exist yet).
 
-(`onboard` itself doesn't need this — it accepts invalid certs by default
+`onboard` itself doesn't need this — it accepts invalid certs by default
 for its own token exchange, per its `--strict-tls` flag — but the
 `openshell` CLI commands it shells out to still do, since they go through
-the same code path as running `openshell` directly.) If you're driving
+the same code path as running `openshell` directly. Driving
 `gateway add`/`onboard` headlessly with Playwright per
-[`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md),
-the browser context needs the equivalent
-`context = await browser.newContext({ ignoreHTTPSErrors: true })` or it
-will fail navigating to the same self-signed Keycloak login page.
+[`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md)
+needs the browser-context equivalent —
+`context = await browser.newContext({ ignoreHTTPSErrors: true })` — or it
+fails navigating to the same self-signed Keycloak login page.
+
+**Why this is one problem, not two:** Keycloak's Route has no certificate
+of its own — it rides the cluster's default IngressController certificate,
+self-signed by `ingress-operator` on most fresh/lab clusters. Both the
+OpenShell gateway pod (at startup) and the `openshell` CLI (on every
+command) do real OIDC discovery against that same Route, and neither has a
+soft-fail path: the gateway pod crashes with `configuration error: OIDC
+initialization failed: OIDC discovery request failed: error sending
+request for url
+(https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration)`
+and CrashLoopBackOffs indefinitely (unlike the embeddings race in
+[step 4](#4-deploy-mcp-servers), there's no dependency here to wait out);
+the CLI just fails the same TLS handshake locally. Both fixes above pull
+from the same source — `default-ingress-cert` in
+`openshift-config-managed` — just deliver it differently: mounted as a
+ConfigMap for the in-cluster pod, exported as `SSL_CERT_FILE` for the local
+CLI process.
 
 With those set, the command below creates the namespace and grants the
 sandbox SCC, computes `ROUTE_HOST`, then branches only on whether
