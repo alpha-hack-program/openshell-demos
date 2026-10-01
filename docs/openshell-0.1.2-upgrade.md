@@ -68,6 +68,17 @@ live on `keycloak-oidc-demo` namespace (OpenShift SCC UID range
   the new OpenShift-SCC-awareness feature breaks the exact convention
   OpenShift itself documents for arbitrary-UID compatibility. Worth filing
   against `NVIDIA/OpenShell` before spending more effort here.
+- **Not an image problem, confirmed**: also tested the newer
+  `quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0` and
+  `quay.io/aipcc/agentic-ci/codex-sandbox:0.4.0` tags (both public, no
+  registry login needed to pull). Identical `/sandbox` layout (`0770`,
+  `uid=1001`, `gid=0`) and identical live failure
+  (`workspace-init` → `Init:Error` → `Permission denied (os error 13)`) —
+  rules out "stale image" as the cause and confirms the bug is in the
+  0.1.2 gateway/driver, not in any particular image build. `CODEX_IMAGE`'s
+  correct 0.4.0 path also changed repos:
+  `quay.io/aipcc/base-images/agentic/codex:0.4.0` doesn't exist (404); the
+  new tag lives at `quay.io/aipcc/agentic-ci/codex-sandbox:0.4.0` instead.
 - Until that's fixed (or there's a documented workaround), **step 5
   (`scripts/15-provision-claude-sandbox.sh`) and step 6
   (`scripts/14-provision-codex-sandbox.sh`), plus everything downstream of
