@@ -3,11 +3,16 @@
 Status: **live-tested against a fresh OpenShift cluster (sandbox341,
 OCP 4.22.15) on 2026-10-01.** Part I steps 1–4 (Keycloak, gateway install,
 OIDC login, Providers v2 onboarding, MCP servers) pass on 0.1.2 with the
-fixes below. Step 5 (sandbox provisioning) is **blocked** by a real 0.1.2
-regression in the Kubernetes compute driver — see "Blocking finding" below.
+fixes below. Step 5 (sandbox provisioning) hit a real 0.1.2 regression in
+the Kubernetes compute driver — root-caused, and a working image-side
+workaround is now confirmed live (see "Blocking finding" / "Workaround
+confirmed live" below). `CLAUDE_IMAGE`/`CODEX_IMAGE` still need to be
+rebuilt with that one-line fix and re-published before step 5 can be
+re-run end to end with the *real* images (the fix was only verified
+against a throwaway internal-registry build of `claude-sandbox`).
 Branch: `0.1.2-upgrade`. **Do not bump `OPENSHELL_CHART_VERSION` or declare
-the demos upgraded** until that blocker is resolved (upstream fix, or an
-image workaround) and step 5 onward is re-verified.
+the demos upgraded** until the real images are rebuilt and step 5 onward
+is re-verified against them.
 
 This covers `demos/base`, `demos/keycloak-oidc`, and `util/parrot`. 0.1.0 is
 where essentially all the breaking changes land; 0.1.1 and 0.1.2 are patch
@@ -79,6 +84,55 @@ live on `keycloak-oidc-demo` namespace (OpenShift SCC UID range
   correct 0.4.0 path also changed repos:
   `quay.io/aipcc/base-images/agentic/codex:0.4.0` doesn't exist (404); the
   new tag lives at `quay.io/aipcc/agentic-ci/codex-sandbox:0.4.0` instead.
+- **Confirmed via NVIDIA's own docs that this is intentional, not
+  accidental**: `/kubernetes/openshift.md`, checked at both `/latest/` and
+  the version-pinned `/v0.1.2/` path, states plainly: "The driver reads the
+  namespace's `openshift.io/sa.scc.uid-range` annotation and uses the
+  resulting UID/GID for the sandbox, agent, trusted init containers, and
+  supervisor." Same value for UID and GID is the documented design, not a
+  slip — it just isn't reconciled with the separate, equally standard
+  OpenShift "arbitrary UID + group 0" image convention these images follow,
+  and nothing in the docs warns custom-image authors about the conflict.
+
+## Workaround confirmed live — rebuild the image with world-readable content
+
+Since the injected UID *and* GID are both unpredictable at image-build time,
+group-based tricks (GID 0, etc.) can't fix this from the image side — the
+only thing that works is making the seeded content **world-readable**.
+Tested end to end against this cluster:
+
+```dockerfile
+FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0
+USER root
+RUN chmod -R a+rX /sandbox
+USER sandbox
+```
+
+Built via an OpenShift binary build straight into the cluster's internal
+registry (`oc new-build --binary --strategy=docker` +
+`oc start-build --from-dir=... --follow`), no external registry
+credentials needed:
+
+```bash
+oc new-build --binary --name=claude-sandbox-fix --strategy=docker
+oc start-build claude-sandbox-fix --from-dir=<dir-with-Dockerfile> --follow
+# pushes to image-registry.openshift-image-registry.svc:5000/<ns>/claude-sandbox-fix:latest
+```
+
+Result: `openshell sandbox create --from image-registry.openshift-image-registry.svc:5000/keycloak-oidc-demo/claude-sandbox-fix:latest`
+reached `Ready`/`DependenciesReady` with no `Init:Error`, and after
+attaching providers and applying the policy, `claude --version` inside the
+sandbox returned `2.1.263 (Claude Code)`. Seeded files end up correctly
+owned by the runtime identity (`1000910000:1000910000` in this namespace)
+post-extraction — `a+rX` only needs to survive the one-time read during
+seeding, not persist as the live permissions.
+
+**This is a real, scoped fix**: add one `chmod -R a+rX /sandbox` (or
+whatever the workspace mount path is) layer, after all build steps, to any
+custom sandbox image meant to run on OpenShell 0.1.2 + OpenShift. Doesn't
+require an upstream fix — still worth filing upstream so other users don't
+have to rediscover this, and so the docs gap gets closed, but it's no
+longer a hard blocker for this demo.
 - Until that's fixed (or there's a documented workaround), **step 5
   (`scripts/15-provision-claude-sandbox.sh`) and step 6
   (`scripts/14-provision-codex-sandbox.sh`), plus everything downstream of
@@ -315,12 +369,17 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
 
 ## Remaining work, in order
 
-1. **Resolve the blocking finding above** — either an upstream OpenShell fix
-   (file the bug against `NVIDIA/OpenShell`), a documented workaround if one
-   surfaces, or confirmation that a differently-built image (group-0-free,
-   e.g. owning `/sandbox` world-readable instead of relying on the GID-0
-   convention) sidesteps it. Nothing past step 5 can be tested without this.
-2. Once sandboxes provision again: re-run step 5 (Claude Code + DeepSeek's
+1. **Rebuild `CLAUDE_IMAGE`/`CODEX_IMAGE` (and the audit/garak variants built
+   on top of them) with `RUN chmod -R a+rX /sandbox` added after the final
+   `USER` switch**, confirmed live to fix the provisioning failure (see
+   "Workaround confirmed live" above). This needs to happen wherever those
+   images are actually built/published (not this repo — they're upstream
+   `quay.io/aipcc/...` images), then `CLAUDE_IMAGE`/`CODEX_IMAGE` in `.env`
+   point at the rebuilt tags. Also worth filing upstream against
+   `NVIDIA/OpenShell` even with the workaround in hand, since the
+   driver/docs gap will bite the next person who builds a GID-0-convention
+   image.
+2. Once the real images are rebuilt: re-run step 5 (Claude Code + DeepSeek's
    Anthropic-compatible endpoint, `https://api.deepseek.com/anthropic`) and
    confirm the full scene walkthrough (policy enforcement, MCP isolation
    between alice/bob/charlie) still holds on 0.1.2.
