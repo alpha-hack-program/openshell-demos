@@ -163,68 +163,42 @@ SANDBOX_CREATE_ARGS=(
   --name "$SANDBOX_NAME"
   --provider byo-claude
   --provider "user-${USER_ID}"
-  --upload "${MCP_CONFIG}:/sandbox/.claude/mcp-servers.json"
   --workspace "${USER_ID}"
 )
 [ -z "$CLAUDE_IMAGE" ] || SANDBOX_CREATE_ARGS+=(--from "$CLAUDE_IMAGE")
 
-# Note: if $SANDBOX_NAME already exists, this is a no-op — the --upload'd
-# mcp-servers.json only takes effect at creation time. Re-running with a
-# changed server list against an already-provisioned sandbox won't update
-# it; delete the sandbox first if you need to change its MCP servers.
-#
-# The two `provider attach` calls right after are the fallback for that
-# same "already existed" case: if $SANDBOX_NAME predates this script (e.g.
+# The two `provider attach` calls right after are the fallback for the
+# "already existed" case: if $SANDBOX_NAME predates this script (e.g.
 # created some other way with only one of the two providers attached),
 # `sandbox create ... || true` above silently does nothing — it would
 # never actually attach byo-claude/user-<id>, leaving Claude Code with no
 # LLM credentials with no error raised. Attaching an already-attached
 # provider is a harmless no-op, so these are safe to run unconditionally.
 #
-# --detach, not `-- true`: OpenShell 0.1.2 rejects `--upload` combined with
-# a trailing [COMMAND] outright ("the argument '--upload <UPLOAD>' cannot
-# be used with '[COMMAND]...'") — confirmed live. --detach starts the
-# sandbox's main process without attaching, which is what `-- true` was
-# standing in for anyway.
-openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach || true
+# Backgrounded, not awaited: confirmed live on OpenShell 0.1.2 — a sandbox
+# created with --provider flags attached has no valid policy yet (a fresh
+# sandbox gets no usable built-in bundle the way 0.0.106 did), so
+# `sandbox create` sits in its own client-side readiness-polling loop for
+# anywhere from ~30s to 5 minutes before giving up, by which point the
+# gateway's own fail-closed safeguard has already deleted the still
+# "ConfigurationInvalid" sandbox out from under it. The server-side
+# CreateSandbox call itself completes in under a second regardless (seen
+# in gateway logs) — only the CLI's own post-create wait is slow. Racing
+# policy set in immediately after a short, fixed pause reliably wins:
+# confirmed live, Ready + a working `claude --version` every time tested.
+openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach &
+CREATE_PID=$!
+sleep 5
 openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
 openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
 
-rm -f "$MCP_CONFIG"
-
 # ---------------------------------------------------------------------------
-# Step 3: substitute the real $USER_ACCESS_TOKEN into the uploaded file.
-# Don't construct the JSON inside `sandbox exec` in the first place (a
-# printf/heredoc nested in `bash -c '...'` is fragile — one missed
-# %s/argument pair silently breaks the JSON, and heredocs reliably hang
-# there), and don't relay the token out of the sandbox and back in
-# (observed live to silently return empty on a cold connection, producing
-# a blank Bearer header with no error) — see "Write each banker's MCP
-# server config once" in the README.
-#
-# A `sandbox exec` run immediately after `sandbox upload`/`sandbox create`
-# has also been observed to silently no-op on a cold connection (neither
-# has a --wait flag). The README works around this by looping over
-# multiple bankers between the upload and substitution steps, letting the
-# connection settle; since this script only handles one banker, it
-# verifies the substitution took (grep for the placeholder) and retries
-# instead.
-# ---------------------------------------------------------------------------
-REMAINING=""
-for attempt in 1 2 3; do
-  openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- bash -c \
-    'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
-  REMAINING=$(openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- \
-    grep -o __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json || true)
-  [ -z "$REMAINING" ] && break
-  echo "token substitution didn't take (attempt ${attempt}/3, likely the post-create cold-connection race) — retrying..."
-  sleep 2
-done
-[ -z "$REMAINING" ] || { echo "failed to substitute USER_ACCESS_TOKEN into mcp-servers.json after 3 attempts"; exit 1; }
-
-# ---------------------------------------------------------------------------
-# Step 4: apply the full policy via the same Helm chart 14 uses for Codex
-# (recipe=claude-code instead of recipe=codex).
+# Step 3: apply the full policy via the same Helm chart 14 uses for Codex
+# (recipe=claude-code instead of recipe=codex) — immediately, before doing
+# anything else, to beat the fail-closed window described above. Moved
+# ahead of the MCP-config upload and token substitution (formerly steps
+# 2/3) for the same reason: both need a Ready, non-rejected sandbox to
+# succeed reliably.
 # ---------------------------------------------------------------------------
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
 POLICY_SET_ARGS=(
@@ -252,6 +226,54 @@ helm template "${SANDBOX_NAME}-policy" policies "${POLICY_SET_ARGS[@]}" \
 openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
+
+# Reap the backgrounded `sandbox create` from above — it has either already
+# returned or is still polling for a readiness signal that arrived via the
+# policy set above; either way we don't care about its own exit code.
+wait "$CREATE_PID" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Step 4: upload the MCP config built in step 2, now that the sandbox has
+# an active policy. `sandbox create --upload` is no longer used here:
+# OpenShell 0.1.2 rejects `--upload` combined with a trailing [COMMAND]
+# outright, and bundling it into the backgrounded create above was found
+# live to silently lose the upload — the create's own client-side process
+# gets abandoned (see `wait` above) before the transfer completes. A
+# separate `sandbox upload` call after the sandbox is Ready is reliable.
+# ---------------------------------------------------------------------------
+openshell sandbox upload "$SANDBOX_NAME" "$MCP_CONFIG" /sandbox/.claude/mcp-servers.json \
+  --workspace "${USER_ID}"
+rm -f "$MCP_CONFIG"
+
+# ---------------------------------------------------------------------------
+# Step 5: substitute the real $USER_ACCESS_TOKEN into the uploaded file.
+# Don't construct the JSON inside `sandbox exec` in the first place (a
+# printf/heredoc nested in `bash -c '...'` is fragile — one missed
+# %s/argument pair silently breaks the JSON, and heredocs reliably hang
+# there), and don't relay the token out of the sandbox and back in
+# (observed live to silently return empty on a cold connection, producing
+# a blank Bearer header with no error) — see "Write each banker's MCP
+# server config once" in the README.
+#
+# A `sandbox exec` run immediately after `sandbox upload`/`sandbox create`
+# has also been observed to silently no-op on a cold connection (neither
+# has a --wait flag). The README works around this by looping over
+# multiple bankers between the upload and substitution steps, letting the
+# connection settle; since this script only handles one banker, it
+# verifies the substitution took (grep for the placeholder) and retries
+# instead.
+# ---------------------------------------------------------------------------
+REMAINING=""
+for attempt in 1 2 3; do
+  openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- bash -c \
+    'sed -i "s|__USER_ACCESS_TOKEN__|$USER_ACCESS_TOKEN|g" /sandbox/.claude/mcp-servers.json'
+  REMAINING=$(openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- \
+    grep -o __USER_ACCESS_TOKEN__ /sandbox/.claude/mcp-servers.json || true)
+  [ -z "$REMAINING" ] && break
+  echo "token substitution didn't take (attempt ${attempt}/3, likely the post-create cold-connection race) — retrying..."
+  sleep 2
+done
+[ -z "$REMAINING" ] || { echo "failed to substitute USER_ACCESS_TOKEN into mcp-servers.json after 3 attempts"; exit 1; }
 
 if [ "$GW" = true ]; then
   echo "Claude sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, routed through the MCP Gateway (${MCP_GATEWAY_URL}) to: ${SERVER_NAMES}"

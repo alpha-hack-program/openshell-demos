@@ -186,25 +186,28 @@ EOF
   done
 fi
 
-# Note: if $SANDBOX_NAME already exists, this is a no-op — the
-# --upload'd config.toml only takes effect at creation time. Re-running
-# with a changed server list against an already-provisioned sandbox won't
-# update it; delete the sandbox first if you need to change its MCP
-# servers.
-# --detach, not `-- true`: OpenShell 0.1.2 rejects `--upload` combined with
-# a trailing [COMMAND] outright ("the argument '--upload <UPLOAD>' cannot
-# be used with '[COMMAND]...'") — confirmed live. --detach starts the
-# sandbox's main process without attaching, which is what `-- true` was
-# standing in for anyway.
+# Backgrounded, not awaited — confirmed live on OpenShell 0.1.2 (see the
+# identical note in 15-provision-claude-sandbox.sh): a sandbox created with
+# --provider flags attached has no valid policy yet, so `sandbox create`
+# sits in its own client-side readiness-polling loop for anywhere from
+# ~30s to 5 minutes before giving up, by which point the gateway's own
+# fail-closed safeguard has already deleted the still-"ConfigurationInvalid"
+# sandbox out from under it. The server-side CreateSandbox call itself
+# completes in under a second regardless — only the CLI's own post-create
+# wait is slow. Racing policy set in immediately after a short, fixed
+# pause reliably wins. --upload is no longer passed here either: OpenShell
+# 0.1.2 rejects it combined with a trailing [COMMAND] outright, and
+# bundling it into a backgrounded create was found live (on the Claude Code
+# sandbox) to silently lose the upload — config.toml gets uploaded as a
+# separate step below instead, once the sandbox has an active policy.
 openshell sandbox create --name "$SANDBOX_NAME" \
   --provider byo-codex \
   --provider "user-${USER_ID}" \
   --from "${CODEX_IMAGE}" \
-  --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml" \
   --workspace "${USER_ID}" \
-  --detach || true
-
-rm -f "$CODEX_CONFIG"
+  --detach &
+CREATE_PID=$!
+sleep 5
 
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
 POLICY_SET_ARGS=(
@@ -232,6 +235,17 @@ helm template "${SANDBOX_NAME}-policy" policies "${POLICY_SET_ARGS[@]}" \
 openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
   --workspace "${USER_ID}" --wait
 rm -f "${POLICY_TMPFILE}"
+
+# Reap the backgrounded `sandbox create` from above — see the comment at
+# its call site. We don't care about its own exit code.
+wait "$CREATE_PID" 2>/dev/null || true
+
+# Upload config.toml now that the sandbox has an active policy (see the
+# comment at the `sandbox create` call site for why this moved out of
+# `--upload`).
+openshell sandbox upload "$SANDBOX_NAME" "$CODEX_CONFIG" /sandbox/.codex/config.toml \
+  --workspace "${USER_ID}"
+rm -f "$CODEX_CONFIG"
 
 if [ "$GW" = true ]; then
   echo "Codex sandbox $SANDBOX_NAME provisioned in workspace ${USER_ID}, routed through the MCP Gateway (${MCP_GATEWAY_URL}) to: ${SERVER_NAMES}"

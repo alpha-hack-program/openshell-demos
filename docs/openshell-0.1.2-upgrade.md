@@ -3,16 +3,19 @@
 Status: **live-tested against a fresh OpenShift cluster (sandbox341,
 OCP 4.22.15) on 2026-10-01.** Part I steps 1–4 (Keycloak, gateway install,
 OIDC login, Providers v2 onboarding, MCP servers) pass on 0.1.2 with the
-fixes below. Step 5 (sandbox provisioning) hit a real 0.1.2 regression in
-the Kubernetes compute driver — root-caused, and a working image-side
-workaround is now confirmed live (see "Blocking finding" / "Workaround
-confirmed live" below). `CLAUDE_IMAGE`/`CODEX_IMAGE` still need to be
-rebuilt with that one-line fix and re-published before step 5 can be
-re-run end to end with the *real* images (the fix was only verified
-against a throwaway internal-registry build of `claude-sandbox`).
+fixes below. Step 5 (Claude Code sandbox provisioning) is now **fully
+working end to end** — `quay.io/atarazana/claude-sandbox:0.4.0` and
+`quay.io/atarazana/codex-sandbox:0.4.0` are built, pushed, and public, and
+`scripts/15-provision-claude-sandbox.sh` (run unmodified, for real) reaches
+`PHASE: Ready` with a working `claude --version`. Two distinct 0.1.2
+regressions had to be found and worked around along the way — a
+filesystem-permission bug (image-side fix) and a sandbox-creation timing
+race (script-side fix) — see "Blocking finding", "Resolution", and "Second
+blocking finding" below. Step 6 (Codex) still needs the separate
+`inference.local` removal redesign before it can be tested the same way.
 Branch: `0.1.2-upgrade`. **Do not bump `OPENSHELL_CHART_VERSION` or declare
-the demos upgraded** until the real images are rebuilt and step 5 onward
-is re-verified against them.
+the demos upgraded** until step 6 and the remaining scenes are re-verified
+too.
 
 This covers `demos/base`, `demos/keycloak-oidc`, and `util/parrot`. 0.1.0 is
 where essentially all the breaking changes land; 0.1.1 and 0.1.2 are patch
@@ -158,13 +161,68 @@ already layer Containerfiles on top of the upstream images):
 - `demos/keycloak-oidc/.env`'s `CLAUDE_IMAGE`/`CODEX_IMAGE` now point at
   `quay.io/atarazana/{claude,codex}-sandbox:0.4.0`.
 
-**Not yet published** — building and pushing to `quay.io/atarazana`
-requires registry credentials this session doesn't have. Until someone
-with push access runs the `podman build`/`podman push` commands in each
-new Containerfile's header comment, `.env`'s image references won't
-actually pull. `.env.example` deliberately hasn't been updated yet either,
-same reasoning as the `OPENSHELL_CHART_VERSION` cutover — do that once the
-images are live and step 5 has been re-run against them.
+**Published.** Both images are built and pushed —
+`quay.io/atarazana/claude-sandbox:0.4.0`/`:latest` and
+`quay.io/atarazana/codex-sandbox:0.4.0`/`:latest` — confirmed live via a
+fresh `podman pull` after removing the local cache. One gotcha hit along
+the way: quay.io defaults new repos to **private**, unlike this repo's
+other `atarazana` images (confirmed via the quay.io API,
+`"is_public": false` initially) — the cluster has no imagePullSecret for
+that registry at all, relying on everything being public, so the first
+real pull attempt failed with `ErrImagePull: unauthorized`. Fixed by
+flipping both repos to public in the quay.io UI (no API/management token
+available to do it from this session). `.env.example` still deliberately
+hasn't been updated, same reasoning as the `OPENSHELL_CHART_VERSION`
+cutover.
+
+## Second blocking finding — sandbox create blocks and gets rolled back (script-side, fixed)
+
+Separate from the filesystem-permission bug above: even with a correctly
+publicly-pullable, permission-fixed image, `scripts/15-provision-claude-sandbox.sh`
+run as-is still failed. Root cause, confirmed live:
+
+- A sandbox created with `--provider` flags attached has **no valid policy
+  yet** — a fresh sandbox does not get a usable built-in policy bundle the
+  way earlier OpenShell versions did (`openshell policy get <sandbox>
+  --base` returns "no active policy configured", not the documented
+  built-in bundle). Its `configuration_admission` reports `state:
+  "rejected"`, `error: "Effective configuration could not be activated;
+  replace the policy or repair attached providers"` — reproduced even with
+  **zero** providers attached, so this isn't a providers.v2/credential
+  issue, it's that a brand-new sandbox simply has no admitted policy until
+  one is explicitly set.
+- `openshell sandbox create` itself then sits in its own client-side
+  readiness-polling loop waiting for that non-existent Ready state —
+  anywhere from ~30 seconds to the full 5-minute client timeout observed
+  across different attempts — while the **gateway's own fail-closed
+  safeguard** independently rolls back and deletes the still-rejected
+  sandbox after its own timeout (`rolled back stale fail-closed
+  sandbox-runtime bootstrap` in the gateway logs). Whichever fires first,
+  the script's later `openshell policy set` call — the thing that would
+  actually fix the rejected configuration — never gets a chance to run
+  before the sandbox is gone.
+- The actual server-side `CreateSandbox` gRPC call completes in **under a
+  second** regardless (confirmed in gateway logs: `CreateSandbox request
+  completed successfully`) — the multi-minute delay is entirely the CLI's
+  own client-side wait, which `--detach` does not skip.
+
+**Fix, confirmed live repeatedly**: background the `sandbox create` call
+(`&`), `sleep 5`, then immediately call `policy set --wait` — this
+reliably wins the race every time tested, reaching `Ready` with a working
+agent binary. `--upload` had to come out of the `sandbox create` call
+entirely in the process: bundling it into a backgrounded/abandoned create
+was found to silently lose the uploaded file (confirmed: the 10-second
+cutoff in one test killed the client before "Uploading files..." printed).
+Config is now uploaded via a separate `openshell sandbox upload <name>
+<local> <dest>` call (positional, not the `local:remote` syntax `sandbox
+create --upload` uses) once the sandbox has an active policy, then token
+substitution proceeds as before. Applied to both
+`scripts/15-provision-claude-sandbox.sh` (verified end to end, unmodified,
+reaches `Ready` + `claude --version` works) and
+`scripts/14-provision-codex-sandbox.sh` (same mechanical fix applied for
+consistency, but that script still can't be run end to end — see the
+`openshell inference`/`inference.local` removal item below, a separate,
+pre-existing blocker in the same script).
 
 ## Already fixed on this branch (verified locally, no cluster needed)
 
@@ -396,24 +454,25 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
 
 ## Remaining work, in order
 
-1. **Publish `quay.io/atarazana/claude-sandbox:0.4.0` and
-   `quay.io/atarazana/codex-sandbox:0.4.0`** — someone with push access to
-   that registry needs to run the `podman build`/`podman push` commands in
-   `demos/keycloak-oidc/images/{claude,codex}-sandbox/Containerfile`'s
-   header comment. Both images and the fix are already confirmed live (see
-   "Resolution" above); this is purely the publish step this session
-   couldn't do itself. Also worth filing upstream against
-   `NVIDIA/OpenShell` even with the workaround in hand, since the
-   driver/docs gap will bite the next person who builds a GID-0-convention
-   image.
-2. Once published: re-run step 5 (Claude Code + DeepSeek's
-   Anthropic-compatible endpoint, `https://api.deepseek.com/anthropic`) and
-   confirm the full scene walkthrough (policy enforcement, MCP isolation
-   between alice/bob/charlie) still holds on 0.1.2.
+1. ~~Publish `quay.io/atarazana/claude-sandbox:0.4.0` and
+   `quay.io/atarazana/codex-sandbox:0.4.0`~~ — **done.** Both built, pushed,
+   and flipped to public; `scripts/15-provision-claude-sandbox.sh` verified
+   end to end against the real published images, unmodified, reaching
+   `Ready` with a working `claude --version`. Still worth filing both
+   findings upstream against `NVIDIA/OpenShell` (the GID-0 image-convention
+   gap and the sandbox-create-vs-fail-closed-rollback race) even with
+   workarounds in hand, since both will bite the next OpenShift user.
+2. Walk the rest of step 5's scenes (1–7) for alice/bob/charlie against the
+   now-working Claude Code sandboxes — only banker `alice`'s sandbox has
+   been provisioned and smoke-tested (`id`, `claude --version`, MCP config
+   token substitution) so far; bob and charlie, and the actual scene
+   scripts/assertions, are still unverified on 0.1.2.
 3. Redesign and provision the Codex BYO-LLM flow (step 6 / Annex A) against
    the new provider-profile pattern, replacing the removed `openshell
-   inference`/`inference.local` mechanism — still untested, see the item
-   below.
+   inference`/`inference.local` mechanism (`scripts/14-provision-codex-sandbox.sh`
+   line ~112, `openshell inference set`, has no 0.1.2 equivalent at all) —
+   still untested beyond confirming `codex-sandbox`'s own GID fix and the
+   create/policy/upload timing fix, both applied to that script already.
 4. Re-run `demos/base`'s hello-world step to settle the default-image/curl
    fix there.
 5. Separately, get this cluster's RHCL operator (or a different cluster) to
