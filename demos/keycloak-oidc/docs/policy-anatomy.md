@@ -39,7 +39,6 @@ network_policies:
         protocol: rest
         access: full
         enforcement: enforce
-        tls: terminate
 ```
 
 `filesystem_policy`/`landlock`/`process` are the same on every sandbox in
@@ -56,7 +55,7 @@ an endpoint:
 | `protocol` | `rest` for HTTP(S); other protocols (e.g. `websocket`) exist but aren't used in this demo. |
 | `access` | `read-only`, `read-write`, or `full`. |
 | `enforcement` | `enforce` actually blocks non-matching traffic; other values exist for audit-only modes. |
-| `tls` | `terminate` if OpenShell needs to see inside the TLS session (e.g. to inject credentials or do method/path-scoped `rules`). Omit it for plain pass-through. |
+| `tls` | Omit it — OpenShell auto-inspects TLS when the endpoint needs it (e.g. to inject credentials or do method/path-scoped `rules`). The old explicit `terminate`/`passthrough` values are gone as of OpenShell 0.1.0; don't set `tls: skip` as a replacement, since that disables inspection entirely. |
 | `rules` | Optional method/path allowlist scoped to this endpoint — see the built-in `github_ssh_over_https` group for an example (`GET /**/info/refs*`, `POST /**/git-upload-pack`). |
 
 A fresh sandbox ships with a bundle of built-in groups —
