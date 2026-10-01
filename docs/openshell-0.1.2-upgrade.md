@@ -175,54 +175,89 @@ available to do it from this session). `.env.example` still deliberately
 hasn't been updated, same reasoning as the `OPENSHELL_CHART_VERSION`
 cutover.
 
-## Second blocking finding — sandbox create blocks and gets rolled back (script-side, fixed)
+## Second blocking finding — sandbox create vs. the gateway's fail-closed rollback (a real race condition, fixed at the root cause)
 
 Separate from the filesystem-permission bug above: even with a correctly
 publicly-pullable, permission-fixed image, `scripts/15-provision-claude-sandbox.sh`
-run as-is still failed. Root cause, confirmed live:
+run as-is still failed. Root cause, confirmed live — this is a genuine race
+condition between two independent, uncoordinated timers:
 
-- A sandbox created with `--provider` flags attached has **no valid policy
-  yet** — a fresh sandbox does not get a usable built-in policy bundle the
-  way earlier OpenShell versions did (`openshell policy get <sandbox>
-  --base` returns "no active policy configured", not the documented
-  built-in bundle). Its `configuration_admission` reports `state:
-  "rejected"`, `error: "Effective configuration could not be activated;
-  replace the policy or repair attached providers"` — reproduced even with
-  **zero** providers attached, so this isn't a providers.v2/credential
-  issue, it's that a brand-new sandbox simply has no admitted policy until
-  one is explicitly set.
-- `openshell sandbox create` itself then sits in its own client-side
-  readiness-polling loop waiting for that non-existent Ready state —
-  anywhere from ~30 seconds to the full 5-minute client timeout observed
-  across different attempts — while the **gateway's own fail-closed
-  safeguard** independently rolls back and deletes the still-rejected
-  sandbox after its own timeout (`rolled back stale fail-closed
-  sandbox-runtime bootstrap` in the gateway logs). Whichever fires first,
-  the script's later `openshell policy set` call — the thing that would
-  actually fix the rejected configuration — never gets a chance to run
-  before the sandbox is gone.
-- The actual server-side `CreateSandbox` gRPC call completes in **under a
-  second** regardless (confirmed in gateway logs: `CreateSandbox request
-  completed successfully`) — the multi-minute delay is entirely the CLI's
-  own client-side wait, which `--detach` does not skip.
+- **Clock 1 (gateway, server-side):** a sandbox created with `--provider`
+  flags but no policy has **no valid policy at all** — a fresh sandbox
+  does not get a usable built-in policy bundle the way earlier OpenShell
+  versions did (`openshell policy get <sandbox> --base` returns "no active
+  policy configured", not the documented built-in bundle). Its
+  `configuration_admission` reports `state: "rejected"`, `error:
+  "Effective configuration could not be activated; replace the policy or
+  repair attached providers"` — reproduced even with **zero** providers
+  attached, so this isn't a providers.v2/credential issue. After some
+  variable amount of time in that rejected state (observed anywhere from
+  ~30 seconds to 5 minutes across otherwise-identical attempts — not a
+  fixed, documented timeout), the gateway's own "fail-closed" safeguard
+  decides the sandbox is unrecoverable and deletes it outright (`rolled
+  back stale fail-closed sandbox-runtime bootstrap` in the gateway logs).
+- **Clock 2 (CLI, client-side):** `openshell sandbox create` itself blocks,
+  polling for a Ready state that can never arrive without a policy — for
+  up to its own ~5-minute timeout. The *only* thing that stops Clock 1 is
+  calling `policy set` — but the original script's `sandbox create` call
+  ran in the foreground and didn't return control to the script (so
+  `policy set` could run) until it gave up.
+- Whichever clock reaches zero first determines the outcome. The actual
+  server-side `CreateSandbox` gRPC call completes in **under a second**
+  regardless (confirmed in gateway logs: `CreateSandbox request completed
+  successfully`) — the delay on both sides is independent client/server
+  polling logic, not the actual sandbox creation.
 
-**Fix, confirmed live repeatedly**: background the `sandbox create` call
-(`&`), `sleep 5`, then immediately call `policy set --wait` — this
-reliably wins the race every time tested, reaching `Ready` with a working
-agent binary. `--upload` had to come out of the `sandbox create` call
-entirely in the process: bundling it into a backgrounded/abandoned create
-was found to silently lose the uploaded file (confirmed: the 10-second
-cutoff in one test killed the client before "Uploading files..." printed).
-Config is now uploaded via a separate `openshell sandbox upload <name>
-<local> <dest>` call (positional, not the `local:remote` syntax `sandbox
-create --upload` uses) once the sandbox has an active policy, then token
-substitution proceeds as before. Applied to both
-`scripts/15-provision-claude-sandbox.sh` (verified end to end, unmodified,
-reaches `Ready` + `claude --version` works) and
+**Not a known, already-filed upstream issue, but closely related to two
+that are** (searched `NVIDIA/OpenShell` issues/PRs):
+- [#3145](https://github.com/NVIDIA/OpenShell/issues/3145) (accepted,
+  implemented via PR #3259) is the feature that *introduced* the
+  "no active policy → rejected, stable error state" behavior — its own
+  acceptance criteria say a policy-less sandbox should sit in a stable,
+  externally-visible error state "repairable... without first activating
+  the invalid workload configuration," i.e. exactly the state a
+  `policy set` is supposed to be able to fix at leisure.
+- [#3758](https://github.com/NVIDIA/OpenShell/issues/3758) (closed,
+  self-withdrawn by the reporter) hits the identical reaper mechanism and
+  log signature (`could not verify sandbox-runtime workload generation`
+  → `rolled back stale fail-closed sandbox-runtime bootstrap`), traced to
+  a hardcoded `SANDBOX_RUNTIME_BOOTSTRAP_GRACE = 5m` constant in
+  `crates/openshell-driver-kubernetes/src/driver.rs` — not configurable via
+  gateway.toml, Helm values, or any CLI flag — with no retry/backoff or
+  consecutive-failure threshold before reaping. That issue's trigger was
+  apiserver/etcd flakiness, not a missing policy, but it's the same reaper
+  killing a sandbox that hasn't reached "ready" inside a fixed window,
+  for any reason. Nobody appears to have reported the specific interaction
+  between #3145's new "stable, repairable error state" and this
+  unmodified, much older reaper — worth filing upstream.
+- Checked for a CLI escape hatch first: `sandbox create --help` has no
+  `--wait`/`--no-wait`/`--async`/`--timeout` flag, and `--detach` only
+  skips interactive attach, not the readiness poll.
+
+**The actual fix is not "win the race faster" — it's to avoid the race
+entirely.** `sandbox create` has its own `--policy <file>` flag (easy to
+miss: it's listed, undocumented-as-relevant-here, right next to `--from`
+and `--provider` in `--help`). Rendering the policy *before* calling
+`sandbox create` and passing it via `--policy` (alongside `--upload` for
+the MCP config / config.toml, in the same call) means the sandbox is never
+in the rejected state to begin with — there's no race to lose. Confirmed
+live, repeatedly: `sandbox create --provider ... --provider ... --policy
+... --upload ... --detach`, run as an ordinary foreground call with no
+backgrounding/sleep tricks, returns normally in ordinary image-pull time
+(~35s) and reaches `Ready` immediately, with a working `claude --version`.
+An earlier, since-discarded version of this fix (background the `sandbox
+create` call, `sleep 5`, then race `policy set` in immediately) also
+worked, reliably, across repeated tests — but it was a workaround that won
+the race, not a fix that removed it; `--policy`-at-creation is strictly
+better and is what's actually committed.
+
+Applied to both `scripts/15-provision-claude-sandbox.sh` (verified end to
+end, reaches `Ready` + `claude --version` works) and
 `scripts/14-provision-codex-sandbox.sh` (same mechanical fix applied for
-consistency, but that script still can't be run end to end — see the
-`openshell inference`/`inference.local` removal item below, a separate,
-pre-existing blocker in the same script).
+consistency, but that script still can't be run end to end to re-confirm
+it there — see the `openshell inference`/`inference.local` removal item
+below, a separate, pre-existing blocker in the same script). The README's
+"Provision the Claude Code harness" walkthrough was updated to match.
 
 ## Already fixed on this branch (verified locally, no cluster needed)
 

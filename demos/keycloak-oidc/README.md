@@ -1805,19 +1805,47 @@ MCP_CONFIG=$(mktemp --suffix=.json)
 } > "$MCP_CONFIG"
 ```
 
-Both providers and the config file all land in one `sandbox create` call —
-no separate `provider attach`/`sandbox upload` round trips. Use `--detach`
-here, not a trailing `-- true`: OpenShell 0.1.2 rejects `--upload` combined
-with a trailing `[COMMAND]` outright (confirmed live:
-`error: the argument '--upload <UPLOAD>' cannot be used with
-'[COMMAND]...'`) — `--detach` starts the sandbox's main process without
-attaching, which is what `-- true` was standing in for on 0.0.106:
+**3. The full policy, from the same Helm chart used for Codex** (`recipe=
+claude-code` instead of `recipe=codex`), rendered *before* creating the
+sandbox:
+
+```bash
+POLICY_TMPFILE=$(mktemp --suffix=.yaml)
+helm template "claude-${USER_ID}-policy" policies \
+  --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
+  --set llmHost="${LLM_HOST}" \
+  --set recipe=claude-code \
+  --set "mcpServers={${SERVER_NAMES}}" \
+  > "${POLICY_TMPFILE}"
+```
+
+Both providers, the config file, and this policy all land in one `sandbox
+create` call — no separate `provider attach`/`sandbox upload`/`policy set`
+round trips. This isn't just tidiness: confirmed live, a sandbox created
+with `--provider` flags but no `--policy` has no usable policy at all (no
+built-in bundle the way 0.0.106 had) and sits in a `ConfigurationInvalid`
+rejected state until one is set. `sandbox create` then blocks client-side
+waiting for a Ready state that can never arrive (anywhere from ~30s to its
+5-minute timeout), while the gateway's own independent fail-closed
+safeguard deletes the still-rejected sandbox on its own clock in the
+meantime (`rolled back stale fail-closed sandbox-runtime bootstrap` in the
+gateway's logs) — a race between two uncoordinated timers that a
+policy-less `sandbox create` reliably loses. Passing `--policy` (and
+`--upload`) at creation sidesteps the race entirely: confirmed live,
+repeatedly, `sandbox create --policy ... --upload ...` returns normally in
+ordinary image-pull time and reaches `Ready` immediately, no
+backgrounding/sleep tricks needed. Use `--detach` here, not a trailing
+`-- true`: OpenShell 0.1.2 rejects `--upload` combined with a trailing
+`[COMMAND]` outright — `--detach` starts the sandbox's main process
+without attaching, which is what `-- true` was standing in for on 0.0.106:
 
 ```bash
 openshell sandbox create --name "claude-${USER_ID}" \
   --provider byo-claude --provider "user-${USER_ID}" \
+  --policy "${POLICY_TMPFILE}" \
   --upload "${MCP_CONFIG}:/sandbox/.claude/mcp-servers.json" \
   --workspace "${USER_ID}" --detach || true
+rm -f "${POLICY_TMPFILE}"
 openshell sandbox provider attach "claude-${USER_ID}" byo-claude --workspace "${USER_ID}" || true
 openshell sandbox provider attach "claude-${USER_ID}" "user-${USER_ID}" --workspace "${USER_ID}" || true
 ```
@@ -1828,9 +1856,12 @@ if `claude-<id>` already existed — which would otherwise leave Claude Code
 with no LLM credential and no error raised anywhere. Attaching an
 already-attached provider is a harmless no-op — confirmed live
 (`Provider byo-claude is already attached to sandbox claude-bob.`) — so
-these two calls are safe to run unconditionally every time.
+these two calls are safe to run unconditionally every time. (The same
+"already existed" caveat applies to `--policy`/`--upload` above — neither
+re-applies against a pre-existing sandbox; delete it first to change its
+policy or MCP server list.)
 
-**3. Substitute the real token, with automatic retry.** A `sandbox exec`
+**4. Substitute the real token, with automatic retry.** A `sandbox exec`
 run immediately after `sandbox create`/`sandbox upload` has been observed
 live to occasionally no-op on a cold connection — the `sed` reports
 success (exit 0) but the file is left unchanged, apparently because the
@@ -1853,36 +1884,24 @@ done
 [ -z "$REMAINING" ] || { echo "failed to substitute USER_ACCESS_TOKEN after 3 attempts"; exit 1; }
 ```
 
-**4. The full policy, from the same Helm chart used for Codex** (`recipe=
-claude-code` instead of `recipe=codex`):
-
-```bash
-POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-helm template "claude-${USER_ID}-policy" policies \
-  --set openshellNamespace="${OPENSHELL_NAMESPACE}" \
-  --set llmHost="${LLM_HOST}" \
-  --set recipe=claude-code \
-  --set "mcpServers={${SERVER_NAMES}}" \
-  > "${POLICY_TMPFILE}"
-openshell policy set "claude-${USER_ID}" --policy "${POLICY_TMPFILE}" \
-  --workspace "${USER_ID}" --wait
-rm -f "${POLICY_TMPFILE}"
-```
-
 This renders the banker's full policy document from the
-[`policies/`](policies/) Helm chart and applies it with `openshell policy
-set`, which **replaces the sandbox's whole policy** rather than merging
-into it — the only sandbox-policy touch this guide makes, and it's safe
-only because the rendered document already includes everything the
-sandbox needs, including a `/usr/bin/curl` grant per MCP server (which is
-also what makes [the raw-protocol walkthrough](docs/raw-mcp-protocol-calls.md)
-in Annex A work, with no separate binary-permission step). See
+[`policies/`](policies/) Helm chart and passes it to `sandbox create
+--policy`, which **sets the sandbox's whole policy at creation** rather
+than merging into some other starting point — the only sandbox-policy
+touch this guide makes, and it's safe only because the rendered document
+already includes everything the sandbox needs, including a `/usr/bin/curl`
+grant per MCP server (which is also what makes [the raw-protocol
+walkthrough](docs/raw-mcp-protocol-calls.md) in Annex A work, with no
+separate binary-permission step). See
 [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for what a policy
-document contains, how `policy update`/`policy set`/`policy get` differ,
-and a worked example of granting a one-off endpoint both the merge way and
-the full-document way. Alice's extra `mcp-compatibility` grant is just one
-more name in her server list (`$SERVER_NAMES`, the script's second
-argument), not a separate command.
+document contains, how `policy update`/`policy set`/`policy get` differ
+(this flow uses `sandbox create --policy` instead of a separate `policy
+set` specifically to avoid the race described above — `policy set` against
+an already-created sandbox is still the right tool any other time you need
+to replace a sandbox's whole policy), and a worked example of granting a
+one-off endpoint both the merge way and the full-document way. Alice's
+extra `mcp-compatibility` grant is just one more name in her server list
+(`$SERVER_NAMES`, the script's second argument), not a separate command.
 
 > **This chart is a demo convenience, not a policy-management best
 > practice.** It exists to make one script readable instead of a dozen

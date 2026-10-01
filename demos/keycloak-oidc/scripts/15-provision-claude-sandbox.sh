@@ -4,9 +4,11 @@ set -euo pipefail
 # ("Run the demo") — see "Provision the Claude Code harness" there for the
 # narrated walkthrough of what this does and why. Same shape as
 # 14-provision-codex-sandbox.sh: a dedicated sandbox named claude-<user-id>
-# with both providers (byo-claude for the LLM, user-<id> for MCP calls)
-# attached at creation, /sandbox/.claude/mcp-servers.json baked in via
-# --upload, and the full claude-code-recipe policy applied at the end.
+# with both providers (byo-claude for the LLM, user-<id> for MCP calls),
+# the full claude-code-recipe policy, and /sandbox/.claude/mcp-servers.json
+# all passed to a single `sandbox create --provider --provider --policy
+# --upload` call (required on OpenShell 0.1.2 — see the comment above that
+# call for why policy can't be applied as a separate, later step).
 #
 # Usage: ./15-provision-claude-sandbox.sh [--gw] <user-id> <server-name>[,<server-name>...]
 #   e.g. ./15-provision-claude-sandbox.sh bob mcp-portfolio,mcp-crm-calendar,mcp-market-news,mcp-kyc-compliance
@@ -133,11 +135,10 @@ openshell provider create --name byo-claude --type byo-claude \
 # server, keyed by its short name with the "mcp-" prefix stripped — Claude's
 # tool names come out as mcp__<key>__<tool>, e.g.
 # mcp__portfolio__list_my_clients — the URL still uses the real service DNS
-# name) with a __USER_ACCESS_TOKEN__ placeholder, then create the sandbox
-# with it baked in via --upload, same as 14 bakes in Codex's config.toml.
-# The real token isn't known yet — user-<id> (which injects it as
-# $USER_ACCESS_TOKEN) is only attached once the sandbox exists — so this
-# is still a placeholder at creation time; step 3 substitutes it after.
+# name) with a __USER_ACCESS_TOKEN__ placeholder. The real token isn't known
+# yet — user-<id> (which injects it as $USER_ACCESS_TOKEN) is only attached
+# once the sandbox exists — so this is still a placeholder when it's
+# uploaded at creation time; step 4 substitutes it after.
 # ---------------------------------------------------------------------------
 MCP_CONFIG=$(mktemp --suffix=.json)
 if [ "$GW" = true ]; then
@@ -159,49 +160,29 @@ else
   } > "$MCP_CONFIG"
 fi
 
-SANDBOX_CREATE_ARGS=(
-  --name "$SANDBOX_NAME"
-  --provider byo-claude
-  --provider "user-${USER_ID}"
-  --workspace "${USER_ID}"
-)
-[ -z "$CLAUDE_IMAGE" ] || SANDBOX_CREATE_ARGS+=(--from "$CLAUDE_IMAGE")
-
-# The two `provider attach` calls right after are the fallback for the
-# "already existed" case: if $SANDBOX_NAME predates this script (e.g.
-# created some other way with only one of the two providers attached),
-# `sandbox create ... || true` above silently does nothing — it would
-# never actually attach byo-claude/user-<id>, leaving Claude Code with no
-# LLM credentials with no error raised. Attaching an already-attached
-# provider is a harmless no-op, so these are safe to run unconditionally.
-#
-# Backgrounded, not awaited: confirmed live on OpenShell 0.1.2 — a sandbox
-# created with --provider flags attached has no valid policy yet (a fresh
-# sandbox gets no usable built-in bundle the way 0.0.106 did), so
-# `sandbox create` sits in its own client-side readiness-polling loop for
-# anywhere from ~30s to 5 minutes before giving up, by which point the
-# gateway's own fail-closed safeguard has already deleted the still
-# "ConfigurationInvalid" sandbox out from under it. The server-side
-# CreateSandbox call itself completes in under a second regardless (seen
-# in gateway logs) — only the CLI's own post-create wait is slow. Racing
-# policy set in immediately after a short, fixed pause reliably wins:
-# confirmed live, Ready + a working `claude --version` every time tested.
-openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach &
-CREATE_PID=$!
-sleep 5
-openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
-openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
-
 # ---------------------------------------------------------------------------
-# Step 3: apply the full policy via the same Helm chart 14 uses for Codex
-# (recipe=claude-code instead of recipe=codex) — immediately, before doing
-# anything else, to beat the fail-closed window described above. Moved
-# ahead of the MCP-config upload and token substitution (formerly steps
-# 2/3) for the same reason: both need a Ready, non-rejected sandbox to
-# succeed reliably.
+# Step 3: render the full policy via the same Helm chart 14 uses for Codex
+# (recipe=claude-code instead of recipe=codex) *before* creating the
+# sandbox, so it can be passed to `sandbox create --policy` directly.
+#
+# This isn't just a reordering for tidiness: confirmed live on OpenShell
+# 0.1.2, a sandbox created with --provider flags but no --policy has no
+# usable policy at all (no built-in bundle the way 0.0.106 had) and sits in
+# a "ConfigurationInvalid" rejected state — `sandbox create` then blocks
+# client-side polling for a Ready state that can never arrive (anywhere
+# from ~30s to its 5-minute timeout), while the gateway's own independent
+# fail-closed safeguard deletes the still-rejected sandbox on its own clock
+# in the meantime (`rolled back stale fail-closed sandbox-runtime
+# bootstrap` in gateway logs) — a race between two uncoordinated timers
+# that a policy-less `sandbox create` reliably loses. Passing a real
+# --policy at creation time sidesteps the race entirely rather than trying
+# to win it: the sandbox is never in the rejected state to begin with.
+# Confirmed live, repeatedly: `sandbox create --policy ... --upload ...`
+# (same call, no backgrounding/sleep tricks needed) returns normally in
+# ~35s (ordinary image-pull time) and reaches Ready immediately.
 # ---------------------------------------------------------------------------
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
-POLICY_SET_ARGS=(
+POLICY_TEMPLATE_ARGS=(
   --set openshellNamespace="${OPENSHELL_NAMESPACE}"
   --set llmHost="${LLM_HOST}"
   --set recipe=claude-code
@@ -214,39 +195,46 @@ if [ "$GW" = true ]; then
   else
     GW_PORT=443
   fi
-  POLICY_SET_ARGS+=(
+  POLICY_TEMPLATE_ARGS+=(
     --set "mcpGatewayHost=${GW_HOST_PORT%%:*}"
     --set "mcpGatewayPort=${GW_PORT}"
   )
 else
-  POLICY_SET_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
+  POLICY_TEMPLATE_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
 fi
-helm template "${SANDBOX_NAME}-policy" policies "${POLICY_SET_ARGS[@]}" \
+helm template "${SANDBOX_NAME}-policy" policies "${POLICY_TEMPLATE_ARGS[@]}" \
   > "${POLICY_TMPFILE}"
-openshell policy set "$SANDBOX_NAME" --policy "${POLICY_TMPFILE}" \
-  --workspace "${USER_ID}" --wait
-rm -f "${POLICY_TMPFILE}"
 
-# Reap the backgrounded `sandbox create` from above — it has either already
-# returned or is still polling for a readiness signal that arrived via the
-# policy set above; either way we don't care about its own exit code.
-wait "$CREATE_PID" 2>/dev/null || true
-
-# ---------------------------------------------------------------------------
-# Step 4: upload the MCP config built in step 2, now that the sandbox has
-# an active policy. `sandbox create --upload` is no longer used here:
-# OpenShell 0.1.2 rejects `--upload` combined with a trailing [COMMAND]
-# outright, and bundling it into the backgrounded create above was found
-# live to silently lose the upload — the create's own client-side process
-# gets abandoned (see `wait` above) before the transfer completes. A
-# separate `sandbox upload` call after the sandbox is Ready is reliable.
-# ---------------------------------------------------------------------------
-openshell sandbox upload "$SANDBOX_NAME" "$MCP_CONFIG" /sandbox/.claude/mcp-servers.json \
+SANDBOX_CREATE_ARGS=(
+  --name "$SANDBOX_NAME"
+  --provider byo-claude
+  --provider "user-${USER_ID}"
+  --policy "$POLICY_TMPFILE"
+  --upload "${MCP_CONFIG}:/sandbox/.claude/mcp-servers.json"
   --workspace "${USER_ID}"
-rm -f "$MCP_CONFIG"
+)
+[ -z "$CLAUDE_IMAGE" ] || SANDBOX_CREATE_ARGS+=(--from "$CLAUDE_IMAGE")
+
+# Note: if $SANDBOX_NAME already exists, this is a no-op — the --policy and
+# --upload'd mcp-servers.json only take effect at creation time. Re-running
+# with a changed server list against an already-provisioned sandbox won't
+# update it; delete the sandbox first if you need to change its MCP
+# servers or policy.
+openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach || true
+rm -f "$POLICY_TMPFILE" "$MCP_CONFIG"
+
+# The two `provider attach` calls right after are the fallback for that
+# same "already existed" case: if $SANDBOX_NAME predates this script (e.g.
+# created some other way with only one of the two providers attached),
+# `sandbox create ... || true` above silently does nothing — it would
+# never actually attach byo-claude/user-<id>, leaving Claude Code with no
+# LLM credentials with no error raised. Attaching an already-attached
+# provider is a harmless no-op, so these are safe to run unconditionally.
+openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
+openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
 
 # ---------------------------------------------------------------------------
-# Step 5: substitute the real $USER_ACCESS_TOKEN into the uploaded file.
+# Step 4: substitute the real $USER_ACCESS_TOKEN into the uploaded file.
 # Don't construct the JSON inside `sandbox exec` in the first place (a
 # printf/heredoc nested in `bash -c '...'` is fragile — one missed
 # %s/argument pair silently breaks the JSON, and heredocs reliably hang
