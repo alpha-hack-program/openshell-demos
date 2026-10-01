@@ -63,7 +63,11 @@ impl ParrotClient {
         if let Some(name) = explicit {
             return Ok(Some(name.to_string()));
         }
-        let workspaces = self.inner.list_workspaces(ListOptions::default()).await?;
+        let workspaces = self
+            .inner
+            .list_workspaces(ListOptions::default())
+            .collect_all()
+            .await?;
         match workspaces.as_slice() {
             [] => Ok(None),
             [only] => Ok(Some(only.name.clone())),

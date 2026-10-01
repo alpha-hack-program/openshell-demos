@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt;
+use openshell_sdk::raw::proto;
 use openshell_sdk::raw::proto::exec_sandbox_event::Payload;
 use openshell_sdk::raw::ExecSandboxRequest;
 use openshell_sdk::SdkError;
@@ -72,22 +73,33 @@ impl ParrotClient {
         cmd: &[String],
         opts: StreamedExecOptions,
     ) -> Result<ExecStream> {
-        let sandbox = match workspace {
-            Some(workspace) => self.sdk().workspace(workspace).get_sandbox(name).await?,
-            None => self.sdk().get_sandbox(name).await?,
+        // Fail fast with a clear "not found" / "not a member" error before
+        // opening the exec stream — same existence/membership check as
+        // before, even though the RPC itself now addresses the sandbox by
+        // name rather than by the id this used to return.
+        match workspace {
+            Some(workspace) => {
+                self.sdk().workspace(workspace).get_sandbox(name).await?;
+            }
+            None => {
+                self.sdk().get_sandbox(name).await?;
+            }
         };
         let request = ExecSandboxRequest {
-            sandbox_id: sandbox.id,
+            sandbox: name.to_string(),
+            workspace_scope: Some(proto::workspace_selector(workspace.unwrap_or("default"))),
             command: cmd.to_vec(),
             workdir: opts.workdir.unwrap_or_default(),
             environment: opts.environment,
-            timeout_seconds: opts
-                .timeout
-                .map_or(0, |d| u32::try_from(d.as_secs()).unwrap_or(u32::MAX)),
+            execution_timeout: opts.timeout.map(|d| prost_types::Duration {
+                seconds: i64::try_from(d.as_secs()).unwrap_or(i64::MAX),
+                nanos: i32::try_from(d.subsec_nanos()).unwrap_or(0),
+            }),
             stdin: Vec::new(),
             tty: false,
             cols: 0,
             rows: 0,
+            ..Default::default()
         };
 
         // Open the stream under the same retry-once-on-`Unauthenticated`
