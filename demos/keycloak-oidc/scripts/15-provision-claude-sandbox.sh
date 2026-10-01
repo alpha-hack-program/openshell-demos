@@ -180,7 +180,13 @@ SANDBOX_CREATE_ARGS=(
 # never actually attach byo-claude/user-<id>, leaving Claude Code with no
 # LLM credentials with no error raised. Attaching an already-attached
 # provider is a harmless no-op, so these are safe to run unconditionally.
-openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" -- true || true
+#
+# --detach, not `-- true`: OpenShell 0.1.2 rejects `--upload` combined with
+# a trailing [COMMAND] outright ("the argument '--upload <UPLOAD>' cannot
+# be used with '[COMMAND]...'") — confirmed live. --detach starts the
+# sandbox's main process without attaching, which is what `-- true` was
+# standing in for anyway.
+openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach || true
 openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
 openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
 

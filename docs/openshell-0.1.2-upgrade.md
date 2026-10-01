@@ -1,11 +1,13 @@
 # OpenShell 0.0.106 → 0.1.2 upgrade — prep notes
 
-Status: **research/prep complete, demo cutover pending a live cluster.**
-Branch: `0.1.2-upgrade`. Do not bump `OPENSHELL_CHART_VERSION` or declare the
-demos upgraded until the remaining items below are verified against a real
-OpenShift cluster — several of them (Helm install behavior, OIDC flow,
-sandbox policy enforcement) can't be confirmed from docs or local tooling
-alone.
+Status: **live-tested against a fresh OpenShift cluster (sandbox341,
+OCP 4.22.15) on 2026-10-01.** Part I steps 1–4 (Keycloak, gateway install,
+OIDC login, Providers v2 onboarding, MCP servers) pass on 0.1.2 with the
+fixes below. Step 5 (sandbox provisioning) is **blocked** by a real 0.1.2
+regression in the Kubernetes compute driver — see "Blocking finding" below.
+Branch: `0.1.2-upgrade`. **Do not bump `OPENSHELL_CHART_VERSION` or declare
+the demos upgraded** until that blocker is resolved (upstream fix, or an
+image workaround) and step 5 onward is re-verified.
 
 This covers `demos/base`, `demos/keycloak-oidc`, and `util/parrot`. 0.1.0 is
 where essentially all the breaking changes land; 0.1.1 and 0.1.2 are patch
@@ -22,6 +24,55 @@ contact): `helm show values oci://ghcr.io/nvidia/openshell/helm-chart
 0.1.2 CLI binary's own `--help` output (extracted from the Fedora rpm
 release asset), the vendored `.proto`/Rust source at the `openshell-sdk`
 git tag, and `podman run` against the new default sandbox image.
+
+## Blocking finding — custom sandbox images fail to provision (live, confirmed root cause)
+
+**Every custom sandbox image used by this demo (`CLAUDE_IMAGE`, `CODEX_IMAGE`,
+and by extension the audit/garak variants built on top of them) fails to
+provision under 0.1.2**, even though they were fine on 0.0.106. Confirmed
+live on `keycloak-oidc-demo` namespace (OpenShift SCC UID range
+`1000910000/10000`):
+
+- `openshell sandbox create --from quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36 ...`
+  creates the Sandbox resource, but the pod sits at `Init:Error` on the
+  `workspace-init` container with `Error: × Permission denied (os error 13)`,
+  and the gateway logs `rolled back stale fail-closed sandbox-runtime
+  bootstrap`.
+- Root cause, traced into the actual 0.1.2 gateway source
+  (`crates/openshell-driver-kubernetes/src/driver.rs`,
+  `resolve_sandbox_identity_in_namespace`): the Kubernetes compute driver is
+  **new** in 0.1.2 in reading the namespace's `openshift.io/sa.scc.uid-range`
+  / `openshift.io/sa.scc.supplemental-groups` annotations and forcing
+  **both** `runAsUser` *and* `runAsGroup` on every sandbox pod (including the
+  `workspace-init` init container that seeds the PVC from the image) to
+  values derived from those annotations — in this case UID **and** GID
+  `1000910000`.
+- The images themselves do everything OpenShift's own "support arbitrary
+  user IDs" convention asks for: `/sandbox` is `drwxrwx--- uid=1001(sandbox)
+  gid=0(root)` (confirmed via `podman inspect`/`stat` on both
+  `claude-sandbox:0.3.36` and the `codex` image — identical layout). That
+  convention relies on the **group** staying `0` regardless of which
+  arbitrary UID a pod ends up with. 0.1.2's driver instead sets the group to
+  the *same* namespace-derived value as the UID (`1000910000`, not `0`),
+  which isn't a member of the image's `root`-owned directory — hence
+  `Permission denied` reading `/sandbox` to seed the workspace.
+- This is not fixable from this repo's side: `sandbox_gid` can be overridden
+  via a `gateway.toml` driver override, but the driver's own validation
+  (`openshell_policy::MIN_SANDBOX_UID..=MAX_SANDBOX_UID`, i.e. `[1,
+  u32::MAX-1]`) rejects `0` outright, so there's no way to configure the
+  group OpenShift's own convention actually needs. Confirmed the **stock**
+  default image (`nvcr.io/nvidia/base/ubuntu:24.04`, no pre-existing
+  `/sandbox` content to seed) provisions fine under the same namespace — the
+  bug only surfaces for images that ship real content under `/sandbox`.
+- **This looks like an upstream OpenShell bug**, not a demo misconfiguration:
+  the new OpenShift-SCC-awareness feature breaks the exact convention
+  OpenShift itself documents for arbitrary-UID compatibility. Worth filing
+  against `NVIDIA/OpenShell` before spending more effort here.
+- Until that's fixed (or there's a documented workaround), **step 5
+  (`scripts/15-provision-claude-sandbox.sh`) and step 6
+  (`scripts/14-provision-codex-sandbox.sh`), plus everything downstream of
+  them (scenes 1–7, Part II red-team, Annex A), cannot be completed on
+  0.1.2** with this demo's current images.
 
 ## Already fixed on this branch (verified locally, no cluster needed)
 
@@ -51,6 +102,67 @@ git tag, and `podman run` against the new default sandbox image.
   inspection).
 - **`demos/keycloak-oidc/docs/policy-anatomy.md`**: updated the matching
   example snippet and the `tls` field's table description to match.
+
+## Live-verified on 0.1.2 (sandbox341, fresh install, Part I steps 1–4)
+
+- **Step 1 (Keycloak)**: RHBK operator + Keycloak CR + realm import —
+  unaffected by the OpenShell version, passed as documented.
+- **Step 2a (Helm install)**: `helm upgrade --install openshell
+  oci://ghcr.io/nvidia/openshell/helm-chart --version 0.1.2 -f
+  helm/values-certmanager.yaml ...` succeeded first try with the existing
+  values file, no changes needed — confirms the earlier `helm template`
+  prediction. Gateway pod came up, Route created, cert-manager-issued certs
+  worked.
+- **Step 2b/2c (`gateway add` + OIDC login)**: worked unchanged, including
+  the Playwright-driven headless login.
+- **Step 2d (Providers v2) — found a real change**: `openshell settings set
+  --global --key providers_v2_enabled --value true` now fails with `unknown
+  setting key 'providers_v2_enabled'. Allowed keys: ocsf_json_enabled,
+  ocsf_schema_version, agent_policy_proposals_enabled,
+  proposal_approval_mode`. Providers v2 behavior (the whole `provider
+  profile import` → `provider create` → `provider refresh
+  configure/rotate` flow) works regardless — **this step is gone/obsolete
+  in 0.1.2, Providers v2 is just always-on.** Skip it when updating the
+  guide; no replacement command needed.
+- **Step 3 (`onboard` tool, all three bankers)**: ran headlessly via
+  Playwright exactly as documented, including workspace create/member-add.
+  `openshell provider refresh status` showed `STATUS: refreshed` for
+  alice/bob/charlie — fully working on 0.1.2, no script changes needed.
+- **Step 4a (mcp-gateway / RHCL)** — **environment gap, not a 0.1.2
+  regression**: this cluster's RHCL operator (`rhcl-operator.v1.4.3`, the
+  only channel OperatorHub offers) has no `mcp.kuadrant.io/v1alpha1`
+  `MCPGatewayExtension` CRD at all (`oc get crd | grep mcp` → nothing), so
+  `helm install ./mcp-gateway` fails with `no matches for kind
+  "MCPGatewayExtension"`. Not related to the OpenShell version — this is an
+  RHCL/Kuadrant version gap on this specific cluster. Fell back to the
+  guide's documented direct-access alternative
+  (`MCP_GATEWAY_ENABLED=false`/`MCP_GATEWAY_AUTH_ENABLED=false`) and
+  continued; didn't investigate further since it's orthogonal to this task.
+- **Step 4b (MCP servers, direct access)**: `./scripts/06-deploy-mcp-servers.sh`
+  worked unchanged. Hit the exact fresh-cluster embeddings cold-start
+  CrashLoopBackOff the README already documents
+  (`mcp-market-news`/`mcp-kyc-compliance` failing until
+  `jina-embeddings-v3-cpu-predictor` finishes loading) — self-healed within
+  a few minutes with no intervention, confirming that troubleshooting note
+  is still accurate on 0.1.2.
+- **`sandbox create --upload ... -- true` — found a real breaking change,
+  not in NVIDIA's docs**: 0.1.2 flat-out rejects `--upload` combined with a
+  trailing `[COMMAND]` (`error: the argument '--upload <UPLOAD>' cannot be
+  used with '[COMMAND]...'`), regardless of whether `--from` is also given.
+  Fixed by replacing `-- true` with `--detach` everywhere this pattern
+  appears — confirmed live that `--detach` produces the same "create +
+  upload, don't attach" behavior `-- true` used to. Fixed in
+  `scripts/15-provision-claude-sandbox.sh`, `scripts/14-provision-codex-sandbox.sh`,
+  and the matching README snippet (step 5, "Provision the Claude Code
+  harness"). This pattern is otherwise unused in `demos/base`.
+- **Default sandbox image lacking `curl`**: same finding as `demos/base`'s
+  hello-world (see below), but it also silently affected
+  `scripts/15-provision-claude-sandbox.sh`, whose own comment ("Claude Code
+  is pre-installed in the chart's default sandbox image") is now false.
+  Added `CLAUDE_IMAGE=quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36` to
+  `.env` (this repo's own known-good image, already used elsewhere in
+  `docs/evalhub-redteam.md`) as a required override — except that image hits
+  the blocking finding above, so this alone isn't sufficient yet.
 
 ## Confirmed non-issues (don't touch these)
 
@@ -190,17 +302,26 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
   not-yet-removed features, but "probably" isn't good enough to assert in
   a guide).
 
-## Suggested order once cluster access is available
+## Remaining work, in order
 
-1. Fresh Helm install of the keycloak-oidc stack at 0.1.2 (not an in-place
-   upgrade — simpler, and this repo's docs already assume fresh installs).
-2. Walk Part I of the README literally (per house rule: run the README's
-   commands, not `scripts/NN-*.sh`) through OIDC login and `gateway add`.
-3. Provision Claude Code sandbox + policy (`policies/` chart) — confirms the
-   `tls: terminate` removal didn't regress anything.
-4. Redesign and provision the Codex BYO-LLM flow against the new
-   provider-profile pattern.
-5. Re-run `demos/base`'s hello-world step to settle the default-image fix.
+1. **Resolve the blocking finding above** — either an upstream OpenShell fix
+   (file the bug against `NVIDIA/OpenShell`), a documented workaround if one
+   surfaces, or confirmation that a differently-built image (group-0-free,
+   e.g. owning `/sandbox` world-readable instead of relying on the GID-0
+   convention) sidesteps it. Nothing past step 5 can be tested without this.
+2. Once sandboxes provision again: re-run step 5 (Claude Code + DeepSeek's
+   Anthropic-compatible endpoint, `https://api.deepseek.com/anthropic`) and
+   confirm the full scene walkthrough (policy enforcement, MCP isolation
+   between alice/bob/charlie) still holds on 0.1.2.
+3. Redesign and provision the Codex BYO-LLM flow (step 6 / Annex A) against
+   the new provider-profile pattern, replacing the removed `openshell
+   inference`/`inference.local` mechanism — still untested, see the item
+   below.
+4. Re-run `demos/base`'s hello-world step to settle the default-image/curl
+   fix there.
+5. Separately, get this cluster's RHCL operator (or a different cluster) to
+   a version that actually ships `MCPGatewayExtension`, to test the
+   gateway-routed MCP path (`--gw`) and Scene 4d, which direct-access skips.
 6. Only then: bump `OPENSHELL_CHART_VERSION` everywhere, update the
    historical-claim docs that turned out to need it, and merge
    `0.1.2-upgrade` back into `main`.

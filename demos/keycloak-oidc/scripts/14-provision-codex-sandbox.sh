@@ -191,13 +191,18 @@ fi
 # with a changed server list against an already-provisioned sandbox won't
 # update it; delete the sandbox first if you need to change its MCP
 # servers.
+# --detach, not `-- true`: OpenShell 0.1.2 rejects `--upload` combined with
+# a trailing [COMMAND] outright ("the argument '--upload <UPLOAD>' cannot
+# be used with '[COMMAND]...'") — confirmed live. --detach starts the
+# sandbox's main process without attaching, which is what `-- true` was
+# standing in for anyway.
 openshell sandbox create --name "$SANDBOX_NAME" \
   --provider byo-codex \
   --provider "user-${USER_ID}" \
   --from "${CODEX_IMAGE}" \
   --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml" \
   --workspace "${USER_ID}" \
-  -- true || true
+  --detach || true
 
 rm -f "$CODEX_CONFIG"
 

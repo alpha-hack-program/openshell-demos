@@ -1806,13 +1806,18 @@ MCP_CONFIG=$(mktemp --suffix=.json)
 ```
 
 Both providers and the config file all land in one `sandbox create` call —
-no separate `provider attach`/`sandbox upload` round trips:
+no separate `provider attach`/`sandbox upload` round trips. Use `--detach`
+here, not a trailing `-- true`: OpenShell 0.1.2 rejects `--upload` combined
+with a trailing `[COMMAND]` outright (confirmed live:
+`error: the argument '--upload <UPLOAD>' cannot be used with
+'[COMMAND]...'`) — `--detach` starts the sandbox's main process without
+attaching, which is what `-- true` was standing in for on 0.0.106:
 
 ```bash
 openshell sandbox create --name "claude-${USER_ID}" \
   --provider byo-claude --provider "user-${USER_ID}" \
   --upload "${MCP_CONFIG}:/sandbox/.claude/mcp-servers.json" \
-  --workspace "${USER_ID}" -- true || true
+  --workspace "${USER_ID}" --detach || true
 openshell sandbox provider attach "claude-${USER_ID}" byo-claude --workspace "${USER_ID}" || true
 openshell sandbox provider attach "claude-${USER_ID}" "user-${USER_ID}" --workspace "${USER_ID}" || true
 ```
