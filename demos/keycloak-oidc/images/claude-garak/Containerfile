@@ -10,7 +10,12 @@
 #
 # Base image: confirmed — includes claude CLI (2.1.220 as of this writing)
 # at /usr/local/bin/claude and satisfies OpenShell sandbox requirements.
-FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36
+#
+# Built on ../claude-sandbox, not the raw upstream image directly — that
+# layer carries the chmod fix OpenShell 0.1.2 needs to seed a sandbox's
+# workspace on OpenShift at all (see ../claude-sandbox/Containerfile and
+# docs/openshell-0.1.2-upgrade.md). Build/push that image first.
+FROM quay.io/atarazana/claude-sandbox:0.4.0
 
 COPY agent-proxy /usr/local/bin/agent-proxy
 

@@ -12,7 +12,12 @@
 # namespace tools, required for MCP via the Responses API).
 # The image already satisfies OpenShell's sandbox requirements
 # (non-root user, /sandbox workspace, iproute2).
-FROM quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012
+#
+# Built on ../codex-sandbox, not the raw upstream image directly — that
+# layer carries the chmod fix OpenShell 0.1.2 needs to seed a sandbox's
+# workspace on OpenShift at all (see ../codex-sandbox/Containerfile and
+# docs/openshell-0.1.2-upgrade.md). Build/push that image first.
+FROM quay.io/atarazana/codex-sandbox:0.4.0
 
 COPY agent-proxy /usr/local/bin/agent-proxy
 

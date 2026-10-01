@@ -6,7 +6,12 @@
 # before the sandbox is ever created, is the only way to get a copy of it
 # into a path nothing inside a running sandbox can replace.
 # See demos/keycloak-oidc/docs/prometheus-scraping.md.
-FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.3.36
+#
+# Built on ../claude-sandbox, not the raw upstream image directly — that
+# layer carries the chmod fix OpenShell 0.1.2 needs to seed a sandbox's
+# workspace on OpenShift at all (see ../claude-sandbox/Containerfile and
+# docs/openshell-0.1.2-upgrade.md). Build/push that image first.
+FROM quay.io/atarazana/claude-sandbox:0.4.0
 
 # Copied here before build — see .gitignore in this directory.
 COPY --chmod=755 session-auditor /usr/local/bin/session-auditor

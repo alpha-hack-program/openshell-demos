@@ -3,7 +3,15 @@
 # read_only under OpenShell's default filesystem_policy, so this is the
 # only way to place a binary nothing inside a running sandbox can replace.
 # See demos/keycloak-oidc/docs/prometheus-scraping.md.
-FROM quay.io/aipcc/base-images/agentic/codex:0.0.1-1786355012
+#
+# Built on ../codex-sandbox, not the raw upstream image directly — that
+# layer carries the chmod fix OpenShell 0.1.2 needs to seed a sandbox's
+# workspace on OpenShift at all (see ../codex-sandbox/Containerfile and
+# docs/openshell-0.1.2-upgrade.md). Build/push that image first. Also
+# note the upstream image moved repos at this tag: the old
+# base-images/agentic/codex path 404s at 0.4.0, replaced by
+# agentic-ci/codex-sandbox.
+FROM quay.io/atarazana/codex-sandbox:0.4.0
 
 # Copied here before build — see .gitignore in this directory.
 COPY --chmod=755 session-auditor /usr/local/bin/session-auditor

@@ -133,11 +133,38 @@ custom sandbox image meant to run on OpenShell 0.1.2 + OpenShift. Doesn't
 require an upstream fix — still worth filing upstream so other users don't
 have to rediscover this, and so the docs gap gets closed, but it's no
 longer a hard blocker for this demo.
-- Until that's fixed (or there's a documented workaround), **step 5
-  (`scripts/15-provision-claude-sandbox.sh`) and step 6
-  (`scripts/14-provision-codex-sandbox.sh`), plus everything downstream of
-  them (scenes 1–7, Part II red-team, Annex A), cannot be completed on
-  0.1.2** with this demo's current images.
+## Resolution — rebuild our own claude-sandbox/codex-sandbox base images
+
+Rather than waiting on an upstream fix, or relying on upstream republishing
+`quay.io/aipcc/...` with the chmod fix, this repo now builds and owns its
+own patched base images, the same pattern already used for
+`claude-audit`/`claude-garak`/`codex-audit`/`codex-garak` (all of which
+already layer Containerfiles on top of the upstream images):
+
+- `demos/keycloak-oidc/images/claude-sandbox/Containerfile` — `FROM
+  quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0` + the `chmod -R a+rX
+  /sandbox` fix. Publishes to `quay.io/atarazana/claude-sandbox:0.4.0`.
+- `demos/keycloak-oidc/images/codex-sandbox/Containerfile` — same fix on
+  `quay.io/aipcc/agentic-ci/codex-sandbox:0.4.0`, publishing to
+  `quay.io/atarazana/codex-sandbox:0.4.0`. Both the codex tag and fix
+  confirmed live the same way as claude's (`codex --version` →
+  `codex-cli 0.153.4` inside a sandbox built from a throwaway in-cluster
+  copy of this image).
+- `claude-audit`, `claude-garak`, `codex-audit`, `codex-garak`'s
+  Containerfiles now `FROM` our new images instead of the raw upstream
+  ones (and picked up the 0.3.36→0.4.0 / old-repo-path→agentic-ci bumps in
+  the same edit) — one fix, inherited everywhere, instead of four places
+  to patch separately.
+- `demos/keycloak-oidc/.env`'s `CLAUDE_IMAGE`/`CODEX_IMAGE` now point at
+  `quay.io/atarazana/{claude,codex}-sandbox:0.4.0`.
+
+**Not yet published** — building and pushing to `quay.io/atarazana`
+requires registry credentials this session doesn't have. Until someone
+with push access runs the `podman build`/`podman push` commands in each
+new Containerfile's header comment, `.env`'s image references won't
+actually pull. `.env.example` deliberately hasn't been updated yet either,
+same reasoning as the `OPENSHELL_CHART_VERSION` cutover — do that once the
+images are live and step 5 has been re-run against them.
 
 ## Already fixed on this branch (verified locally, no cluster needed)
 
@@ -369,17 +396,17 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
 
 ## Remaining work, in order
 
-1. **Rebuild `CLAUDE_IMAGE`/`CODEX_IMAGE` (and the audit/garak variants built
-   on top of them) with `RUN chmod -R a+rX /sandbox` added after the final
-   `USER` switch**, confirmed live to fix the provisioning failure (see
-   "Workaround confirmed live" above). This needs to happen wherever those
-   images are actually built/published (not this repo — they're upstream
-   `quay.io/aipcc/...` images), then `CLAUDE_IMAGE`/`CODEX_IMAGE` in `.env`
-   point at the rebuilt tags. Also worth filing upstream against
+1. **Publish `quay.io/atarazana/claude-sandbox:0.4.0` and
+   `quay.io/atarazana/codex-sandbox:0.4.0`** — someone with push access to
+   that registry needs to run the `podman build`/`podman push` commands in
+   `demos/keycloak-oidc/images/{claude,codex}-sandbox/Containerfile`'s
+   header comment. Both images and the fix are already confirmed live (see
+   "Resolution" above); this is purely the publish step this session
+   couldn't do itself. Also worth filing upstream against
    `NVIDIA/OpenShell` even with the workaround in hand, since the
    driver/docs gap will bite the next person who builds a GID-0-convention
    image.
-2. Once the real images are rebuilt: re-run step 5 (Claude Code + DeepSeek's
+2. Once published: re-run step 5 (Claude Code + DeepSeek's
    Anthropic-compatible endpoint, `https://api.deepseek.com/anthropic`) and
    confirm the full scene walkthrough (policy enforcement, MCP isolation
    between alice/bob/charlie) still holds on 0.1.2.
