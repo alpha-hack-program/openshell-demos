@@ -13,6 +13,17 @@ use std::{
 // swappable for a friendlier one; the OTLP endpoint shouldn't be
 // redirectable or removable (denial of the audit signal) or pointed
 // somewhere else.
+//
+// otlp-endpoint.txt must be the collector's **fully qualified** Service
+// name, which also means these images are bound to the namespace it names.
+// A bare `audit-collector` does not work: the supervisor's policy DNS does
+// not resolve short names, while the FQDN it does resolve is refused
+// unless the provider profile authorizes that exact string. Getting this
+// wrong fails silently — curl can't connect, the hook swallows the error
+// and still exits 0, and the only symptom is metrics that never arrive.
+// Keep this in sync with the `audit-collector...` endpoint in
+// demos/keycloak-oidc/providers/session-auditor-*-profile.yaml, and
+// rebuild both images if OPENSHELL_NAMESPACE changes.
 const CLASSIFICATION_PROMPT: &str = include_str!("../prompt.txt");
 const OTLP_ENDPOINT: &str = include_str!("../otlp-endpoint.txt");
 

@@ -60,12 +60,16 @@ endpoints:
     protocol: rest
     access: read-write
     enforcement: enforce
-  # Matches the short, in-namespace DNS name compiled into
-  # session-auditor's binary (util/session-auditor/otlp-endpoint.txt) —
-  # keep these in sync; the demos/keycloak-oidc/audit-collector chart's
-  # release name is fixed to "audit" so the Service is always named
-  # exactly this.
-  - host: "audit-collector"
+  # Must match, character for character, the endpoint compiled into
+  # session-auditor (util/session-auditor/otlp-endpoint.txt). It has to be
+  # the FQDN, not the bare Service name: the supervisor's policy DNS does
+  # not resolve short names, and the FQDN it does resolve is refused unless
+  # authorized here by that exact string. Verified live — a bare
+  # `audit-collector` gives `Could not resolve host`, the FQDN without this
+  # entry gives `Permission denied`, and with it the collector answers
+  # `HTTP/1.1 200 OK`. The audit-collector chart's release name is fixed to
+  # "audit", so the Service is always named exactly this.
+  - host: "audit-collector.<openshell-namespace>.svc.cluster.local"
     port: 4318
     protocol: rest
     access: read-write

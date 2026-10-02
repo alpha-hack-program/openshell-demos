@@ -384,6 +384,63 @@ current placeholder (`--upload` does not re-apply to an existing sandbox).
 To check: compare the value in the file against `printenv USER_ACCESS_TOKEN`
 inside the sandbox — they must be identical.
 
+## Scene 7 (audit trail) — working, after four stacked silent failures
+
+Scene 7 produced no audit signal at all, and every layer of the failure was
+invisible: the sandbox was `Ready`, the agent answered prompts correctly,
+Prometheus was up and scraping the collector, and the hook exited 0. Four
+separate bugs had to be cleared.
+
+**1. The audited sandbox ran the wrong image.**
+`16-provision-audited-sandbox.sh` exports `CLAUDE_IMAGE`/`CODEX_IMAGE` as
+the `*-audit` image before invoking 14/15, but those scripts then run
+`set -a; source .env`, which reassigns both back to the plain image.
+`SANDBOX_PREFIX` isn't in `.env`, so it survives — producing a correctly
+named `aud-` sandbox with no `session-auditor` binary in it. Both scripts
+now preserve a caller-supplied image override across the `.env` load.
+
+**2. The auditor's egress was denied by binary identity.** `session-auditor`
+doesn't open sockets itself — it shells out to `curl` for both the
+classification call and the OTLP POST. The profiles listed only
+`/usr/local/bin/session-auditor`, and 0.1.2's supervisor enforces
+`require_binary_identity:true`, so every request was denied. `curl -f`
+fails, the hook swallows the error, exit code stays 0. Added
+`/usr/bin/curl` to both auditor profiles.
+
+**3. Short Service names don't resolve in a sandbox.** The binary posted to
+`http://audit-collector:4318`. The supervisor's policy DNS doesn't resolve
+bare Service names (`Could not resolve host`), while the FQDN it *does*
+resolve was refused (`Permission denied`) because the profile authorized
+the literal string `audit-collector`. Both the baked-in endpoint and the
+profile entry are now the FQDN; `scripts/16` substitutes
+`<openshell-namespace>` into the profile the same way `onboard` does for
+the user profile. Note this binds the published audit images to a
+namespace — deliberate, because the endpoint is compile-time by design
+(an agent must not be able to redirect or silence its own audit signal),
+so it cannot become an env var.
+
+**4. Same tag, stale image.** The Makefile tagged images by base-image
+version alone, so rebuilding with changed auditor content produced an
+identical tag; sandbox pods run `imagePullPolicy: IfNotPresent`, so nodes
+kept serving the cached binary and the endpoint fix appeared to do nothing
+(verified by grepping the running binary — still the old short name).
+Images are now tagged `<base>-auditor<crate-version>`, e.g.
+`claude-audit:0.4.0-auditor0.1.5`.
+
+**Verified live, gateway-routed:** benign turn →
+`agent_session_started` + `agent_turn_heartbeat`; forced overreach →
+`session_compliance_risk_score{sandbox="aud-claude-bob",workspace="bob"} 2`,
+surfaced by the dashboard API as
+`risk_level: "blocked_attempt"` — the amber verdict the README predicts,
+and the ceiling for this scene since the server-side check denies the call
+outright.
+
+**Open:** the dashboard reports `mcp_servers: []`, so the graph has no
+user → sandbox → server edges yet. Partly the known trace-consumption
+follow-up, and partly inherent to `--gw`: every call goes to one broker
+endpoint, so per-server edges collapse unless the edges are derived from
+tool-name prefixes instead of destination hosts.
+
 ## Already fixed on this branch (verified locally, no cluster needed)
 
 - **`util/parrot`**: ran `make bump-openshell-sdk OPENSHELL_SDK_TAG=v0.1.2`,

@@ -43,12 +43,12 @@ endpoints:
     protocol: rest
     access: read-write
     enforcement: enforce
-  # Matches the short, in-namespace DNS name compiled into
-  # session-auditor's binary (util/session-auditor/otlp-endpoint.txt) —
-  # keep these in sync; the demos/keycloak-oidc/audit-collector chart's
-  # release name is fixed to "audit" so the Service is always named
-  # exactly this.
-  - host: "audit-collector"
+  # Must match, character for character, the endpoint compiled into
+  # session-auditor (util/session-auditor/otlp-endpoint.txt), and must be
+  # the FQDN — see the same comment in
+  # session-auditor-anthropic-profile.yaml for why a bare Service name
+  # cannot work here.
+  - host: "audit-collector.<openshell-namespace>.svc.cluster.local"
     port: 4318
     protocol: rest
     access: read-write

@@ -15,6 +15,18 @@ CODEX_IMAGE_DIR  := ../../demos/keycloak-oidc/images/codex-audit
 CLAUDE_BASE_TAG  := $(lastword $(subst :, ,$(shell grep '^FROM' $(CLAUDE_IMAGE_DIR)/Containerfile)))
 CODEX_BASE_TAG   := $(lastword $(subst :, ,$(shell grep '^FROM' $(CODEX_IMAGE_DIR)/Containerfile)))
 
+# This crate's own version, appended to the base tag below. Tagging by base
+# image alone is not enough: rebuilding the same base with changed auditor
+# content (a new prompt.txt, a new otlp-endpoint.txt, a code fix) produces
+# an identical tag, and because sandbox pods run imagePullPolicy
+# IfNotPresent any node that already cached that tag keeps serving the old
+# binary. That failure is silent — the pod is Ready, the agent answers
+# normally, and only the audit signal is missing. Bump the crate version
+# (make release-patch) whenever the auditor's baked-in content changes.
+CRATE_VERSION    := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+CLAUDE_TAG       := $(CLAUDE_BASE_TAG)-auditor$(CRATE_VERSION)
+CODEX_TAG        := $(CODEX_BASE_TAG)-auditor$(CRATE_VERSION)
+
 .PHONY: help build release musl \
         fmt fmt-check clippy check ci \
         clean doc \
@@ -75,23 +87,23 @@ doc: ## Build and open docs
 image-claude: musl ## Build the claude-audit sandbox image
 	cp $(MUSL_BIN) $(CLAUDE_IMAGE_DIR)/session-auditor
 	podman build \
-	    -t $(IMAGE_REGISTRY)/claude-audit:$(CLAUDE_BASE_TAG) \
+	    -t $(IMAGE_REGISTRY)/claude-audit:$(CLAUDE_TAG) \
 	    -t $(IMAGE_REGISTRY)/claude-audit:latest \
 	    -f $(CLAUDE_IMAGE_DIR)/Containerfile $(CLAUDE_IMAGE_DIR)/
 
 image-codex: musl ## Build the codex-audit sandbox image
 	cp $(MUSL_BIN) $(CODEX_IMAGE_DIR)/session-auditor
 	podman build \
-	    -t $(IMAGE_REGISTRY)/codex-audit:$(CODEX_BASE_TAG) \
+	    -t $(IMAGE_REGISTRY)/codex-audit:$(CODEX_TAG) \
 	    -t $(IMAGE_REGISTRY)/codex-audit:latest \
 	    -f $(CODEX_IMAGE_DIR)/Containerfile $(CODEX_IMAGE_DIR)/
 
 push-claude: ## Push the claude-audit image to $IMAGE_REGISTRY
-	podman push $(IMAGE_REGISTRY)/claude-audit:$(CLAUDE_BASE_TAG)
+	podman push $(IMAGE_REGISTRY)/claude-audit:$(CLAUDE_TAG)
 	podman push $(IMAGE_REGISTRY)/claude-audit:latest
 
 push-codex: ## Push the codex-audit image to $IMAGE_REGISTRY
-	podman push $(IMAGE_REGISTRY)/codex-audit:$(CODEX_BASE_TAG)
+	podman push $(IMAGE_REGISTRY)/codex-audit:$(CODEX_TAG)
 	podman push $(IMAGE_REGISTRY)/codex-audit:latest
 
 push: push-claude push-codex ## Push both sandbox images

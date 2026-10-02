@@ -153,7 +153,7 @@ else
   AUDITOR_LLM_PORT=443
 fi
 AUDITOR_PROFILE_TMPFILE=$(mktemp --suffix=.yaml)
-sed -e "s/<llm-host>/${AUDITOR_LLM_HOST}/" -e "s/<llm-port>/${AUDITOR_LLM_PORT}/" \
+sed -e "s/<llm-host>/${AUDITOR_LLM_HOST}/" -e "s/<llm-port>/${AUDITOR_LLM_PORT}/" -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" \
   "providers/session-auditor-${AUDITOR_PROVIDER_STYLE}-profile.yaml" > "$AUDITOR_PROFILE_TMPFILE"
 openshell provider profile import \
   -f "$AUDITOR_PROFILE_TMPFILE" \

@@ -1,1 +1,1 @@
-http://audit-collector:4318
+http://audit-collector.keycloak-oidc-demo.svc.cluster.local:4318
