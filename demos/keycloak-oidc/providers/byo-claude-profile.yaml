@@ -32,7 +32,7 @@ endpoints:
   # session-auditor-anthropic-profile.yaml / session-auditor-openai-profile.yaml)
   # and the hostname compiled into util/session-auditor's binary
   # (util/session-auditor/otlp-endpoint.txt).
-  - host: "audit-collector"
+  - host: "audit-collector.<openshell-namespace>.svc.cluster.local"
     port: 4318
     protocol: rest
     access: read-write

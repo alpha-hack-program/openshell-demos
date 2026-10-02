@@ -128,7 +128,7 @@ cd "$DEMO_DIR"
 # time instead (OpenShell only injects credentials, not config values).
 # ---------------------------------------------------------------------------
 TMPFILE=$(mktemp --suffix=.yaml)
-sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" providers/byo-claude-profile.yaml > "$TMPFILE"
+sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" providers/byo-claude-profile.yaml > "$TMPFILE"
 # `|| true` only tolerates "already exists" on first run — confirmed live
 # that `import` against an already-imported profile ID is a hard error, not
 # a silent update, so editing this YAML and re-running this script does
