@@ -373,16 +373,34 @@ above are fixed.
   Playwright exactly as documented, including workspace create/member-add.
   `openshell provider refresh status` showed `STATUS: refreshed` for
   alice/bob/charlie — fully working on 0.1.2, no script changes needed.
-- **Step 4a (mcp-gateway / RHCL)** — **environment gap, not a 0.1.2
-  regression**: this cluster's RHCL operator (`rhcl-operator.v1.4.3`, the
-  only channel OperatorHub offers) has no `mcp.kuadrant.io/v1alpha1`
-  `MCPGatewayExtension` CRD at all (`oc get crd | grep mcp` → nothing), so
-  `helm install ./mcp-gateway` fails with `no matches for kind
-  "MCPGatewayExtension"`. Not related to the OpenShell version — this is an
-  RHCL/Kuadrant version gap on this specific cluster. Fell back to the
-  guide's documented direct-access alternative
-  (`MCP_GATEWAY_ENABLED=false`/`MCP_GATEWAY_AUTH_ENABLED=false`) and
-  continued; didn't investigate further since it's orthogonal to this task.
+- **Step 4a (mcp-gateway / RHCL)** — **resolved, environment gap, not a
+  0.1.2 regression, and not actually an RHCL version problem either.**
+  Originally fell back to direct access
+  (`MCP_GATEWAY_ENABLED=false`/`MCP_GATEWAY_AUTH_ENABLED=false`) because
+  `helm install ./mcp-gateway` failed with `no matches for kind
+  "MCPGatewayExtension"` — `rhcl-operator.v1.4.3` alone has no
+  `mcp.kuadrant.io` CRDs. Root-caused later: gateway-routed MCP needs a
+  **second, separate OLM operator** (`mcp-gateway`, "MCP Gateway Operator
+  (Tech Preview)", channel `preview`, versioned `0.7.x` — unrelated to
+  RHCL's own `1.4.x`), which this demo's docs never mentioned installing
+  at all. Installed it live
+  (`oc get packagemanifest mcp-gateway -n openshift-marketplace` confirmed
+  it's in the same `Red Hat Operators` catalog), which produced the
+  missing CRDs immediately. Found one more gap finishing the install: the
+  `MCPGatewayExtension` then sat at `Ready: False, Reason:
+  ReferenceGrantRequired` (its target `Gateway` lives in a different
+  namespace, `openshift-ingress` vs. `mcp-gateway-system`) — the
+  `mcp-gateway` chart never templated the `ReferenceGrant` that needs;
+  fixed by adding `templates/referencegrant.yaml` (chart bumped to 0.2.0).
+  `helm install ./mcp-gateway` now succeeds clean on a cluster that only
+  ever had the documented prerequisites, `mcp-gateway-ext` reaches
+  `Ready: True`, and step 4a's own verification
+  (`GatewayClass`/`Gateway`/`MCPGatewayExtension`) all pass. Documented
+  both gaps in the README (new "Installing the MCP Gateway Operator"
+  section) and in the chart's own Chart.yaml/values.yaml/README. **Scene
+  4d and the `--gw` sandboxes (`claude-alice-gw`/`claude-bob-gw`) are now
+  testable on this cluster** — not yet actually re-run, see "Remaining
+  work" below.
 - **Step 4b (MCP servers, direct access)**: `./scripts/06-deploy-mcp-servers.sh`
   worked unchanged. Hit the exact fresh-cluster embeddings cold-start
   CrashLoopBackOff the README already documents
@@ -560,6 +578,13 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
 2. ~~Walk scenes 1–6 for alice/bob/charlie~~ — **done**, see "Scenes 1–6"
    above. Only Scene 4d (gateway-routed MCP) and Scene 7 (audit trail)
    remain untested from step 5.
+   ~~Get gateway-routed MCP infrastructure working on this cluster~~ —
+   **done**, see "Step 4a" above (`mcp-gateway` operator + `ReferenceGrant`
+   fix). What's left for Scene 4d specifically: deploy `mcp-servers` with
+   `MCP_GATEWAY_ENABLED=true`/`MCP_GATEWAY_AUTH_ENABLED=true`, provision
+   `claude-alice-gw`/`claude-bob-gw` (`15-provision-claude-sandbox.sh --gw`),
+   and actually re-run Scene 4d — none of that has happened yet, only the
+   cluster-wide prerequisite is now in place.
 3. **Scene 7 ("Watching the audit trail live")** — not started. Blocked on
    stale images: `claude-audit`/`codex-audit` (published at
    `quay.io/atarazana`, tagged `0.3.36`/`0.0.1-1786355012`) predate the
@@ -583,9 +608,9 @@ Checked against the real 0.1.0 breaking-changes list and ruled out:
    The biggest remaining piece of work in this list.
 6. Re-run `demos/base`'s hello-world step to settle the default-image/curl
    fix there.
-7. Separately, get this cluster's RHCL operator (or a different cluster) to
-   a version that actually ships `MCPGatewayExtension`, to test the
-   gateway-routed MCP path (`--gw`) and Scene 4d, which direct-access skips.
+7. ~~Separately, get this cluster's RHCL to a version that ships
+   `MCPGatewayExtension`~~ — **done**, see item 2 above (it was never an
+   RHCL version problem — a second operator).
 8. Only then: bump `OPENSHELL_CHART_VERSION` everywhere, update the
    historical-claim docs that turned out to need it, and merge
    `0.1.2-upgrade` back into `main`.
