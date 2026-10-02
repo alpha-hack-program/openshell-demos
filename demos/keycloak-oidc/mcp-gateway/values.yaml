@@ -4,10 +4,21 @@
 # template inside mcp-servers. Install once per cluster, before any demo
 # enables mcpGateway.
 #
-# Prerequisite: RHCL operator (Kagenti/Kuadrant MCP gateway, v0.7.1+) and,
-# if auth.enabled, the Kuadrant operator — both installed on the cluster
-# already. This chart only creates CRs their CRDs define, never the
-# operators themselves. See README.md.
+# Prerequisite: TWO separate OLM operators, both already installed on the
+# cluster — this chart only creates CRs their CRDs define, never the
+# operators themselves:
+#   1. rhcl-operator (RHCL/Kuadrant core — Authorino, Limitador, etc.),
+#      channel stable, versioned 1.4.x.
+#   2. mcp-gateway (MCP Gateway Operator, Tech Preview), a DIFFERENT OLM
+#      package despite the similar name, channel preview, versioned
+#      0.7.x — this is what actually provides the MCPGatewayExtension/
+#      MCPServerRegistration CRDs this chart's templates use. Confirmed
+#      live: a cluster with only rhcl-operator installed has neither CRD
+#      at all, and `helm install` against this chart fails with "no
+#      matches for kind MCPGatewayExtension" — easy to misread as an RHCL
+#      version problem, since nothing here hints a second operator exists.
+# See README.md's "Installing RHCL" and "Installing the MCP Gateway
+# Operator" sections for both.
 
 gateway:
   name: mcp-gateway

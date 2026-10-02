@@ -372,7 +372,7 @@ banker membership in a workspace that already has one.
 | A Keycloak instance (26+, or current) | Self-hosted via Helm, or existing |
 | `jq`, `openssl` | Scripting, secret handling |
 | OpenShift cert-manager operator | Used to provision the gateway's TLS certificates — see [2a. Helm install](#2a-helm-install). The PKI-init-job alternative avoids this dependency but isn't walked through end to end in this guide |
-| RHCL operator (`rhcl-operator`, Red Hat Operators catalog) | **Optional** — only for gateway-routed MCP access (the default walkthrough below); direct access needs none of this. See [Installing RHCL](#installing-rhcl) below |
+| RHCL operator (`rhcl-operator`, Red Hat Operators catalog) **and** the separate MCP Gateway operator (`mcp-gateway`, same catalog, Tech Preview) | **Optional** — only for gateway-routed MCP access (the default walkthrough below); direct access needs none of this. Two separate OLM packages, easy to miss the second one — see [Installing RHCL](#installing-rhcl) and [Installing the MCP Gateway Operator](#installing-the-mcp-gateway-operator) below |
 | Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the `mcp-gateway` chart creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
@@ -536,6 +536,75 @@ oc get kuadrant kuadrant -n kuadrant-system
 >   is what creates the `GatewayClass`; apply the `Kuadrant` CR whenever
 >   convenient, before or after, it becomes `Ready: True` once the
 >   `GatewayClass` exists.
+
+#### Installing the MCP Gateway Operator
+
+**Also required for gateway-routed MCP access, in addition to RHCL above —
+easy to miss, since nothing about the `MCPGatewayExtension`/
+`MCPServerRegistration` CRDs `mcp-gateway/` (step 4a) depends on actually
+ships with `rhcl-operator`.** Confirmed live: a cluster with `rhcl-operator`
+installed and `Succeeded`, but without this second operator, has no
+`mcpgatewayextensions.mcp.kuadrant.io` CRD at all — `helm install
+./mcp-gateway` fails outright with `no matches for kind
+"MCPGatewayExtension"`, which reads like a Gateway API / RHCL version
+problem but isn't. This is a **separate** OLM package, confusingly similar
+name, Tech Preview, its own versioning scheme (`0.7.x`, unrelated to
+RHCL's own `1.4.x`):
+
+```bash
+# Verify the package is available (same catalog, different package than rhcl-operator)
+oc get packagemanifest mcp-gateway -n openshift-marketplace
+
+oc apply -f - <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-gateway-system
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: mcp-gateway
+  namespace: mcp-gateway-system
+spec:
+  targetNamespaces:
+    - mcp-gateway-system
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: mcp-gateway
+  namespace: mcp-gateway-system
+spec:
+  channel: preview
+  name: mcp-gateway
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+EOF
+```
+
+Verify it reaches `Succeeded`, and that the CRDs now exist:
+
+```bash
+oc -n mcp-gateway-system get csv mcp-gateway.v0.7.1   # version shown is whatever the catalog currently serves
+oc get crd | grep mcp.kuadrant.io
+```
+
+> **Gotchas:**
+> - **Technology Preview** — not covered by production SLAs. See Red Hat's
+>   [MCP Gateway install guide](https://docs.redhat.com/en/documentation/red_hat_connectivity_link/1.4/html-single/install_the_mcp_gateway/index)
+>   for the full upstream instructions this section summarizes, and the
+>   Technology Preview support-scope policy it links to.
+> - Requires **RHCL 1.4.1 or later** — 1.4.0 is called out upstream as
+>   having real stability issues (auth failures, gateway pod memory
+>   pressure). Not a concern if you installed RHCL via the steps above on
+>   a current catalog, but worth knowing if a cluster has an older pin.
+> - This gap is exactly why `mcp-gateway/Chart.yaml`'s comment ("confirmed
+>   live against sandbox268") didn't catch it originally — that reference
+>   cluster already had this operator installed for an unrelated AI-gateway
+>   workload sharing the same cluster, so the dependency was invisible
+>   until testing against a cluster that only had RHCL's core operator.
 
 #### How OpenShell networking works
 

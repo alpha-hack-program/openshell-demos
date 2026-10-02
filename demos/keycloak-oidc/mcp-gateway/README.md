@@ -1,9 +1,13 @@
 # mcp-gateway Helm chart
 
 Cluster-scoped RHCL (Kuadrant) MCP Gateway resources: `GatewayClass`,
-`Gateway`, `MCPGatewayExtension`, a ConfigMap forcing the gateway's Service
-to `ClusterIP`, and (when `auth.enabled`) the Authorino-TLS `EnvoyFilter`
-workaround. This is everything [`../mcp-servers`](../mcp-servers/)'s own
+`Gateway`, `MCPGatewayExtension`, the cross-namespace `ReferenceGrant` it
+needs (the extension lives in `mcp-gateway-system`, the `Gateway` it
+targets lives in `openshift-ingress` — without this grant the extension
+sits at `Ready: False, Reason: ReferenceGrantRequired` indefinitely,
+confirmed live), a ConfigMap forcing the gateway's Service to `ClusterIP`,
+and (when `auth.enabled`) the Authorino-TLS `EnvoyFilter` workaround. This
+is everything [`../mcp-servers`](../mcp-servers/)'s own
 `mcpGateway.enabled`/`mcpGateway.auth.enabled` attaches to when routing
 through the gateway instead of direct sandbox-to-server access.
 
@@ -17,17 +21,35 @@ resources that were assumed to already exist.
 
 ## Prerequisites
 
-- The `rhcl-operator` CSV (Red Hat Connectivity Link, Kagenti/Kuadrant MCP
-  gateway, v0.7.1+) installed, plus a `Kuadrant` CR applied to instantiate
-  its Authorino/Limitador operands — needed either way for the
-  `GatewayClass`/`Gateway` below, and (if `auth.enabled`, default `true`)
-  for `mcp-servers`' own `AuthPolicy` CRs to reconcile. One Subscription:
-  `rhcl-operator` pulls in `authorino-operator`/`limitador-operator` as OLM
-  dependencies — there's no separate "Kuadrant operator" to install. This
-  chart only creates CRs their CRDs define, never the operators or the
-  `Kuadrant` CR itself. See the main demo README's
-  [Installing RHCL](../README.md#installing-rhcl) for the install steps
-  and gotchas.
+**Two separate OLM operators**, both already installed, both on the Red
+Hat Operators catalog but with confusingly similar names and completely
+different version schemes — easy to install only the first and not
+realize the second is missing, since nothing about the CRD names
+(`MCPGatewayExtension`) hints at a second package:
+
+- **`rhcl-operator`** (Red Hat Connectivity Link / Kuadrant core —
+  Authorino, Limitador — channel `stable`, versioned `1.4.x`), plus a
+  `Kuadrant` CR applied to instantiate its Authorino/Limitador operands —
+  needed either way for the `GatewayClass`/`Gateway` below, and (if
+  `auth.enabled`, default `true`) for `mcp-servers`' own `AuthPolicy` CRs
+  to reconcile. One Subscription: `rhcl-operator` pulls in
+  `authorino-operator`/`limitador-operator` as OLM dependencies — there's
+  no separate "Kuadrant operator" to install.
+- **`mcp-gateway`** (MCP Gateway Operator, Technology Preview — channel
+  `preview`, versioned `0.7.x`, unrelated to RHCL's own `1.4.x`). This is
+  what actually provides the `MCPGatewayExtension`/`MCPServerRegistration`
+  CRDs this chart's templates use. Confirmed live: a cluster with only
+  `rhcl-operator` installed has neither CRD at all, and `helm install`
+  against this chart fails with `no matches for kind
+  "MCPGatewayExtension"` — reads like a version/compatibility problem, but
+  is actually just this second, separate operator never having been
+  installed.
+
+This chart only creates CRs their CRDs define, never the operators or the
+`Kuadrant` CR itself. See the main demo README's
+[Installing RHCL](../README.md#installing-rhcl) and
+[Installing the MCP Gateway Operator](../README.md#installing-the-mcp-gateway-operator)
+for the install steps and gotchas for both.
 
 ## Adopting already-existing resources
 

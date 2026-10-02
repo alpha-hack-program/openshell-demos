@@ -1,0 +1,25 @@
+# Required whenever the MCPGatewayExtension (mcp-gateway-system) targets a
+# Gateway in a different namespace (openshift-ingress, per values.yaml) —
+# confirmed live: without this, the extension sits at
+# `Ready: False, Reason: ReferenceGrantRequired` indefinitely, message
+# "ReferenceGrant required in openshift-ingress to allow cross-namespace
+# reference from mcp-gateway-system". This chart previously didn't
+# template this at all; it had to be applied by hand
+# (gateway.networking.k8s.io/v1beta1 ReferenceGrant, confirmed against a
+# live cluster) every time. See docs/install_the_mcp_gateway's
+# cross-namespace note in Red Hat's own RHCL 1.4 MCP Gateway install guide.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-mcp-gateway-ext
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  from:
+    - group: mcp.kuadrant.io
+      kind: MCPGatewayExtension
+      namespace: {{ .Values.extension.namespace }}
+  to:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
