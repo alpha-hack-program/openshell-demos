@@ -14,8 +14,9 @@
 #   openshell whoami   # now reports the requested identity
 #
 # This only points the CLI at that identity's already-registered gateway
-# session — it can't perform the one-time browser OIDC login for you (see
-# "Log in as each banker" in the README). It also cross-checks the stored
+# session — it can't perform the one-time browser OIDC login for you (run
+# ./scripts/relogin-identity.sh <id>, or see "Log in as each banker" in
+# the README to do it by hand). It also cross-checks the stored
 # gateway's endpoint against this demo's own .env (CLUSTER_APPS_DOMAIN/
 # OPENSHELL_NAMESPACE), so a stale login left over from a *different*
 # cluster is caught here as a clear error instead of surfacing later as a
@@ -68,8 +69,9 @@ use_identity() {
     cat >&2 <<EOF
 ${user_id} has never logged into gateway '${gateway_name}' from this
 identity (nothing at $gateway_metadata). This function can't run the
-browser login for you -- do that first (see "Log in as each banker" in
-the README), then call use_identity again.
+browser login for you -- run ./scripts/relogin-identity.sh ${user_id}
+(or see "Log in as each banker" in the README to do it by hand), then
+call use_identity again.
 EOF
     return 1
   fi
@@ -84,9 +86,14 @@ ${user_id}'s stored gateway registration points at a DIFFERENT cluster
 than this demo's own .env expects:
   registered: ${registered_endpoint:-<unreadable>}
   expected:   ${expected_endpoint}
-This is a stale login from a previous cluster/run, at
-$gateway_metadata -- re-run "Log in as each banker" for ${user_id}
-against the current cluster before continuing.
+This is a stale login from a previous cluster/run at
+$gateway_metadata -- these XDG identity directories live under \$HOME,
+shared by every checkout of this repo on this machine, not scoped per
+clone/worktree, so running the same identity against a different
+cluster from another checkout overwrites this one. Fix it with:
+  ./scripts/relogin-identity.sh ${user_id}
+(admin first, if admin's own identity is also stale -- see that script's
+header comment), then call use_identity again.
 EOF
       return 1
     fi

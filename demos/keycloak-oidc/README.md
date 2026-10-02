@@ -2030,6 +2030,15 @@ and redirects to Keycloak — log in as `USER_ID`, not admin and not another
 banker. The demo realm's password equals the username for all three (see
 `keycloak/realm-export.json`).
 
+**Shortcut:** `./scripts/relogin-identity.sh <alice|bob|charlie|admin>`
+does everything below in one command — useful any time `use_identity`
+reports a stale-cluster mismatch (e.g. you've run this same identity
+against a different cluster from another checkout; the
+`$HOME/.local/state/openshell-demos/oc-<id>/` directories are shared by
+every checkout on the machine, not scoped per clone). It still opens a
+real browser for the one step that can't be automated away — logging in
+as that identity.
+
 **The only line that changes per terminal** is `USER_ID` — set it once,
 then run the rest of the block unchanged:
 
