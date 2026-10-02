@@ -137,9 +137,9 @@ make push-claude      # or push-codex, or plain `push` for both
 
 Each image's primary tag is the base image's own tag (extracted
 automatically from the Containerfile's `FROM` line) plus this crate's
-version — e.g. `claude-audit:0.4.0-auditor0.1.5`. Both halves matter. The
+version — e.g. `claude-audit:0.4.0-0.1.5`. Both halves matter. The
 base half means a base-image bump is visible rather than hidden. The
-`-auditor<version>` half exists because this crate bakes its payload in at
+`-<crate-version>` half exists because this crate bakes its payload in at
 compile time (`prompt.txt`, `otlp-endpoint.txt`): rebuilding changed
 content under an unchanged tag produces an image that nodes running
 `imagePullPolicy: IfNotPresent` will never pull, so they keep executing
@@ -220,7 +220,7 @@ network policy automatically, no separate `policy update` call needed.
 
 ```bash
 openshell sandbox create --name my-sandbox \
-  --from quay.io/atarazana/claude-audit:0.4.0-auditor0.1.5 \
+  --from quay.io/atarazana/claude-audit:0.4.0-0.1.5 \
   --provider session-auditor-anthropic --workspace <ws> -- true
 ```
 

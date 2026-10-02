@@ -424,8 +424,8 @@ version alone, so rebuilding with changed auditor content produced an
 identical tag; sandbox pods run `imagePullPolicy: IfNotPresent`, so nodes
 kept serving the cached binary and the endpoint fix appeared to do nothing
 (verified by grepping the running binary — still the old short name).
-Images are now tagged `<base>-auditor<crate-version>`, e.g.
-`claude-audit:0.4.0-auditor0.1.5`.
+Images are now tagged `<base>-<crate-version>`, e.g.
+`claude-audit:0.4.0-0.1.5`.
 
 **Verified live, gateway-routed:** benign turn →
 `agent_session_started` + `agent_turn_heartbeat`; forced overreach →

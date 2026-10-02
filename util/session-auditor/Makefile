@@ -24,8 +24,8 @@ CODEX_BASE_TAG   := $(lastword $(subst :, ,$(shell grep '^FROM' $(CODEX_IMAGE_DI
 # normally, and only the audit signal is missing. Bump the crate version
 # (make release-patch) whenever the auditor's baked-in content changes.
 CRATE_VERSION    := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-CLAUDE_TAG       := $(CLAUDE_BASE_TAG)-auditor$(CRATE_VERSION)
-CODEX_TAG        := $(CODEX_BASE_TAG)-auditor$(CRATE_VERSION)
+CLAUDE_TAG       := $(CLAUDE_BASE_TAG)-$(CRATE_VERSION)
+CODEX_TAG        := $(CODEX_BASE_TAG)-$(CRATE_VERSION)
 
 .PHONY: help build release musl \
         fmt fmt-check clippy check ci \
