@@ -1,0 +1,36 @@
+{{- if ne .Values.gateway.className "istio" }}
+# Workaround for an MCP Gateway Operator (Tech Preview) bug on OpenShift.
+#
+# The operator starts the broker with a hardcoded private host derived the
+# upstream-Istio way -- `<gateway-name>-istio.<ns>.svc.cluster.local`:
+#
+#   --mcp-gateway-private-host=mcp-gateway-istio.openshift-ingress.svc.cluster.local:8080
+#
+# OpenShift's own Gateway API controller
+# (openshift.io/gateway-controller/v1) instead names the Service
+# `<gateway-name>-<gatewayclass-name>`, so with any className other than
+# `istio` that host does not exist and the broker cannot dial itself back
+# through the Gateway.
+#
+# The failure is deceptive: `tools/list` still succeeds, because the broker
+# answers it from its own aggregated cache without leaving the pod. Only
+# tool *invocation* -- which proxies back through the Gateway's `mcps`
+# listener -- fails, with `failed to create session for mcp server:
+# transport error: dial tcp: lookup mcp-gateway-istio... no such host`.
+# Confirmed live: an agent can list all 16 tools and still be unable to call
+# a single one.
+#
+# This ExternalName alias makes the operator's assumed name resolve to the
+# Service OpenShift actually created. Drop it once the operator derives the
+# private host from the GatewayClass (or exposes it as a setting).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gateway.name }}-istio
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  type: ExternalName
+  externalName: {{ .Values.gateway.name }}-{{ .Values.gateway.className }}.{{ .Values.gateway.namespace }}.svc.cluster.local
+{{- end }}

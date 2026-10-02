@@ -18,6 +18,20 @@ credentials:
       refresh_before_seconds: 300
 
 endpoints:
+  # The MCP Gateway's public host, used when a sandbox is provisioned with
+  # `--gw` (scripts/15-provision-claude-sandbox.sh) and therefore reaches
+  # every server through one broker endpoint instead of the five in-cluster
+  # hosts below. Without this entry the proxy refuses to inject
+  # USER_ACCESS_TOKEN and the gateway returns
+  # {"error":"credential_endpoint_mismatch"} — the credential is only
+  # injected for endpoints listed here. It is a separate entry rather than a
+  # replacement because both access paths stay supported; a direct-access
+  # (no `--gw`) sandbox never contacts this host.
+  - host: "<mcp-gateway-host>"
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
   - host: "mcp-compatibility.<openshell-namespace>.svc.cluster.local"
     port: 8000
     protocol: rest

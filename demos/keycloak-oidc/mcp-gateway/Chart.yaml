@@ -5,9 +5,11 @@ description: >-
   ../mcp-servers attaches to via mcpGateway.enabled: the GatewayClass,
   Gateway, MCPGatewayExtension, the cross-namespace ReferenceGrant it
   needs, ClusterIP override ConfigMap, and (when auth.enabled) the
-  Authorino-TLS EnvoyFilter workaround. Confirmed live against sandbox268
-  and (0.2.0) sandbox341 — this chart reproduces what was previously
-  hand-applied via oc patch/oc apply in scripts/20 and scripts/21.
+  Authorino-TLS EnvoyFilter workaround, the OpenShift Route that exposes
+  gateway.publicHost, and an ExternalName alias working around the MCP
+  Gateway Operator's upstream-Istio Service-naming assumption. Replaces
+  what was previously hand-applied via oc patch/oc apply in scripts/20 and
+  scripts/21.
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.3.0
+appVersion: "0.3.0"

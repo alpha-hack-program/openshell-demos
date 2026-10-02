@@ -6,7 +6,13 @@ needs (the extension lives in `mcp-gateway-system`, the `Gateway` it
 targets lives in `openshift-ingress` — without this grant the extension
 sits at `Ready: False, Reason: ReferenceGrantRequired` indefinitely,
 confirmed live), a ConfigMap forcing the gateway's Service to `ClusterIP`,
-and (when `auth.enabled`) the Authorino-TLS `EnvoyFilter` workaround. This
+the OpenShift `Route` that makes `gateway.publicHost` reachable at all
+(without it the host resolves to the ingress router with no backend and
+returns a bare `HTTP/1.0 503`), an `ExternalName` alias working around the
+MCP Gateway Operator's upstream-Istio Service-naming assumption (see
+`templates/broker-private-host-alias.yaml` for why `tools/list` can succeed
+while every tool *invocation* fails without it), and (when `auth.enabled`)
+the Authorino-TLS `EnvoyFilter` workaround. This
 is everything [`../mcp-servers`](../mcp-servers/)'s own
 `mcpGateway.enabled`/`mcpGateway.auth.enabled` attaches to when routing
 through the gateway instead of direct sandbox-to-server access.
@@ -15,9 +21,9 @@ Split out of `mcp-servers` because these resources are shared
 infrastructure, not owned by any one demo's namespace/release: `Gateway`
 and `MCPGatewayExtension` live in `openshift-ingress`/`mcp-gateway-system`,
 not `OPENSHELL_NAMESPACE` — `helm uninstall mcp-servers` should never take
-them down. Confirmed live against sandbox268: this chart reproduces
-exactly what scripts/20 and scripts/21 previously built by hand-patching
-resources that were assumed to already exist.
+them down. This chart reproduces exactly what scripts/20 and scripts/21
+previously built by hand-patching resources that were assumed to already
+exist.
 
 ## Prerequisites
 
@@ -38,7 +44,7 @@ realize the second is missing, since nothing about the CRD names
 - **`mcp-gateway`** (MCP Gateway Operator, Technology Preview — channel
   `preview`, versioned `0.7.x`, unrelated to RHCL's own `1.4.x`). This is
   what actually provides the `MCPGatewayExtension`/`MCPServerRegistration`
-  CRDs this chart's templates use. Confirmed live: a cluster with only
+  CRDs this chart's templates use. A cluster with only
   `rhcl-operator` installed has neither CRD at all, and `helm install`
   against this chart fails with `no matches for kind
   "MCPGatewayExtension"` — reads like a version/compatibility problem, but
@@ -49,7 +55,36 @@ This chart only creates CRs their CRDs define, never the operators or the
 `Kuadrant` CR itself. See the main demo README's
 [Installing RHCL](../README.md#installing-rhcl) and
 [Installing the MCP Gateway Operator](../README.md#installing-the-mcp-gateway-operator)
-for the install steps and gotchas for both.
+for the install steps — there is no RHOAI/`DataScienceCluster` shortcut for
+either (see the Gotcha below).
+
+**Gotcha — don't confuse this with RHOAI's AI Hub "MCP Catalog" feature.**
+RHOAI (3.4+) has its own, separate MCP story: `DataScienceCluster.spec.
+components.mcplifecycleoperator: Managed` deploys an "MCP Lifecycle
+Operator" (`mcp-lifecycle-operator-controller-manager` /
+`mcp-lifecycle-module-operator-controller-manager` in
+`redhat-ods-applications`) that reconciles `MCPServer` CRs (API group
+`mcp.x-k8s.io`, a Kubernetes-SIG concept) — and setting
+`OdhDashboardConfig.spec.dashboardConfig.mcpCatalog: true` (alongside
+`genAiStudio`/`autorag`) surfaces an **AI Hub → MCP Servers** catalog page
+in the RHOAI console for browsing/deploying pre-packaged MCP server
+images. Both flags work as documented by Red Hat ([MCP catalog blog
+post](https://www.redhat.com/en/blog/mcp-catalog-here-discover-deploy-and-connect-red-hat-openshift-ai),
+[3.5 Technology Preview release
+notes](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/release_notes/technology-preview-features_relnotes)).
+
+That feature is real but **not a substitute for, and doesn't overlap with,
+this chart**: it manages `mcp.x-k8s.io` `MCPServer` workloads (deploying
+MCP server *images* from a catalog), not RHCL/Kuadrant's
+`MCPGatewayExtension`/`MCPServerRegistration` (`mcp.kuadrant.io`) that this
+chart's `Gateway`/routing/auth layer needs. Red Hat's own docs are explicit
+that the Kuadrant-based **MCP gateway Operator** (the one installed above)
+is "an optional external prerequisite... not managed by the OpenShift AI
+operator lifecycle" — cluster admins install/upgrade it independently,
+exactly as this README does. Enabling AI Hub's MCP Catalog is optional and
+unrelated to getting this chart working; `mcplifecycleoperator` can stay at
+its default (`Removed`) unless you specifically want that separate
+dashboard feature too.
 
 ## Adopting already-existing resources
 
@@ -146,5 +181,32 @@ oc get gatewayclass mcp-gateway-class
 oc get gateway mcp-gateway -n openshift-ingress
 oc get configmap mcp-gateway-override-config -n openshift-ingress
 oc get mcpgatewayextension mcp-gateway-ext -n mcp-gateway-system
+oc get route mcp-gateway -n openshift-ingress
+oc get svc mcp-gateway-istio -n openshift-ingress               # unless className is `istio`
 oc get envoyfilter mcp-gateway-authn-ssl -n openshift-ingress   # auth.enabled only
 ```
+
+A full protocol-level check from inside a sandbox, which exercises the
+Route, the gateway's authn `AuthPolicy`, and the broker together — a
+`tools/list` that returns every upstream server's tools is the signal that
+all three are wired correctly:
+
+```bash
+openshell sandbox exec -n claude-<id> --workspace <id> -- bash -c '
+URL="https://mcp.<apps-domain>/mcp"
+curl -s -D /tmp/h -o /dev/null -X POST "$URL" \
+  -H "Authorization: Bearer $USER_ACCESS_TOKEN" -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"curl\",\"version\":\"1\"}}}"
+SID=$(grep -i "^mcp-session-id:" /tmp/h | tr -d "\r" | cut -d" " -f2)
+curl -s -X POST "$URL" -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: $SID" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}" | grep -oE "\"name\":\"[a-z_]+\"" | head
+'
+```
+
+**`tools/list` succeeding is necessary but not sufficient** — the broker
+answers it from its own cache without leaving the pod, so it passes even
+when the alias Service above is missing and no tool can actually be
+invoked. Only a real tool call proves the full path.

@@ -319,6 +319,71 @@ No code or script changes were needed for any of this — Scenes 1–6 run
 on 0.1.2 exactly as documented, once the two provisioning-layer bugs
 above are fixed.
 
+## Gateway-routed MCP (`--gw`) — working for the first time (2026-10-02)
+
+Every earlier run of this demo, on every cluster, used **direct** per-server
+access; Scene 4d was always skipped. Running the `--gw` path end to end
+surfaced three separate problems, all now fixed, and 4d passes.
+
+**1. The user credential was never allowed to reach the gateway host.**
+`providers/user-refresh-profile.yaml` lists only the five in-cluster
+`mcp-*.svc.cluster.local:8000` endpoints. In `--gw` mode the sandbox talks
+to `mcp.<apps-domain>:443` instead, which isn't in that allowlist, so the
+proxy refuses to inject `USER_ACCESS_TOKEN` and the gateway answers
+`{"error":"credential_endpoint_mismatch"}`. `git log -S` confirms that host
+has never been in the file in any commit — the gateway credential path had
+simply never worked. Added it as a `<mcp-gateway-host>` placeholder
+endpoint.
+
+**2. Nothing created the OpenShift `Route` for `gateway.publicHost`.** The
+`mcp-gateway` chart deliberately forces the gateway Service to ClusterIP, so
+without a Route the public host reaches the ingress router with no backend
+and returns a bare `HTTP/1.0 503`. sandbox268 had one hand-created, which is
+why it looked fine there. Added `mcp-gateway/templates/route.yaml` (edge/
+Redirect, `targetPort: mcp` by name — both listeners share a port, so only
+the name disambiguates).
+
+**3. MCP Gateway Operator assumes upstream Istio's Service naming.** The
+operator launches the broker with
+`--mcp-gateway-private-host=<gateway-name>-istio.<ns>.svc.cluster.local:8080`,
+but OpenShift's own Gateway API controller names the Service
+`<gateway-name>-<gatewayclass-name>`. With any `className` other than
+`istio` that host doesn't resolve, and the broker can't dial itself back
+through the Gateway. **This is the deceptive one:** `tools/list` still
+succeeds, because the broker serves it from its own aggregated cache without
+leaving the pod — an agent sees all 16 tools and still cannot call a single
+one, failing with `failed to create session for mcp server: transport
+error: dial tcp: lookup mcp-gateway-istio... no such host`. Worked around
+with an `ExternalName` alias
+(`mcp-gateway/templates/broker-private-host-alias.yaml`), guarded by
+`ne .Values.gateway.className "istio"` so it disappears once the operator
+derives the name correctly. Worth filing upstream.
+
+**Verified live, gateway-routed:** bob → `Clara Fontán (cli-001), $38,750`;
+alice → `Elena Duarte (cli-004), $33,000` (correctly different books through
+one shared broker endpoint); and **Scene 4d / 4a's cross-tenant denial fired
+for real** — `MCP error -32602: client_id no encontrado para el llamante
+autenticado` when bob reached for alice's `cli-004`, a server-side ownership
+check, not a model self-refusal.
+
+### Operational gotcha: `provider profile update` invalidates a baked MCP config
+
+The `Authorization: Bearer openshell:resolve:env:s<random>_USER_ACCESS_TOKEN`
+placeholder baked into `/sandbox/.claude/mcp-servers.json` is **per provider
+attachment**. Running `openshell provider profile update` rotates the
+attachment and regenerates that random component, so the already-uploaded
+file silently points at a binding that no longer exists. The symptom is a
+misleading `403 A credential placeholder in the request body cannot be
+forwarded ... body credential rewriting is disabled` — note its own
+"restore provider access" hint. Do **not** reach for the
+`request_body_credential_rewrite` endpoint option to fix it: that resolves
+the placeholder *into* the request body, i.e. ships the user's real Keycloak
+token to the LLM provider, defeating the isolation the demo exists to prove.
+The fix is to delete and re-provision the sandbox so the upload carries the
+current placeholder (`--upload` does not re-apply to an existing sandbox).
+To check: compare the value in the file against `printenv USER_ACCESS_TOKEN`
+inside the sandbox — they must be identical.
+
 ## Already fixed on this branch (verified locally, no cluster needed)
 
 - **`util/parrot`**: ran `make bump-openshell-sdk OPENSHELL_SDK_TAG=v0.1.2`,
@@ -401,6 +466,46 @@ above are fixed.
   4d and the `--gw` sandboxes (`claude-alice-gw`/`claude-bob-gw`) are now
   testable on this cluster** — not yet actually re-run, see "Remaining
   work" below.
+  **RHOAI `mcplifecycleoperator` investigation — related but distinct
+  feature, not a substitute:** investigated whether RHOAI's
+  `DataScienceCluster.spec.components.mcplifecycleoperator` is a
+  declarative/RHOAI-native alternative to the manual OLM Subscription
+  above (prompted by finding it set to `Managed` on sandbox268 alongside a
+  manually-named-identically `mcp-gateway` Subscription). First pass on
+  sandbox341: deleted the manual Subscription/CSV, flipped
+  `mcplifecycleoperator` to `Managed`, and watched RHOAI deploy a
+  *different* operator — `mcp-lifecycle-operator-controller-manager` in
+  `redhat-ods-applications`, reconciling `MCPServer` CRs (API group
+  `mcp.x-k8s.io`) — not RHCL/Kuadrant's
+  `MCPGatewayExtension`/`MCPServerRegistration` (`mcp.kuadrant.io`) this
+  chart needs. Reverted (`mcplifecycleoperator` back to `Removed`,
+  reapplied the manual Subscription from `/tmp/mcp-gateway-operator.yaml`,
+  confirmed `mcp-gateway-ext` back to `Ready: True` within ~20s) while
+  investigating further.
+  Follow-up (same session): this is actually RHOAI's documented **AI Hub →
+  MCP Catalog** feature (GA'd Technology Preview in 3.4/3.5 — see [Red
+  Hat's MCP catalog blog
+  post](https://www.redhat.com/en/blog/mcp-catalog-here-discover-deploy-and-connect-red-hat-openshift-ai)
+  and the [3.5 Technology Preview release
+  notes](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/release_notes/technology-preview-features_relnotes)),
+  not a coincidence. Dashboard visibility needs a second flag beyond the
+  DSC component: `OdhDashboardConfig.spec.dashboardConfig.mcpCatalog:
+  true` (our initial check of `dashboardConfig`'s key list predated
+  setting this — the field doesn't appear until set). Re-enabled
+  `mcplifecycleoperator: Managed` plus `mcpCatalog`/`autorag: true` (with
+  `genAiStudio` already `true`) on sandbox341, restarted `rhods-dashboard`
+  to pick up the config, confirmed no collision with the existing
+  `mcp-gateway` Subscription/CSV/`mcp-gateway-ext` (still `Ready: True`
+  throughout). Left both features enabled this time, since the user wants
+  AI Hub's MCP Catalog available. Red Hat's own docs confirm the
+  distinction is intentional, not a doc gap: the Kuadrant-based **MCP
+  gateway Operator** (manual OLM Subscription, what this chart needs) is
+  explicitly "an optional external prerequisite... not managed by the
+  OpenShift AI operator lifecycle," while the **MCP Lifecycle
+  Operator**/AI Hub catalog is RHOAI-native and manages a different
+  concept (deploying MCP *server* workloads from a catalog, not
+  gateway/auth routing for already-deployed servers). Documented the full,
+  accurate distinction in `mcp-gateway/README.md`'s Gotcha section.
 - **Step 4b (MCP servers, direct access)**: `./scripts/06-deploy-mcp-servers.sh`
   worked unchanged. Hit the exact fresh-cluster embeddings cold-start
   CrashLoopBackOff the README already documents
