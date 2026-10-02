@@ -76,24 +76,34 @@ set -euo pipefail
 # through either way (harmless no-op against a non-audited image, which
 # has no session-auditor Stop hook to read them).
 #
-# --gw (bare flag, default off) targets the <agent>-<user>-gw sandbox
-# instead of the regular <agent>-<user> one -- the MCP-Gateway-only
-# variant (single `meridian` entry in its mcp-servers.json, no direct
-# per-server access at the policy level at all) from the token-exchange
-# work, as opposed to the regular sandbox's direct-per-server MCP config.
-# Only claude-alice-gw/claude-bob-gw exist today (no codex-*-gw, no
-# charlie-*-gw) -- passing --gw for a user/agent combo that has no -gw
-# sandbox provisioned will fail the same way any other reference to a
-# nonexistent sandbox does. Combining --gw with --aud is not a supported
-# combination (no aud-<agent>-<user>-gw sandbox exists) and isn't
-# specially guarded against here, same as other unprovisioned-sandbox cases.
+# --legacy-gw-sandbox (bare flag, default off) targets the separately
+# named <agent>-<user>-gw sandbox instead of the regular <agent>-<user>
+# one -- the MCP-Gateway-only variant (single `meridian` entry in its
+# mcp-servers.json, no direct per-server access at the policy level at
+# all) from the token-exchange work. Only claude-alice-gw/claude-bob-gw
+# were ever built this way (no codex-*-gw, no charlie-*-gw); passing it
+# for a combo that has no -gw sandbox fails like any other reference to a
+# nonexistent sandbox. Combining it with --aud is unsupported (no
+# aud-<agent>-<user>-gw sandbox exists).
 #
-# Usage: ./19-run-scene7-persona-demo.sh [--ui] [--agent claude|codex] [--aud] [--gw] <alice|bob|charlie>
+# This flag was called --gw until it was found to collide, confusingly,
+# with the --gw of 15-/16-provision-*.sh. There, --gw changes a sandbox's
+# MCP *config* (routing it through the gateway) and leaves its name alone;
+# here it changes which sandbox *name* is addressed. Running
+# `16-provision-audited-sandbox.sh --gw alice ...` and then `19 ... --gw
+# alice` therefore looks consistent but targets aud-claude-alice-gw, which
+# was never created. `--gw` is now rejected outright with an explanation
+# rather than aliased to either meaning -- see the arg parser below.
+#
+# Usage: ./19-run-scene7-persona-demo.sh [--ui] [--agent claude|codex] [--aud] [--legacy-gw-sandbox] <alice|bob|charlie>
 #   e.g. ./19-run-scene7-persona-demo.sh bob
 #   e.g. ./19-run-scene7-persona-demo.sh --ui alice
 #   e.g. ./19-run-scene7-persona-demo.sh --agent claude charlie
 #   e.g. ./19-run-scene7-persona-demo.sh --aud bob
-#   e.g. ./19-run-scene7-persona-demo.sh --gw --agent claude alice
+#   # a sandbox provisioned by `16-provision-audited-sandbox.sh --gw alice ...`
+#   # is addressed with --aud alone -- it is already gateway-routed:
+#   e.g. ./19-run-scene7-persona-demo.sh --aud --agent claude alice
+#   e.g. ./19-run-scene7-persona-demo.sh --legacy-gw-sandbox --agent claude alice
 #
 # NOTE: the Codex path is still [VERIFY] per the README's Scene 7 note —
 # only the Claude Code path has been confirmed live end to end so far.
@@ -128,9 +138,34 @@ while [[ $# -gt 0 ]]; do
       AUD=true
       shift
       ;;
-    --gw)
+    --legacy-gw-sandbox)
       GW=true
       shift
+      ;;
+    --gw)
+      # Deliberately rejected rather than aliased. `--gw` means two
+      # unrelated things across this demo's scripts, and silently guessing
+      # either one sends the run at the wrong sandbox:
+      #   15/16 --gw  = provision WITH gateway-routed MCP; the name is
+      #                 unchanged (claude-<user> / aud-claude-<user>).
+      #   19   --gw  = target a DIFFERENTLY NAMED <agent>-<user>-gw
+      #                 sandbox left over from the token-exchange work.
+      # Someone who provisioned with `16 --gw` and then passes `--gw` here
+      # gets "sandbox not found" for a name they never created.
+      cat >&2 <<'MSG'
+error: --gw is ambiguous in this script and has been renamed.
+
+  If you provisioned with `15-/16-provision-*.sh --gw` (gateway-routed
+  MCP), that sandbox is named claude-<user> / aud-claude-<user> -- the
+  --gw there changes its MCP config, not its name. Drop --gw here and
+  use --aud (audited sandbox) or no flag at all:
+
+      ./19-run-scene7-persona-demo.sh --aud --agent claude <user>
+
+  If you meant the older, separately named <agent>-<user>-gw sandboxes
+  from the token-exchange work, pass --legacy-gw-sandbox instead.
+MSG
+      exit 2
       ;;
     *)
       USER_ID="$1"
@@ -138,7 +173,7 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-: "${USER_ID:?usage: $0 [--ui] [--agent claude|codex] [--aud] [--gw] <alice|bob|charlie>}"
+: "${USER_ID:?usage: $0 [--ui] [--agent claude|codex] [--aud] [--legacy-gw-sandbox] <alice|bob|charlie>}"
 case "$AGENT" in
   ""|claude|codex) ;;
   *) echo "invalid --agent '$AGENT' (expected claude or codex)" >&2; exit 1 ;;
