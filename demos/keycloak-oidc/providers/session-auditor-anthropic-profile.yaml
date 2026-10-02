@@ -73,3 +73,12 @@ endpoints:
 
 binaries:
   - /usr/local/bin/session-auditor
+  # session-auditor does not open these sockets itself — it shells out to
+  # curl for both the classification call and the OTLP metrics POST (see
+  # util/session-auditor/src/main.rs). The supervisor attributes egress to
+  # the process that actually connects, and 0.1.2 enforces that strictly
+  # (`require_binary_identity:true` in the supervisor's OPA config), so
+  # listing only session-auditor denies every one of its requests. The
+  # denial is silent end to end: curl fails, the hook swallows it, the hook
+  # still exits 0, and the only symptom is metrics that never arrive.
+  - /usr/bin/curl

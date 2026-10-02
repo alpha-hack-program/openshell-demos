@@ -56,3 +56,9 @@ endpoints:
 
 binaries:
   - /usr/local/bin/session-auditor
+  # Required for the same reason as in session-auditor-anthropic-profile.yaml:
+  # session-auditor shells out to curl for both the classification call and
+  # the OTLP metrics POST, and 0.1.2 attributes egress to the connecting
+  # binary (`require_binary_identity:true`), so curl must be listed too or
+  # every request is silently denied.
+  - /usr/bin/curl

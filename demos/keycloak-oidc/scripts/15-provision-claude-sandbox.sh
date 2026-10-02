@@ -52,10 +52,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
+# Preserved across the `source .env` below: a caller that exported these
+# deliberately (16-provision-audited-sandbox.sh sets CLAUDE_IMAGE to the
+# *-audit image, and SANDBOX_PREFIX to "aud-") must win over .env's own
+# values. `set -a; source .env` reassigns unconditionally, so without this
+# the override is silently discarded. That failure is invisible in the worst
+# way: SANDBOX_PREFIX isn't in .env so it survives, and you get a correctly
+# named `aud-` sandbox running the plain image, no session-auditor binary
+# in it, and a Scene 7 that answers prompts normally while never emitting a
+# single audit metric.
+_CALLER_CLAUDE_IMAGE="${CLAUDE_IMAGE-}"
+
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
+
+[ -n "$_CALLER_CLAUDE_IMAGE" ] && CLAUDE_IMAGE="$_CALLER_CLAUDE_IMAGE"
 
 GW=false
 POSITIONAL=()

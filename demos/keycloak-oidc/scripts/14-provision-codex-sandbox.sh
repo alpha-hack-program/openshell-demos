@@ -50,10 +50,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$SCRIPT_DIR/.."
 
+# Preserved across the `source .env` below — see the same guard in
+# 15-provision-claude-sandbox.sh for why: 16-provision-audited-sandbox.sh
+# exports CODEX_IMAGE as the *-audit image, and `set -a; source .env`
+# would otherwise reassign it back to the plain one, yielding an `aud-`
+# sandbox with no session-auditor in it.
+_CALLER_CODEX_IMAGE="${CODEX_IMAGE-}"
+
 DEMO_ENV="$DEMO_DIR/.env"
 if [[ -f "$DEMO_ENV" ]]; then
   set -a; source "$DEMO_ENV"; set +a
 fi
+
+[ -n "$_CALLER_CODEX_IMAGE" ] && CODEX_IMAGE="$_CALLER_CODEX_IMAGE"
 
 GW=false
 POSITIONAL=()
