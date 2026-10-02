@@ -41,6 +41,10 @@ spec:
               value: {{ .Values.heartbeatStaleSecs | quote }}
             - name: MAX_EVENTS
               value: {{ .Values.maxEvents | quote }}
+            {{- with .Values.mcpGateway.toolPrefixes }}
+            - name: MCP_GATEWAY_TOOL_PREFIXES
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: STATE_FILE_PATH
               value: /data/graph-state.json

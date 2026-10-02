@@ -20,7 +20,7 @@ PODMAN := podman
 endif
 
 .PHONY: help build release install run watch \
-        fmt fmt-check clippy check ci \
+        fmt fmt-check clippy test check ci \
         frontend clean doc \
         image-build image-push \
         release-patch release-minor release-major
@@ -55,7 +55,10 @@ fmt-check: ## Check formatting without modifying files
 clippy: ## Lint with clippy, warnings as errors
 	cargo clippy --all-targets -- -D warnings
 
-check: fmt-check clippy ## Run fmt-check and clippy (no test suite yet)
+test: ## Run the unit tests
+	cargo test
+
+check: fmt-check clippy test ## Run fmt-check, clippy and the unit tests
 
 ci: check ## Alias for check, matches CI gate
 

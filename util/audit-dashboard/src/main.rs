@@ -50,6 +50,34 @@ struct Config {
     #[arg(long, env = "TEMPO_URL", default_value = "http://tempo-audit:3200")]
     tempo_url: String,
 
+    /// Tool-name prefixes the RHCL MCP Gateway stamps onto the tools it
+    /// re-exports, exactly as they appear in each
+    /// `MCPServerRegistration.spec.prefix` — e.g.
+    /// `mcp_portfolio_,mcp_crm_calendar_`.
+    ///
+    /// Only needed for gateway-routed sandboxes. There, every server is
+    /// reached through one broker entry in the agent's MCP config, so the
+    /// agent reports a single tool namespace (`mcp__gateway__...`) and the
+    /// graph would otherwise show one `gateway` node instead of an edge
+    /// per server. The real backend is still recoverable, because the
+    /// gateway prefixes the tool itself:
+    /// `mcp__gateway__mcp_portfolio_get_positions`.
+    ///
+    /// This has to be configured rather than parsed out, because nothing
+    /// in the string marks where the server name ends and the tool name
+    /// begins — both contain underscores, so
+    /// `mcp_market_news_get_relevant_news` is genuinely ambiguous without
+    /// knowing the registered set. Leave empty for direct-access
+    /// sandboxes, where the agent's own config keys are already the
+    /// server names.
+    #[arg(
+        long,
+        env = "MCP_GATEWAY_TOOL_PREFIXES",
+        value_delimiter = ',',
+        default_value = ""
+    )]
+    mcp_gateway_tool_prefixes: Vec<String>,
+
     /// How often to re-poll Thanos-querier and rebuild the in-memory graph.
     #[arg(long, env = "REFRESH_INTERVAL_SECS", default_value_t = 5)]
     refresh_interval_secs: u64,
@@ -511,10 +539,36 @@ fn risk_level_from_score(score: f64) -> String {
 /// Claude Code's confirmed MCP tool-name convention: a tool call on server
 /// `<key>` shows up as `mcp__<key>__<tool>`, e.g.
 /// `mcp__portfolio__list_my_clients`.
-fn mcp_server_from_claude_tool_name(name: &str) -> Option<String> {
+fn mcp_server_from_claude_tool_name(name: &str, gateway_prefixes: &[String]) -> Option<String> {
     let rest = name.strip_prefix("mcp__")?;
-    let (server, _tool) = rest.split_once("__")?;
-    (!server.is_empty()).then(|| server.to_string())
+    let (server, tool) = rest.split_once("__")?;
+    if server.is_empty() {
+        return None;
+    }
+    // Gateway-routed sandboxes report one namespace for every backend, so
+    // `server` here is the broker's config key ("gateway"), not the server
+    // that actually ran the tool. Recover the real one from the prefix the
+    // gateway stamped onto the tool. Longest match first: every prefix
+    // starts `mcp_` and server names contain underscores, so one prefix
+    // can be a proper prefix of another.
+    let mut hit: Option<&String> = None;
+    for p in gateway_prefixes.iter().filter(|p| !p.is_empty()) {
+        if tool.starts_with(p.as_str()) && hit.is_none_or(|best| p.len() > best.len()) {
+            hit = Some(p);
+        }
+    }
+    // Rendered back to the same spelling direct-access sandboxes produce
+    // (`mcp_crm_calendar_` -> `crm-calendar`), so one graph can mix both
+    // access paths without showing the same server under two names.
+    match hit {
+        Some(p) => Some(
+            p.trim_end_matches('_')
+                .strip_prefix("mcp_")
+                .unwrap_or(p)
+                .replace('_', "-"),
+        ),
+        None => Some(server.to_string()),
+    }
 }
 
 /// Re-runs three PromQL queries and two TraceQL searches every tick and
@@ -710,7 +764,9 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
             continue;
         };
         let key = (workspace.clone(), sandbox.clone());
-        let is_pre_clear = risk_ts_by_key.get(&key).is_none_or(|ts| *ts <= cleared_before);
+        let is_pre_clear = risk_ts_by_key
+            .get(&key)
+            .is_none_or(|ts| *ts <= cleared_before);
         if is_pre_clear {
             continue;
         }
@@ -769,10 +825,9 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                 continue;
             };
             let server = match kind {
-                "claude" => span
-                    .attrs
-                    .get("tool_name")
-                    .and_then(|t| mcp_server_from_claude_tool_name(t)),
+                "claude" => span.attrs.get("tool_name").and_then(|t| {
+                    mcp_server_from_claude_tool_name(t, &state.config.mcp_gateway_tool_prefixes)
+                }),
                 _ => span
                     .attrs
                     .get("server_name")
@@ -877,7 +932,12 @@ fn load_state(path: &str) -> PersistedState {
 /// never leaves a truncated/corrupt state file behind — `load_state`
 /// reading garbage on the next boot would silently drop every sandbox
 /// this dashboard has ever seen.
-fn persist_state(path: &str, sandboxes: &[SandboxNode], events: &[Event], cleared_before_unix: i64) {
+fn persist_state(
+    path: &str,
+    sandboxes: &[SandboxNode],
+    events: &[Event],
+    cleared_before_unix: i64,
+) {
     let state = PersistedState {
         sandboxes: sandboxes.to_vec(),
         events: events.to_vec(),
@@ -901,4 +961,100 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mcp_server_from_claude_tool_name;
+
+    fn prefixes() -> Vec<String> {
+        [
+            "mcp_portfolio_",
+            "mcp_crm_calendar_",
+            "mcp_market_news_",
+            "mcp_kyc_compliance_",
+            "mcp_compatibility_",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    #[test]
+    fn direct_access_uses_the_config_key() {
+        // No gateway in play: the agent's own MCP config keys are already
+        // the server names, so the tool part must not be consulted.
+        assert_eq!(
+            mcp_server_from_claude_tool_name("mcp__portfolio__get_positions", &[]),
+            Some("portfolio".to_string())
+        );
+    }
+
+    #[test]
+    fn gateway_access_recovers_the_backend_from_the_prefix() {
+        assert_eq!(
+            mcp_server_from_claude_tool_name(
+                "mcp__gateway__mcp_portfolio_get_top_client_by_aum",
+                &prefixes()
+            ),
+            Some("portfolio".to_string())
+        );
+    }
+
+    #[test]
+    fn multiword_server_names_survive_the_round_trip() {
+        // The reason this needs a configured prefix list at all: nothing
+        // in `mcp_market_news_get_relevant_news` marks where the server
+        // name stops, and `market` would be just as plausible a split.
+        // Also pins the `_` -> `-` rendering that keeps gateway-routed
+        // edges spelled the same as direct-access ones.
+        assert_eq!(
+            mcp_server_from_claude_tool_name(
+                "mcp__gateway__mcp_market_news_get_relevant_news",
+                &prefixes()
+            ),
+            Some("market-news".to_string())
+        );
+        assert_eq!(
+            mcp_server_from_claude_tool_name(
+                "mcp__gateway__mcp_crm_calendar_get_meeting_notes",
+                &prefixes()
+            ),
+            Some("crm-calendar".to_string())
+        );
+    }
+
+    #[test]
+    fn longest_prefix_wins() {
+        // A shorter prefix that is also a proper prefix of a longer one
+        // must not shadow it.
+        let overlapping = vec!["mcp_market_".to_string(), "mcp_market_news_".to_string()];
+        assert_eq!(
+            mcp_server_from_claude_tool_name(
+                "mcp__gateway__mcp_market_news_get_relevant_news",
+                &overlapping
+            ),
+            Some("market-news".to_string())
+        );
+    }
+
+    #[test]
+    fn unmatched_tool_falls_back_to_the_config_key() {
+        // A server registered after this list was configured still shows
+        // up on the graph, just collapsed under the broker's name, rather
+        // than vanishing from it.
+        assert_eq!(
+            mcp_server_from_claude_tool_name("mcp__gateway__mcp_unknown_do_thing", &prefixes()),
+            Some("gateway".to_string())
+        );
+    }
+
+    #[test]
+    fn non_mcp_tools_are_ignored() {
+        assert_eq!(mcp_server_from_claude_tool_name("Bash", &prefixes()), None);
+        assert_eq!(
+            mcp_server_from_claude_tool_name("mcp__only_one_part", &prefixes()),
+            None
+        );
+    }
 }
