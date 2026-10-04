@@ -449,16 +449,36 @@ talks to the LLM endpoint directly, exactly as the Claude Code harness
 always has, with the credential injected by the `byo-codex` provider
 profile instead of by the router.
 
-**The endpoint has to be a Responses-API one, and that is not MaaS.**
-codex-cli rejects `wire_api = "chat"` outright since 0.146 — a hard
-config-load error, not a deprecation — and sends MCP tools as
-`"type": "namespace"` tools that only the Responses API carries. Verified:
-DeepSeek's own API serves it (`POST https://api.deepseek.com/responses`
-→ 200), while the MaaS endpoint's `/v1/responses` 500s and its
-`ExternalModel` CRD only supports `openai-chat` and `messages` formats, so
-it cannot proxy one either. Hence new `CODEX_*` variables rather than
-reusing `OPENAI_*`, which on this cluster points at MaaS for the
-chat-completions consumers (mcp-market-news' generator, session-auditor).
+**The endpoint has to be a Responses-API one.** codex-cli rejects
+`wire_api = "chat"` outright since 0.146 — a hard config-load error, not
+a deprecation — and sends MCP tools as `"type": "namespace"` tools that
+only the Responses API carries. Hence new `CODEX_*` variables rather than
+reusing `OPENAI_*`: the model, and therefore the API shape, differs from
+what the chat-completions consumers (mcp-market-news' generator,
+session-auditor) use.
+
+**MaaS can serve it, contrary to a first reading.** `/v1/responses`
+against the stock `deepseek-flash` 500s, and the `ExternalModel` CRD
+documents only `openai-chat` and `messages` — which together look
+conclusive but are not. `apiFormat` is a free-form string, and
+`openai-responses` works; the name came from the gateway's own rejection
+of a wrong guess:
+
+```
+ext_proc_error ... unsupported format combination: openai-responses → responses
+```
+
+i.e. the ext_proc already recognises the incoming shape as
+`openai-responses`. Publishing a model with that format and
+`path: /responses` makes Codex work through MaaS like everything else —
+see `demos/keycloak-oidc/maas/`. Worth confirming with the MaaS folks,
+since it is undocumented.
+
+Two traps on the client side: MaaS serves these under `/v1`, so
+`CODEX_BASE_URL` must end in `/v1` or codex-cli posts to `/responses` and
+gets `BadRequest - unsupported API endpoint`; and a model is invisible
+until it has both a `MaaSModelRef` and a `MaaSSubscription` entry, failing
+with `403 subscription ... does not include model` until then.
 
 Also needed: `--dangerously-bypass-approvals-and-sandbox` on `codex exec`.
 Without it every MCP call dies with "MCP tool call requires approval, but

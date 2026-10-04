@@ -1,0 +1,21 @@
+{
+  "apiVersion": "inference.opendatahub.io/v1alpha1",
+  "kind": "ExternalModel",
+  "metadata": {
+    "name": "deepseek-flash-responses",
+    "namespace": "llm-d-demo"
+  },
+  "spec": {
+    "externalProviderRefs": [
+      {
+        "apiFormat": "openai-responses",
+        "path": "/responses",
+        "ref": {
+          "name": "deepseek-provider"
+        },
+        "targetModel": "deepseek-flash",
+        "weight": 100
+      }
+    ]
+  }
+}

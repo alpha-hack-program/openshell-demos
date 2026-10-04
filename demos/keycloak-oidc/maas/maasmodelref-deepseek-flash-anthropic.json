@@ -1,0 +1,14 @@
+{
+  "apiVersion": "maas.opendatahub.io/v1alpha1",
+  "kind": "MaaSModelRef",
+  "metadata": {
+    "name": "deepseek-flash-anthropic",
+    "namespace": "llm-d-demo"
+  },
+  "spec": {
+    "modelRef": {
+      "kind": "ExternalModel",
+      "name": "deepseek-flash-anthropic"
+    }
+  }
+}

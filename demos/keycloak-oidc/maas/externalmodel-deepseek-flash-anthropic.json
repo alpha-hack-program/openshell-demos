@@ -1,0 +1,21 @@
+{
+  "apiVersion": "inference.opendatahub.io/v1alpha1",
+  "kind": "ExternalModel",
+  "metadata": {
+    "name": "deepseek-flash-anthropic",
+    "namespace": "llm-d-demo"
+  },
+  "spec": {
+    "externalProviderRefs": [
+      {
+        "apiFormat": "messages",
+        "path": "/anthropic/v1/messages",
+        "ref": {
+          "name": "deepseek-provider"
+        },
+        "targetModel": "deepseek-flash",
+        "weight": 100
+      }
+    ]
+  }
+}
