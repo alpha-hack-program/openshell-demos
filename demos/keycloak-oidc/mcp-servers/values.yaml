@@ -182,6 +182,16 @@ embeddings:
 #   - The Gateway's allowedRoutes.namespaces must include registrationNamespace.
 mcpGateway:
   enabled: false
+  # Strip MCP-Protocol-Version from the broker's requests to each backend.
+  # Works around a broker bug: relaying a client that negotiated a newer
+  # MCP revision than the broker's own sends the client's version in the
+  # body but the broker's in the header, and the backend rejects the
+  # mismatch with 400 -- surfaced confusingly as "likely a legacy SSE
+  # server". Claude Code is unaffected (it negotiates the same revision as
+  # the broker); codex-cli is not, and every tool call fails while
+  # discovery still succeeds. See templates/httproute.yaml. Harmless to
+  # leave on: rmcp only enforces the match when the header is present.
+  stripProtocolVersionHeader: true
   # Gateway CR name and namespace
   gatewayName: mcp-gateway
   gatewayNamespace: openshift-ingress

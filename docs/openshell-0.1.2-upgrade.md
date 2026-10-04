@@ -472,37 +472,52 @@ bob codex ...`): `mcp: mcp-portfolio/get_top_client_by_aum (completed)` →
 "Clara Fontán (cli-001), $38,750", the same answer the Claude harness
 gives, with session-auditor's Stop hook firing.
 
-### Open: Codex + `--gw` fails inside the MCP Gateway broker
+### Codex + `--gw`: a broker protocol-version bug, worked around
 
-Gateway-routed Codex still does not work, and the fault is not in this
-repo's wiring. Tool *discovery* succeeds, then every invocation fails with
-the broker's own error (`component=router`, from the mcp-gateway
-Deployment's log):
+Gateway-routed Codex failed at first: tool *discovery* succeeded, then
+every invocation died with the broker's own error (`component=router`):
 
 ```
 failed to create session for mcp server: failed to create client:
 transport error: server returned 4xx for initialize POST, likely a legacy SSE server
 ```
 
-That is the broker failing to open its *upstream* session, not Codex
-failing to reach the broker. Evidence it is a broker/client interop bug
-rather than a gateway misconfiguration:
+That message is a red herring — nothing is a legacy SSE server. Tracing
+it down: Authorino reported `authorized: true`, so not auth; the Gateway
+access log showed the broker (`mcp-router`) getting **400** from the
+backend; and the backend's own log gave the real reason:
 
-- the same gateway, at the same moment, serves Claude Code tool calls
-  correctly end to end;
-- a raw `curl` MCP handshake from inside the very same Codex sandbox
-  returns all 16 tools;
-- an unauthenticated request returns 401, not the observed 4xx, so this
-  is not simply a missing token.
+```
+rejecting initialize: MCP-Protocol-Version header does not match
+params.protocolVersion   header="2025-06-18" body="2025-11-25"
+```
 
-Codex's client also gets `DELETE /mcp → 403` on session teardown, which
-looks like the authz AuthPolicy's CEL predicate finding no JSON-RPC body
-on a DELETE — harmless, but another sign the gateway and rmcp disagree
-about the streamable-HTTP contract. Worth filing against the MCP Gateway
-Operator (Tech Preview) alongside the `<gateway>-istio` naming bug.
+**The broker relays the downstream client's negotiated MCP revision in
+the JSON body but keeps its own, older value in the `MCP-Protocol-Version`
+header.** The backend's rmcp server rejects the disagreement with 400.
+Claude Code negotiates 2025-06-18 — the same revision as the broker — so
+header and body agree and it never trips; codex-cli negotiates 2025-11-25
+and every tool call fails, while discovery (which needs no upstream
+session) keeps working and makes it look like a partial outage.
 
-Until that is fixed, use Codex **without** `--gw`; Claude Code is the
-gateway-routed path that works.
+Worked around in this repo rather than waiting on the broker:
+`mcp-servers`' HTTPRoutes now strip `MCP-Protocol-Version` on the way to
+each backend (`mcpGateway.stripProtocolVersionHeader`, default on). rmcp
+only enforces the match when the header is present and otherwise honours
+the body's version — which is the one the client actually asked for.
+Verified directly against a backend: initialize succeeds for every
+revision from 2024-11-05 to 2026-02-06 when no header is sent.
+
+**Verified live after the fix**, audited + gateway-routed:
+`mcp: gateway/mcp_portfolio_get_top_client_by_aum (completed)` →
+"Clara Fontán (cli-001), 38,750.0", with session-auditor's Stop hook
+firing and `aud-codex-bob` appearing on the audit dashboard with
+per-server edges.
+
+Still cosmetic: codex gets `DELETE /mcp → 403` on session teardown, after
+the answer is delivered — most likely the authz AuthPolicy's CEL
+predicate finding no JSON-RPC body on a DELETE. Worth filing upstream
+alongside the header bug and the `<gateway>-istio` naming bug.
 
 ## Already fixed on this branch (verified locally, no cluster needed)
 

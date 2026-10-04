@@ -26,6 +26,34 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      {{- if $gw.stripProtocolVersionHeader }}
+      # Workaround for an MCP Gateway broker bug. When it relays a client
+      # that negotiated a newer MCP revision than the broker's own, it
+      # forwards the client's version in the JSON body but keeps its own,
+      # older value in the MCP-Protocol-Version header. The backend's rmcp
+      # server rejects the disagreement outright:
+      #
+      #   rejecting initialize: MCP-Protocol-Version header does not match
+      #   params.protocolVersion  header="2025-06-18" body="2025-11-25"
+      #
+      # -> HTTP 400, which the broker reports upstream as the misleading
+      # "server returned 4xx for initialize POST, likely a legacy SSE
+      # server". Claude Code is unaffected because it negotiates
+      # 2025-06-18, matching the broker; codex-cli negotiates 2025-11-25
+      # and every one of its tool calls fails while discovery still works.
+      #
+      # Removing the header is safe: rmcp only enforces the match when the
+      # header is present, and falls back to the body's protocolVersion
+      # otherwise -- which is the version the client actually asked for.
+      # Verified against the backend directly: initialize succeeds for
+      # every revision from 2024-11-05 to 2026-02-06 when no header is sent.
+      # Drop this once the broker keeps the two in sync.
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - MCP-Protocol-Version
+      {{- end }}
       backendRefs:
         - name: {{ .name }}
           namespace: {{ $.Release.Namespace }}
