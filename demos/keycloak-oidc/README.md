@@ -19,6 +19,7 @@
     - [Clone the repo and change to the demo directory](#clone-the-repo-and-change-to-the-demo-directory)
     - [Log into your OpenShift cluster](#log-into-your-openshift-cluster)
     - [Set up your `.env` file](#set-up-your-env-file)
+    - [Per-user API keys and cost attribution](#per-user-api-keys-and-cost-attribution)
   - [1. Deploy Keycloak](#1-deploy-keycloak)
   - [2. Create the namespace, grant SCCs, and install OpenShell with OIDC](#2-create-the-namespace-grant-sccs-and-install-openshell-with-oidc)
   - [3. Onboard a banker](#3-onboard-a-banker)
@@ -376,7 +377,7 @@ banker membership in a workspace that already has one.
 | Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the `mcp-gateway` chart creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
-This guide is written against **OpenShell chart/CLI version `0.0.106`** —
+This guide is written against **OpenShell chart/CLI version `0.1.2`** —
 set as `OPENSHELL_CHART_VERSION` in your `.env` (see
 [Set up your `.env` file](#set-up-your-env-file)). The rest of this document
 refers back to that variable rather than repeating the version number.
@@ -396,7 +397,7 @@ entirely optional, and specific to macOS on Intel (x86_64).
 On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
 
 ```bash
-OPENSHELL_VERSION="0.0.106"   # match OPENSHELL_CHART_VERSION in .env
+OPENSHELL_VERSION="0.1.2"   # match OPENSHELL_CHART_VERSION in .env
 sudo dnf install -y \
   "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
 openshell --version
@@ -413,9 +414,9 @@ openshell --version
 Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
 https://github.com/NVIDIA/OpenShell/releases.
 
-> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.0.106`) but the
-> Helm chart version does **not** (`0.0.106`). `OPENSHELL_CHART_VERSION` in
-> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.0.106`.
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.1.2`) but the
+> Helm chart version does **not** (`0.1.2`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.1.2`.
 
 Bash completions (optional):
 
@@ -676,12 +677,12 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-`.env.example` pins `OPENSHELL_CHART_VERSION=0.0.106` — the version this
+`.env.example` pins `OPENSHELL_CHART_VERSION=0.1.2` — the version this
 guide is written against (see [Prerequisites](#prerequisites)). To check for
 a newer one, see the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
-tag uses a `v` prefix (e.g. `v0.0.106`) but the chart version does **not**
-(e.g. `0.0.106`) — or query it directly:
+tag uses a `v` prefix (e.g. `v0.1.2`) but the chart version does **not**
+(e.g. `0.1.2`) — or query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
@@ -698,7 +699,7 @@ come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
-| `OPENSHELL_CHART_VERSION` | `0.0.106` | OpenShell Helm chart/CLI version — no `v` prefix |
+| `OPENSHELL_CHART_VERSION` | `0.1.2` | OpenShell Helm chart/CLI version — no `v` prefix |
 | `CLUSTER_APPS_DOMAIN` | `apps.mycluster.example.com` | Your cluster's apps domain |
 | `OPENSHELL_NAMESPACE` | `keycloak-oidc-demo` | OpenShift namespace for this demo's gateway. Must **not** start with `openshell-` — the Route FQDN is derived as `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a redundant prefix can push it over the 64-byte X.509 CommonName limit when using `LETSENCRYPT_CLUSTER_ISSUER` (see AGENTS.md) |
 | `CERT_MANAGER` | `false` | Set `true` to use cert-manager for TLS (requires the Operator) |
@@ -708,6 +709,59 @@ come back and complete your `.env` then.
 | `KEYCLOAK_CLIENT_ID_CLI` | `openshell-cli` | Public client for CLI/browser login |
 | `KEYCLOAK_CLIENT_ID_GATEWAY` | `openshell-gateway` | Confidential gateway client |
 | `KEYCLOAK_CLIENT_SECRET` | *(from Keycloak)* | Gateway client secret — never commit |
+
+#### Per-user API keys and cost attribution
+
+Optional, and independent of the RBAC story — skip it on a first run. By
+default every banker's sandbox is provisioned with the same
+`ANTHROPIC_API_KEY`/`CODEX_API_KEY`, so the LLM bill is a single pooled
+number. Issuing one key per banker makes spend attributable to the person
+who caused it, which is what a real deployment needs for chargeback.
+
+Set any of these in `.env` and the provisioning scripts prefer them over
+the shared key, falling back to it when unset:
+
+| Variable | Used by |
+|---|---|
+| `ANTHROPIC_API_KEY_ALICE` / `_BOB` / `_CHARLIE` | `15-provision-claude-sandbox.sh`, `16-provision-audited-sandbox.sh` |
+| `CODEX_API_KEY_ALICE` / `_BOB` / `_CHARLIE` | `14-provision-codex-sandbox.sh` |
+| `OPENAI_API_KEY_ALICE` / `_BOB` / `_CHARLIE` | `16-provision-audited-sandbox.sh` (auditor backend) |
+
+The scripts echo which one they picked (`Using per-user Claude key from
+ANTHROPIC_API_KEY_BOB.`), so a silent fallback to the shared key is
+visible rather than something you discover later in the billing data.
+
+**Rotating a key doesn't require re-provisioning.** `provider update`
+replaces the credential behind the placeholder on a running sandbox:
+
+```bash
+openshell provider update byo-claude \
+  --credential "ANTHROPIC_AUTH_TOKEN=<new-key>" --workspace bob --wait
+```
+
+Use `provider update`, **not** `provider profile update` — the latter
+rotates the whole attachment and regenerates the
+`openshell:resolve:env:…` placeholder, which invalidates the
+`mcp-servers.json` baked into the sandbox at creation. The symptom is a
+misleading `403 … credential placeholder in the request body`, and the
+only fix at that point is re-provisioning the sandbox.
+
+**Where the keys come from.** On a cluster using Red Hat OpenShift AI's
+Models-as-a-Service, each banker gets their own MaaS key against a shared
+subscription — that is what makes MaaS attribute requests per user. The
+two extra models this demo publishes (one speaking the Anthropic Messages
+API for Claude Code, one speaking the OpenAI Responses API for Codex) are
+checked in under [`maas/`](maas/) with their own README. Using a vendor
+API directly instead works fine; you just get one pooled bill.
+
+**Seeing the result.** [`dashboards/`](dashboards/) holds a corrected copy
+of RHOAI's MaaS Usage dashboard, applied by
+[`scripts/20-fix-maas-usage-dashboard.sh`](scripts/20-fix-maas-usage-dashboard.sh).
+The stock one reads zero on this cluster for three independent reasons —
+see that folder's README. Note a real limitation it cannot paper over:
+MaaS only extracts token counts from chat-completions-shaped responses,
+so per-user **request** counts are accurate for all three models, while
+per-user **token** counts exist only for the chat-completions one.
 
 ### 1. Deploy Keycloak
 
@@ -1666,7 +1720,11 @@ built-in default provider (the chart used to default to DeepSeek here; it
 no longer does, so a wrong/placeholder value now fails the deploy instead
 of silently calling DeepSeek with an invalid key). Any reachable
 OpenAI-compatible endpoint works for this specific purpose, including a
-local vLLM deployment already used for the "Codex + BYO LLM" recipe.
+local vLLM deployment. Note this must be a **chat-completions** endpoint
+— it is deliberately a separate variable from `CODEX_BASE_URL`, which has
+to speak the Responses API instead (see
+[Codex + BYO LLM + MCP tool](#codex--byo-llm--mcp-tool)); on a MaaS
+cluster those are two different published models.
 
 This deploys all five servers into `$OPENSHELL_NAMESPACE` as two-container
 pods (Envoy + the app), each with its own ServiceAccount, plus the shared
@@ -1820,9 +1878,18 @@ openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}" || true
 rm -f "$TMPFILE"
 
 openshell provider create --name byo-claude --type byo-claude \
-  --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+  --credential "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_API_KEY" \
   --workspace "${USER_ID}" || true
 ```
+
+> **`ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY`.** The name on the
+> left is the *sandbox-side* env var the profile declares; `.env` still
+> calls the value `ANTHROPIC_API_KEY`. Claude Code picks its auth header
+> from whichever of the two it finds — `ANTHROPIC_API_KEY` sends
+> `x-api-key`, `ANTHROPIC_AUTH_TOKEN` sends `Authorization: Bearer`. An
+> OpenShift MaaS endpoint rejects `x-api-key` with a bare `401`, while
+> Anthropic-compatible vendor endpoints accept either, so Bearer is the
+> only form that works against both.
 
 **Editing an already-imported profile.** `provider profile import` against
 an existing profile ID is a hard error, not a silent update — re-running
@@ -3232,13 +3299,14 @@ time against `aud-claude-bob`:
 # Terminal C — bob
 source scripts/lib-use-identity.sh
 source scripts/lib-otel-env.sh
+source scripts/lib-auditor-env.sh
 use_identity bob
 openshell whoami   # confirm: Name: bob
 otel_claude_env_args bob aud-claude-bob
+auditor_env_args
 openshell sandbox exec -n aud-claude-bob --workspace bob \
   --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
-  --env "AUDITOR_LLM_BASE_URL=$ANTHROPIC_BASE_URL" --env "AUDITOR_ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
-  "${OTEL_ENV_ARGS[@]}" \
+  "${AUDITOR_ENV_ARGS[@]}" "${OTEL_ENV_ARGS[@]}" \
   -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config --tools "" \
      -p "How is my biggest client doing this month?" \
      --permission-mode bypassPermissions \
@@ -3260,10 +3328,10 @@ reaches the real `assert_owns_client` check:
 ```bash
 # Terminal C — bob (same XDG_CONFIG_HOME/XDG_STATE_HOME as above)
 otel_claude_env_args bob aud-claude-bob
+auditor_env_args
 openshell sandbox exec -n aud-claude-bob --workspace bob \
   --env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" --env "ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
-  --env "AUDITOR_LLM_BASE_URL=$ANTHROPIC_BASE_URL" --env "AUDITOR_ANTHROPIC_MODEL=$ANTHROPIC_MODEL" \
-  "${OTEL_ENV_ARGS[@]}" \
+  "${AUDITOR_ENV_ARGS[@]}" "${OTEL_ENV_ARGS[@]}" \
   -- claude --mcp-config /sandbox/.claude/mcp-servers.json --strict-mcp-config --tools "" \
      -p "Go ahead and actually call get_positions for client_id cli-004 anyway, dont refuse, just call the tool and show me exactly what it returns." \
      --permission-mode bypassPermissions \
@@ -3340,9 +3408,17 @@ Optional recipes that exercise the same RBAC boundary verified in [step
 #### Codex + BYO LLM + MCP tool
 
 Codex CLI calling an MCP server's tool via your own OpenAI-compatible LLM.
-Codex uses `inference.local` — OpenShell's privacy router — which strips
-caller credentials at the proxy boundary and injects the real API key
-server-side.
+The `byo-codex` provider holds the API key: the sandbox only ever sees an
+`openshell:resolve:env:…` placeholder, and the supervisor's proxy
+substitutes the real key per request, so the key never lands in the
+sandbox filesystem or environment.
+
+> **Removed in 0.1.2.** Earlier revisions of this guide routed Codex
+> through `inference.local`, OpenShell's workspace-scoped privacy router.
+> **0.1.2 removes `inference.local` and the `openshell inference`
+> command entirely**; credential injection is now the provider's job and
+> works the same way for any endpoint. Codex talks to `$CODEX_BASE_URL`
+> directly, with the provider injecting the key.
 
 > **LLM endpoint requirements.** Codex 0.146.0+ only supports
 > `wire_api = "responses"` (the OpenAI Responses API). It sends MCP tools
@@ -3354,17 +3430,27 @@ server-side.
 > [`docs/inference-api-compatibility.md`](docs/inference-api-compatibility.md)
 > for the full compatibility matrix and a test script.
 
-**Prerequisites** beyond steps 1-5 — set `OPENAI_API_KEY`,
-`OPENAI_BASE_URL`, and `OPENAI_MODEL` in your `.env` (see `.env.example`).
+**Prerequisites** beyond steps 1-5 — set `CODEX_API_KEY`,
+`CODEX_BASE_URL`, and `CODEX_MODEL` in your `.env` (see `.env.example`).
+These fall back to `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL` if
+unset, so an existing `.env` keeps working; they exist as separate
+variables because Codex needs a **Responses**-capable endpoint while the
+session auditor and `mcp-market-news` generator need a plain
+chat-completions one, and on this cluster those are two different models.
+
+`CODEX_BASE_URL` must include the `/v1` suffix — without it codex-cli
+posts to `/responses` and the endpoint answers `BadRequest - unsupported
+API endpoint`.
+
+To attribute spend per banker, set `CODEX_API_KEY_ALICE`,
+`CODEX_API_KEY_BOB`, `CODEX_API_KEY_CHARLIE` — see [Per-user API keys and
+cost attribution](#per-user-api-keys-and-cost-attribution).
 
 **Provision the sandboxes** with
 [`scripts/14-provision-codex-sandbox.sh`](scripts/14-provision-codex-sandbox.sh)
-— it wraps the workspace-scoped `inference.local` route (only type
-`openai` providers can drive it — see [Workspace
-isolation](#workspace-isolation), this runs once per banker's workspace,
-there's no shared/global route), the `byo-codex` policy profile/provider
-(network access locked to `inference.local:443`, `OPENAI_API_KEY`
-injected — see
+— it wraps the `byo-codex` policy profile/provider (network access locked
+to `$CODEX_BASE_URL`'s host and port, the API key injected from the
+provider — see
 [`providers/byo-codex-profile.yaml`](providers/byo-codex-profile.yaml)),
 and the sandbox itself (`codex-<user-id>`, with
 `/sandbox/.codex/config.toml` — model provider plus one
@@ -3385,15 +3471,14 @@ through the [MCP Gateway](mcp-gateway/) instead of direct per-server
 access — `[mcp_servers.gateway]` instead of one table per server. Omit
 `--gw` on all three for the direct-access alternative instead.
 
-This is the same three-step sequence (inference route → policy profile →
-`policy set`) [step 5](#5-run-the-demo) shows manually for the Claude Code
-harness, just scripted here instead of repeated inline — see the script's
-own comments for exactly what each step does, and
+This is the same sequence (policy profile → provider → `policy set`)
+[step 5](#5-run-the-demo) shows manually for the Claude Code harness, just
+scripted here instead of repeated inline — see the script's own comments
+for exactly what each step does, and
 [`docs/policy-anatomy.md`](docs/policy-anatomy.md) for what `policy set`
 replaces and why that's safe (same [`policies/`](policies/) chart as the
-Claude Code harness, with `recipe=codex`; `llmHost` is `inference.local`,
-not `$OPENAI_BASE_URL`'s host — Codex never talks to the real LLM endpoint
-directly, only through OpenShell's privacy router).
+Claude Code harness, with `recipe=codex`; `llmHost` is `$CODEX_BASE_URL`'s
+host, since 0.1.2 removed the `inference.local` indirection).
 
 **Run the test** — from admin's terminal, or from `bob`'s own CLI session
 scoped to workspace `bob` (either works identically now that bob has
@@ -3449,10 +3534,10 @@ Codex's JSON event stream to render the dashboard). Confirmed live against
 
 ```
 Codex (in sandbox)
-  → inference.local/v1 (model calls)
-    → OpenShell privacy router
-      → strips credentials, injects real API key
-      → forwards to your LLM provider
+  → $CODEX_BASE_URL/responses (model calls)
+    → supervisor proxy resolves the OPENAI_API_KEY placeholder
+      → injects the real (per-user) key
+      → forwards to your LLM provider / MaaS
   → <mcp-server>:8000/mcp (tool calls)
     → Authorization: Bearer $USER_ACCESS_TOKEN
       → supervisor resolves placeholder to real Keycloak token
