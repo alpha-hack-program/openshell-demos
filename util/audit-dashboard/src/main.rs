@@ -78,6 +78,27 @@ struct Config {
     )]
     mcp_gateway_tool_prefixes: Vec<String>,
 
+    /// Agent config keys that name the *gateway* rather than a real MCP
+    /// server. codex-cli tags its MCP connection spans with
+    /// `server_name=<config key>`, which for a gateway-routed sandbox is
+    /// the single broker entry ("gateway") no matter which backend
+    /// actually ran the tool — so taking it at face value draws one
+    /// `gateway` edge and hides every real server. Connection spans whose
+    /// `server_name` is listed here are skipped; those sandboxes get their
+    /// edges from tool spans instead, where the backend is recoverable
+    /// from the gateway-stamped tool prefix.
+    ///
+    /// Direct-access sandboxes are unaffected: their `server_name` is the
+    /// real server (`mcp-portfolio`), won't match this list, and keeps
+    /// producing an edge straight from the connection span.
+    #[arg(
+        long,
+        env = "MCP_GATEWAY_SERVER_KEYS",
+        value_delimiter = ',',
+        default_value = "gateway"
+    )]
+    mcp_gateway_server_keys: Vec<String>,
+
     /// How often to re-poll Thanos-querier and rebuild the in-memory graph.
     #[arg(long, env = "REFRESH_INTERVAL_SECS", default_value_t = 5)]
     refresh_interval_secs: u64,
@@ -548,27 +569,76 @@ fn mcp_server_from_claude_tool_name(name: &str, gateway_prefixes: &[String]) -> 
     // Gateway-routed sandboxes report one namespace for every backend, so
     // `server` here is the broker's config key ("gateway"), not the server
     // that actually ran the tool. Recover the real one from the prefix the
-    // gateway stamped onto the tool. Longest match first: every prefix
-    // starts `mcp_` and server names contain underscores, so one prefix
-    // can be a proper prefix of another.
+    // gateway stamped onto the tool.
+    match server_from_gateway_prefix(tool, gateway_prefixes) {
+        Some(real) => Some(real),
+        None => Some(server.to_string()),
+    }
+}
+
+/// Longest gateway tool-prefix that `tool` starts with, rendered back to
+/// the same spelling direct-access sandboxes produce (`mcp_crm_calendar_`
+/// -> `crm-calendar`) so one graph can mix both access paths without
+/// showing the same server under two names.
+///
+/// Longest match wins: every prefix starts `mcp_` and server names contain
+/// underscores, so one prefix can be a proper prefix of another.
+fn server_from_gateway_prefix(tool: &str, gateway_prefixes: &[String]) -> Option<String> {
     let mut hit: Option<&String> = None;
     for p in gateway_prefixes.iter().filter(|p| !p.is_empty()) {
         if tool.starts_with(p.as_str()) && hit.is_none_or(|best| p.len() > best.len()) {
             hit = Some(p);
         }
     }
-    // Rendered back to the same spelling direct-access sandboxes produce
-    // (`mcp_crm_calendar_` -> `crm-calendar`), so one graph can mix both
-    // access paths without showing the same server under two names.
-    match hit {
-        Some(p) => Some(
-            p.trim_end_matches('_')
-                .strip_prefix("mcp_")
-                .unwrap_or(p)
-                .replace('_', "-"),
-        ),
-        None => Some(server.to_string()),
+    hit.map(|p| {
+        p.trim_end_matches('_')
+            .strip_prefix("mcp_")
+            .unwrap_or(p)
+            .replace('_', "-")
+    })
+}
+
+/// codex-cli's MCP tool-name conventions, which are *not* Claude Code's.
+/// Confirmed live against codex-cli 0.153.4 on a gateway-routed sandbox,
+/// which emits both of these spellings for the same call:
+///
+///   mcp_portfolio_get_top_client_by_aum
+///   mcp__gatewaymcp_portfolio_get_top_client_by_aum
+///
+/// The second is the interesting one: it is `mcp__` + the config key
+/// (`gateway`) + the gateway-stamped tool, concatenated with **no**
+/// separator before the tool. It looks like Claude's
+/// `mcp__<server>__<tool>` but has only one `__`, so
+/// `mcp_server_from_claude_tool_name` splits on `__`, finds no second
+/// delimiter, returns None, and the span is silently dropped — which is
+/// why these sandboxes fell back to the connection span's
+/// `server_name=gateway` and rendered a single `gateway` edge.
+///
+/// Rather than special-casing that exact shape, locate the gateway prefix
+/// anywhere it can legitimately begin: at the start of the string, or
+/// immediately after an `mcp__<key>` header. Anchoring to those two
+/// positions (instead of a bare `contains`) keeps a server name appearing
+/// inside some unrelated tool's text from being mistaken for a prefix.
+fn mcp_server_from_codex_tool_name(name: &str, gateway_prefixes: &[String]) -> Option<String> {
+    if let Some(real) = server_from_gateway_prefix(name, gateway_prefixes) {
+        return Some(real);
     }
+    // `mcp__<key>` header followed directly by the stamped tool.
+    let rest = name.strip_prefix("mcp__")?;
+    let mut best: Option<String> = None;
+    for p in gateway_prefixes.iter().filter(|p| !p.is_empty()) {
+        if let Some(idx) = rest.find(p.as_str()) {
+            // Everything before the prefix must be the config key alone —
+            // no further `_` boundaries to cross.
+            if !rest[..idx].contains("__")
+                && let Some(real) = server_from_gateway_prefix(&rest[idx..], gateway_prefixes)
+                && best.as_ref().is_none_or(|b| real.len() > b.len())
+            {
+                best = Some(real);
+            }
+        }
+    }
+    best
 }
 
 /// Re-runs three PromQL queries and two TraceQL searches every tick and
@@ -680,6 +750,24 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     .await
     .unwrap_or_else(|e| {
         eprintln!("audit-dashboard: tempo query (codex server_name) failed: {e}");
+        Vec::new()
+    });
+    // codex-cli's *tool* spans, which carry the gateway-stamped tool name
+    // the connection spans above lack. Deliberately a separate query
+    // rather than a widened `claude_mcp_calls`: the two agents spell MCP
+    // tools differently (see mcp_server_from_codex_tool_name), and codex
+    // also emits plain non-MCP tool names here like `exec_command`, which
+    // the resolver drops. Can't be folded into the server_name query
+    // either — a given span has one attribute or the other, never both.
+    let codex_tool_calls = query_tempo_search(
+        &state.http,
+        tempo_base,
+        r#"{span.tool_name!="" && resource.workspace!="" && resource.sandbox!=""}"#,
+        TEMPO_SEARCH_LIMIT,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("audit-dashboard: tempo query (codex tool_name) failed: {e}");
         Vec::new()
     });
 
@@ -814,7 +902,11 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
     // `start_unix.is_some_and(...)` rather than requiring it: a span with
     // no parseable start time fails open (still shown) rather than
     // silently vanishing if Tempo's response shape ever changes.
-    for (kind, span_list) in [("claude", &claude_mcp_calls), ("codex", &codex_mcp_calls)] {
+    for (kind, span_list) in [
+        ("claude", &claude_mcp_calls),
+        ("codex", &codex_mcp_calls),
+        ("codex_tool", &codex_tool_calls),
+    ] {
         for span in span_list {
             if span.start_unix.is_some_and(|ts| ts <= cleared_before) {
                 continue;
@@ -828,9 +920,23 @@ async fn refresh_graph(state: &AppState) -> Result<(), String> {
                 "claude" => span.attrs.get("tool_name").and_then(|t| {
                     mcp_server_from_claude_tool_name(t, &state.config.mcp_gateway_tool_prefixes)
                 }),
+                "codex_tool" => span.attrs.get("tool_name").and_then(|t| {
+                    mcp_server_from_codex_tool_name(t, &state.config.mcp_gateway_tool_prefixes)
+                }),
+                // Connection span: the config key is the server only for
+                // direct access. For a gateway-routed sandbox it is the
+                // broker's own key, which would draw a single `gateway`
+                // edge over the top of the real ones recovered above.
                 _ => span
                     .attrs
                     .get("server_name")
+                    .filter(|s| {
+                        !state
+                            .config
+                            .mcp_gateway_server_keys
+                            .iter()
+                            .any(|k| !k.is_empty() && k == *s)
+                    })
                     .map(|s| s.strip_prefix("mcp-").unwrap_or(s).to_string()),
             };
             let Some(server) = server else { continue };
@@ -965,7 +1071,7 @@ fn now_unix() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::mcp_server_from_claude_tool_name;
+    use super::{mcp_server_from_claude_tool_name, mcp_server_from_codex_tool_name};
 
     fn prefixes() -> Vec<String> {
         [
@@ -1054,6 +1160,99 @@ mod tests {
         assert_eq!(mcp_server_from_claude_tool_name("Bash", &prefixes()), None);
         assert_eq!(
             mcp_server_from_claude_tool_name("mcp__only_one_part", &prefixes()),
+            None
+        );
+    }
+
+    // ---- codex-cli tool names -------------------------------------
+    // Every string below was captured from Tempo on a live
+    // gateway-routed codex sandbox (codex-cli 0.153.4), not invented.
+
+    #[test]
+    fn codex_bare_stamped_tool_resolves() {
+        assert_eq!(
+            mcp_server_from_codex_tool_name("mcp_portfolio_get_top_client_by_aum", &prefixes()),
+            Some("portfolio".to_string())
+        );
+        assert_eq!(
+            mcp_server_from_codex_tool_name(
+                "mcp_kyc_compliance_search_regulatory_guidance",
+                &prefixes()
+            ),
+            Some("kyc-compliance".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_single_underscore_gateway_header_resolves() {
+        // The shape that broke the Claude parser: `mcp__` + config key +
+        // stamped tool, with NO `__` before the tool. split_once("__")
+        // finds no second delimiter and drops the span, which is exactly
+        // how these sandboxes ended up rendering a lone `gateway` edge.
+        assert_eq!(
+            mcp_server_from_claude_tool_name(
+                "mcp__gatewaymcp_portfolio_get_top_client_by_aum",
+                &prefixes()
+            ),
+            None,
+            "precondition: the Claude parser cannot read codex's spelling"
+        );
+        assert_eq!(
+            mcp_server_from_codex_tool_name(
+                "mcp__gatewaymcp_portfolio_get_top_client_by_aum",
+                &prefixes()
+            ),
+            Some("portfolio".to_string())
+        );
+        assert_eq!(
+            mcp_server_from_codex_tool_name(
+                "mcp__gatewaymcp_crm_calendar_get_upcoming_meetings",
+                &prefixes()
+            ),
+            Some("crm-calendar".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_longest_prefix_still_wins() {
+        let overlapping = vec!["mcp_market_".to_string(), "mcp_market_news_".to_string()];
+        assert_eq!(
+            mcp_server_from_codex_tool_name(
+                "mcp__gatewaymcp_market_news_get_relevant_news",
+                &overlapping
+            ),
+            Some("market-news".to_string())
+        );
+        assert_eq!(
+            mcp_server_from_codex_tool_name("mcp_market_news_get_relevant_news", &overlapping),
+            Some("market-news".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_non_mcp_tools_are_dropped() {
+        // codex emits ordinary tool calls on the same attribute; they must
+        // not become graph edges. Unlike the Claude parser there is no
+        // config key to fall back to here -- the connection span owns that
+        // -- so an unresolvable name yields None rather than a bogus node.
+        assert_eq!(
+            mcp_server_from_codex_tool_name("exec_command", &prefixes()),
+            None
+        );
+        assert_eq!(
+            mcp_server_from_codex_tool_name("mcp__gatewaymcp_unknown_do_thing", &prefixes()),
+            None
+        );
+        assert_eq!(mcp_server_from_codex_tool_name("", &prefixes()), None);
+    }
+
+    #[test]
+    fn codex_resolution_needs_a_configured_prefix_list() {
+        // Direct-access codex sandboxes configure no prefixes and get
+        // their edges from the connection span's server_name instead, so
+        // the tool-name path must stay silent rather than guess a split.
+        assert_eq!(
+            mcp_server_from_codex_tool_name("mcp_portfolio_get_positions", &[]),
             None
         );
     }

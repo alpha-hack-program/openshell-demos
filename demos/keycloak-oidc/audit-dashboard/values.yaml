@@ -1,6 +1,6 @@
 image:
   repository: quay.io/atarazana/audit-dashboard
-  tag: 0.1.12
+  tag: 0.1.13
   pullPolicy: IfNotPresent
 
 # Optional — leave empty to let OpenShift auto-generate a hostname (this
@@ -52,6 +52,17 @@ mcpGateway:
     - mcp_market_news_
     - mcp_kyc_compliance_
     - mcp_compatibility_
+  # Agent MCP-config keys that name the gateway rather than a real server.
+  # codex-cli tags its MCP *connection* spans with the config key, which on
+  # a gateway-routed sandbox is this single broker entry no matter which
+  # backend served the call — so without this the graph draws one `gateway`
+  # edge and hides every real server. Listed keys are ignored on connection
+  # spans; those sandboxes get their edges from tool spans instead, where
+  # the backend is recoverable from the stamped tool prefix above.
+  # Must match the `[mcp_servers.<key>]` table name that
+  # scripts/14-provision-codex-sandbox.sh --gw writes into config.toml.
+  serverKeys:
+    - gateway
 
 # A sandbox/MCP-server node is never removed from the graph once observed
 # (see util/audit-dashboard/src/main.rs's refresh_graph) — it only ever

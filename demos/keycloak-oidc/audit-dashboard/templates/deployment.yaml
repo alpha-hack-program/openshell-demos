@@ -45,6 +45,10 @@ spec:
             - name: MCP_GATEWAY_TOOL_PREFIXES
               value: {{ join "," . | quote }}
             {{- end }}
+            {{- with .Values.mcpGateway.serverKeys }}
+            - name: MCP_GATEWAY_SERVER_KEYS
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: STATE_FILE_PATH
               value: /data/graph-state.json
