@@ -49,9 +49,16 @@ if ! oc get persesdashboard "$SRC_NAME" -n "$SRC_NS" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Rendered artifact is kept in the repo, not just applied: it is the thing
+# you can diff when RHOAI ships a new stock dashboard, and it lets someone
+# apply the fix without cluster-read access to the original.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT_FILE="${OUT_FILE:-$SCRIPT_DIR/../dashboards/maas-usage-fixed.json}"
+mkdir -p "$(dirname "$OUT_FILE")"
+
 SRC_JSON=$(mktemp --suffix=.json)
-DST_JSON=$(mktemp --suffix=.json)
-trap 'rm -f "$SRC_JSON" "$DST_JSON"' EXIT
+DST_JSON="$OUT_FILE"
+trap 'rm -f "$SRC_JSON"' EXIT
 oc get persesdashboard "$SRC_NAME" -n "$SRC_NS" -o json > "$SRC_JSON"
 
 DST_NAME="$DST_NAME" python3 - "$SRC_JSON" "$DST_JSON" <<'PY'
@@ -172,14 +179,19 @@ if total == 0:
           "already, in which case this copy is redundant.")
 PY
 
+echo "Wrote $OUT_FILE"
+
 if [ "$DRY_RUN" = true ]; then
-  echo "--dry-run: not applying. Rendered manifest:"
-  head -20 "$DST_JSON"
+  echo "--dry-run: rendered only, not applied."
   exit 0
 fi
 
 oc apply -f "$DST_JSON"
 echo
 echo "Published $SRC_NS/$DST_NAME alongside the untouched original."
-echo "Verify it now returns data (the stock names return nothing):"
+echo
+echo "Note: panels use increase() over the dashboard's selected range, so a"
+echo "window with no traffic shows 0 rather than cumulative totals -- widen"
+echo "the range, or send a request, before concluding it is still broken."
+echo "Verify directly (the stock _total names return nothing):"
 echo "  sum by (user, subscription) (increase(authorized_calls{user!=\"\"}[24h]))"

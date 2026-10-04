@@ -1,0 +1,587 @@
+{
+  "apiVersion": "perses.dev/v1alpha2",
+  "kind": "PersesDashboard",
+  "metadata": {
+    "name": "dashboard-3-maas-usage-admin-fixed",
+    "namespace": "redhat-ods-monitoring",
+    "labels": {
+      "app.kubernetes.io/component": "perses",
+      "app.kubernetes.io/part-of": "models-as-a-service",
+      "app.opendatahub.io/modelsasservice": "true",
+      "app.kubernetes.io/managed-by": "openshell-demos"
+    }
+  },
+  "spec": {
+    "config": {
+      "display": {
+        "name": "Usage (fixed counters)",
+        "description": "Copy of the stock MaaS Usage dashboard with counter names corrected to the unsuffixed series this Limitador exposes. Token panels stay empty for Anthropic-Messages-format models, which emit authorized_calls but no authorized_hits."
+      },
+      "duration": "168h",
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "collapse": {
+                "open": true
+              },
+              "title": "Overview"
+            },
+            "items": [
+              {
+                "content": {
+                  "$ref": "#/spec/panels/totalTokens"
+                },
+                "height": 5,
+                "width": 5,
+                "x": 0,
+                "y": 0
+              },
+              {
+                "content": {
+                  "$ref": "#/spec/panels/totalRequests"
+                },
+                "height": 5,
+                "width": 5,
+                "x": 5,
+                "y": 0
+              },
+              {
+                "content": {
+                  "$ref": "#/spec/panels/totalRateLimited"
+                },
+                "height": 5,
+                "width": 5,
+                "x": 10,
+                "y": 0
+              },
+              {
+                "content": {
+                  "$ref": "#/spec/panels/successRate"
+                },
+                "height": 5,
+                "width": 5,
+                "x": 15,
+                "y": 0
+              },
+              {
+                "content": {
+                  "$ref": "#/spec/panels/activeUsers"
+                },
+                "height": 5,
+                "width": 4,
+                "x": 20,
+                "y": 0
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "collapse": {
+                "open": true
+              },
+              "title": "Token consumption"
+            },
+            "items": [
+              {
+                "content": {
+                  "$ref": "#/spec/panels/tokenConsumptionOverTime"
+                },
+                "height": 10,
+                "width": 24,
+                "x": 0,
+                "y": 0
+              },
+              {
+                "content": {
+                  "$ref": "#/spec/panels/tokenConsumptionByUser"
+                },
+                "height": 8,
+                "width": 24,
+                "x": 0,
+                "y": 10
+              }
+            ]
+          }
+        }
+      ],
+      "panels": {
+        "activeUsers": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Distinct users with API activity over the selected time window.",
+              "name": "Active users"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last",
+                "format": {
+                  "unit": "decimal"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "count(\n  count by (user) (\n    (\n      (\n        sum by (user, subscription, limitador_namespace) (\n          increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n        )\n        +\n        sum by (user, subscription, limitador_namespace) (\n          increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n        )\n      )\n      or\n      sum by (user, subscription, limitador_namespace) (\n        increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n      )\n    )\n    * on(user, subscription, limitador_namespace)\n    (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n    > 0\n  )\n) or vector(0)",
+                      "seriesNameFormat": "Users"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "successRate": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Percentage of authorized vs total requests over the selected time window.",
+              "name": "Success rate"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last",
+                "format": {
+                  "decimalPlaces": 0,
+                  "unit": "percent-decimal"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "(\n  (\n    sum(\n      sum by (user, subscription, limitador_namespace) (\n        increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n      )\n      * on(user, subscription, limitador_namespace)\n      (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n    )\n  )\n  /\n  (\n    (\n      sum(\n        sum by (user, subscription, limitador_namespace) (\n          increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n        )\n        * on(user, subscription, limitador_namespace)\n        (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n      )\n      +\n      (\n        sum(\n          sum by (user, subscription, limitador_namespace) (\n            increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n          )\n          * on(user, subscription, limitador_namespace)\n          (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n        )\n        or vector(0)\n      )\n    ) > 0\n  )\n) or vector(1)",
+                      "seriesNameFormat": "Success Rate"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "tokenConsumptionByUser": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Per-user totals over the Range dropdown window.",
+              "name": "Token consumption table"
+            },
+            "plugin": {
+              "kind": "Table",
+              "spec": {
+                "columnSettings": [
+                  {
+                    "hide": true,
+                    "name": "timestamp"
+                  },
+                  {
+                    "align": "left",
+                    "enableSorting": true,
+                    "header": "User",
+                    "name": "user"
+                  },
+                  {
+                    "align": "left",
+                    "enableSorting": true,
+                    "header": "Subscription",
+                    "name": "subscription"
+                  },
+                  {
+                    "align": "left",
+                    "enableSorting": true,
+                    "header": "Model",
+                    "name": "model"
+                  },
+                  {
+                    "align": "right",
+                    "enableSorting": true,
+                    "format": {
+                      "decimalPlaces": 0,
+                      "shortValues": true,
+                      "unit": "decimal"
+                    },
+                    "header": "Tokens",
+                    "name": "value #1",
+                    "sort": "desc"
+                  },
+                  {
+                    "align": "right",
+                    "enableSorting": true,
+                    "format": {
+                      "decimalPlaces": 0,
+                      "unit": "decimal"
+                    },
+                    "header": "Requests",
+                    "name": "value #2"
+                  },
+                  {
+                    "align": "right",
+                    "enableSorting": true,
+                    "format": {
+                      "decimalPlaces": 0,
+                      "unit": "decimal"
+                    },
+                    "header": "Rate Limited",
+                    "name": "value #3"
+                  }
+                ],
+                "density": "compact",
+                "pagination": true,
+                "transforms": [
+                  {
+                    "kind": "MergeSeries",
+                    "spec": {}
+                  }
+                ]
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "round(sum by (user, subscription, model) (increase(authorized_hits{user!=\"\", user=~\"$user\", subscription=~\"$subscription\", model=~\"$model\"}[$__range])))"
+                    }
+                  }
+                }
+              },
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "round(\n  sum by (user, subscription, model) (\n    (\n      (\n        sum by (user, subscription, limitador_namespace) (increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range]))\n        +\n        sum by (user, subscription, limitador_namespace) (increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range]))\n      )\n      or\n      sum by (user, subscription, limitador_namespace) (increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range]))\n    )\n    * on(user, subscription, limitador_namespace) group_left(model)\n    (0 * (max by (user, subscription, limitador_namespace, model) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace, model) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n  )\n  or\n  0 * sum by (user, subscription, model) (increase(authorized_hits{user!=\"\", user=~\"$user\", subscription=~\"$subscription\", model=~\"$model\"}[$__range]))\n)"
+                    }
+                  }
+                }
+              },
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "round(\n  sum by (user, subscription, model) (\n    sum by (user, subscription, limitador_namespace) (increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range]))\n    * on(user, subscription, limitador_namespace) group_left(model)\n    (0 * (max by (user, subscription, limitador_namespace, model) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace, model) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n  )\n  or\n  0 * sum by (user, subscription, model) (increase(authorized_hits{user!=\"\", user=~\"$user\", subscription=~\"$subscription\", model=~\"$model\"}[$__range]))\n)"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "tokenConsumptionOverTime": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Tokens over time by model or subscription. View by drives chart sum by (${view_by:raw}). Table always shows full model x subscription detail.",
+              "name": "Token consumption chart"
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "mode": "table",
+                  "position": "bottom",
+                  "values": []
+                },
+                "visual": {
+                  "areaOpacity": 1,
+                  "connectNulls": true,
+                  "display": "line",
+                  "lineWidth": 3,
+                  "pointRadius": 6,
+                  "showPoints": "always",
+                  "stack": "all"
+                },
+                "yAxis": {
+                  "format": {
+                    "unit": "decimal"
+                  },
+                  "min": 0
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "round(sum by (${view_by:raw}) (increase(authorized_hits{user!=\"\", user=~\"$user\", subscription=~\"$subscription\", model=~\"$model\"}[2h])))"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "totalRateLimited": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Total rate-limited requests over the selected time window.",
+              "name": "Total rate limited"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last",
+                "format": {
+                  "decimalPlaces": 0,
+                  "shortValues": true,
+                  "unit": "decimal"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "sum(\n  sum by (user, subscription, limitador_namespace) (\n    increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n  )\n  * on(user, subscription, limitador_namespace)\n  (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n)\nor vector(0)",
+                      "seriesNameFormat": "Errors"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "totalRequests": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Total API requests (authorized + rate-limited) over the selected time window.",
+              "name": "Total requests"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last",
+                "format": {
+                  "decimalPlaces": 0,
+                  "shortValues": true,
+                  "unit": "decimal"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "(\n  sum(\n    sum by (user, subscription, limitador_namespace) (\n      increase(authorized_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n    )\n    * on(user, subscription, limitador_namespace)\n    (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n  )\n  or vector(0)\n)\n+\n(\n  sum(\n    sum by (user, subscription, limitador_namespace) (\n      increase(limited_calls{user!=\"\", user=~\"$user\", subscription=~\"$subscription\"}[$__range])\n    )\n    * on(user, subscription, limitador_namespace)\n    (0 * (max by (user, subscription, limitador_namespace) (max_over_time(authorized_hits{model=~\"$model\"}[$__range])) or max by (user, subscription, limitador_namespace) (max_over_time((label_replace(authorized_calls{limitador_namespace=~\"[^/]*/($model)\"}, \"model\", \"$1\", \"limitador_namespace\", \"[^/]*/(.*)\") unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))) + 1)\n  )\n  or vector(0)\n)",
+                      "seriesNameFormat": "Requests"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "totalTokens": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "description": "Total tokens consumed over the selected time window.",
+              "name": "Total tokens"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last",
+                "format": {
+                  "decimalPlaces": 0,
+                  "shortValues": true,
+                  "unit": "decimal"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "datasource": {
+                        "kind": "PrometheusDatasource",
+                        "name": "cluster-prometheus-datasource"
+                      },
+                      "query": "sum(increase(authorized_hits{user!=\"\", user=~\"$user\", subscription=~\"$subscription\", model=~\"$model\"}[$__range])) or vector(0)",
+                      "seriesNameFormat": "Tokens"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "variables": [
+        {
+          "kind": "ListVariable",
+          "spec": {
+            "allowAllValue": true,
+            "allowMultiple": true,
+            "defaultValue": "$__all",
+            "display": {
+              "hidden": false,
+              "name": "User"
+            },
+            "name": "user",
+            "plugin": {
+              "kind": "PrometheusLabelValuesVariable",
+              "spec": {
+                "datasource": {
+                  "kind": "PrometheusDatasource",
+                  "name": "cluster-prometheus-datasource"
+                },
+                "labelName": "user",
+                "matchers": [
+                  "authorized_hits{user!=\"\"}"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "ListVariable",
+          "spec": {
+            "allowAllValue": true,
+            "allowMultiple": true,
+            "defaultValue": "$__all",
+            "display": {
+              "hidden": false,
+              "name": "Subscription"
+            },
+            "name": "subscription",
+            "plugin": {
+              "kind": "PrometheusLabelValuesVariable",
+              "spec": {
+                "datasource": {
+                  "kind": "PrometheusDatasource",
+                  "name": "cluster-prometheus-datasource"
+                },
+                "labelName": "subscription",
+                "matchers": [
+                  "authorized_hits{subscription!=\"\"}"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "ListVariable",
+          "spec": {
+            "allowAllValue": true,
+            "allowMultiple": true,
+            "defaultValue": "$__all",
+            "display": {
+              "hidden": false,
+              "name": "Model"
+            },
+            "name": "model",
+            "plugin": {
+              "kind": "PrometheusLabelValuesVariable",
+              "spec": {
+                "datasource": {
+                  "kind": "PrometheusDatasource",
+                  "name": "cluster-prometheus-datasource"
+                },
+                "labelName": "model",
+                "matchers": [
+                  "authorized_hits{model!=\"\"}"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "ListVariable",
+          "spec": {
+            "allowAllValue": false,
+            "allowMultiple": false,
+            "defaultValue": "model",
+            "display": {
+              "hidden": false,
+              "name": "View by"
+            },
+            "name": "view_by",
+            "plugin": {
+              "kind": "StaticListVariable",
+              "spec": {
+                "values": [
+                  {
+                    "label": "By model",
+                    "value": "model"
+                  },
+                  {
+                    "label": "By subscription",
+                    "value": "subscription"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
