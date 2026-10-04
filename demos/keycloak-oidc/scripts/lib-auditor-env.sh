@@ -41,7 +41,21 @@ auditor_env_args() {  # usage: auditor_env_args   (no args; reads .env)
       ;;
   esac
 
+  # AUDITOR_API_STYLE is NOT optional here. The binary defaults it to
+  # "anthropic" (see util/session-auditor/src/main.rs), so passing only
+  # AUDITOR_OPENAI_MODEL leaves it hunting for the Anthropic key/model
+  # pair, finding neither, and logging
+  #   missing required configuration for Anthropic classification
+  #   (matching API key/model not set), skipping this turn
+  # to /tmp/session-auditor-hook.log inside the sandbox before exiting 0.
+  # Nothing surfaces outside the sandbox: the turn succeeds, the
+  # SessionStart/UserPromptSubmit heartbeats still arrive, and the
+  # dashboard keeps rendering the node -- just permanently without a
+  # risk_level. Worse, the dashboard persists the last value it ever saw,
+  # so a sandbox that classified correctly in an earlier run keeps showing
+  # that stale verdict and looks healthy.
   AUDITOR_ENV_ARGS=(
+    --env "AUDITOR_API_STYLE=${style}"
     --env "AUDITOR_LLM_BASE_URL=${base_url}"
     --env "${model_key}=${model_value}"
   )
