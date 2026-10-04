@@ -96,6 +96,65 @@ for old, new in (
     blob = blob.replace(old, new)
 out = json.loads(blob)
 
+# Third defect: every panel masks the request counters against
+# authorized_hits, because authorized_calls carries no `model` label and
+# that mask is how the $model filter gets applied. authorized_hits is the
+# TOKEN counter, so any model whose responses MaaS cannot token-count --
+# i.e. anything served over the Anthropic Messages route -- is absent from
+# it, and its users vanish from every panel even though their requests
+# were counted. That is what makes the table look like only one user has a
+# key.
+#
+# Fix: fall back to deriving `model` from limitador_namespace
+# ("llm-d-demo/deepseek-flash-anthropic" -> "deepseek-flash-anthropic")
+# for any (user, subscription, namespace) with no token hits. `unless`
+# keeps the authoritative name where hits do exist, so models like
+# alibaba/qwen3-8b are not duplicated under their route name. Verified
+# against live data: stock lookup 4 series, this one 7, adding alice, bob
+# and charlie on deepseek-flash-anthropic with no qwen duplicates.
+def _lookup(by_clause: str) -> str:
+    return (
+        f'max by ({by_clause}) (max_over_time(authorized_hits{{model=~"$model"}}[$__range]))'
+        " or "
+        f'max by ({by_clause}) (max_over_time((label_replace('
+        'authorized_calls{limitador_namespace=~"[^/]*/($model)"}, '
+        '"model", "$1", "limitador_namespace", "[^/]*/(.*)") '
+        "unless on(user, subscription, limitador_namespace) authorized_hits)[$__range:]))"
+    )
+
+_SUBS = [
+    (
+        'max by (user, subscription, limitador_namespace, model) '
+        '(max_over_time(authorized_hits{model=~"$model"}[$__range]))',
+        _lookup("user, subscription, limitador_namespace, model"),
+    ),
+    (
+        'max by (user, subscription, limitador_namespace) '
+        '(max_over_time(authorized_hits{model=~"$model"}[$__range]))',
+        _lookup("user, subscription, limitador_namespace"),
+    ),
+]
+
+rewritten = 0
+def _walk(node):
+    global rewritten
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "query" and isinstance(v, str):
+                for old, new in _SUBS:
+                    if old in v:
+                        rewritten += v.count(old)
+                        v = v.replace(old, f"({new})")
+                node[k] = v
+            else:
+                _walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            _walk(v)
+
+_walk(out["spec"]["config"])
+print(f"rewrote {rewritten} model-lookup joins")
+
 out["spec"]["config"]["display"] = {
     "name": "Usage (fixed counters)",
     "description": (
