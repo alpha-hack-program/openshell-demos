@@ -1,6 +1,6 @@
 id: byo-codex
 display_name: BYO LLM (Codex policy)
-description: Network policy and binary permissions for Codex via inference.local
+description: Network policy and binary permissions for Codex against a BYO LLM
 category: inference
 inference_capable: true
 
@@ -13,8 +13,21 @@ credentials:
     header_name: authorization
 
 endpoints:
-  - host: inference.local
-    port: 443
+  # Was inference.local:443 (OpenShell's privacy router) until 0.1.2
+  # removed `openshell inference` entirely, taking the route with it. Codex
+  # now talks to the LLM endpoint directly, exactly as byo-claude does, and
+  # <llm-host>/<llm-port> are substituted by
+  # scripts/14-provision-codex-sandbox.sh from CODEX_BASE_URL.
+  #
+  # That endpoint must speak the OpenAI *Responses* API: codex-cli rejects
+  # `wire_api = "chat"` outright since 0.146 ("no longer supported", a hard
+  # config-load error), and sends MCP tools as `"type": "namespace"` tools
+  # which only the Responses API carries. DeepSeek's own API serves this;
+  # an OpenShift MaaS endpoint does not (its /v1/responses 500s), which is
+  # why this profile's host is generally NOT the same endpoint the
+  # OPENAI_* variables point at.
+  - host: "<llm-host>"
+    port: <llm-port>
     protocol: rest
     access: read-write
     enforcement: enforce

@@ -441,6 +441,69 @@ follow-up, and partly inherent to `--gw`: every call goes to one broker
 endpoint, so per-server edges collapse unless the edges are derived from
 tool-name prefixes instead of destination hosts.
 
+## Codex (Annex A) — unblocked, working with direct MCP
+
+`openshell inference` was removed in 0.1.2, taking `inference.local` (the
+privacy router) with it, so scripts/14 could not run at all. Codex now
+talks to the LLM endpoint directly, exactly as the Claude Code harness
+always has, with the credential injected by the `byo-codex` provider
+profile instead of by the router.
+
+**The endpoint has to be a Responses-API one, and that is not MaaS.**
+codex-cli rejects `wire_api = "chat"` outright since 0.146 — a hard
+config-load error, not a deprecation — and sends MCP tools as
+`"type": "namespace"` tools that only the Responses API carries. Verified:
+DeepSeek's own API serves it (`POST https://api.deepseek.com/responses`
+→ 200), while the MaaS endpoint's `/v1/responses` 500s and its
+`ExternalModel` CRD only supports `openai-chat` and `messages` formats, so
+it cannot proxy one either. Hence new `CODEX_*` variables rather than
+reusing `OPENAI_*`, which on this cluster points at MaaS for the
+chat-completions consumers (mcp-market-news' generator, session-auditor).
+
+Also needed: `--dangerously-bypass-approvals-and-sandbox` on `codex exec`.
+Without it every MCP call dies with "MCP tool call requires approval, but
+approval policy is never". It is the Codex analogue of the Claude recipe's
+`--permission-mode bypassPermissions`, and its own help text says it is
+"intended solely for running in environments that are externally
+sandboxed" — which is precisely what OpenShell is here.
+
+**Verified live, audited + direct MCP** (`16-provision-audited-sandbox.sh
+bob codex ...`): `mcp: mcp-portfolio/get_top_client_by_aum (completed)` →
+"Clara Fontán (cli-001), $38,750", the same answer the Claude harness
+gives, with session-auditor's Stop hook firing.
+
+### Open: Codex + `--gw` fails inside the MCP Gateway broker
+
+Gateway-routed Codex still does not work, and the fault is not in this
+repo's wiring. Tool *discovery* succeeds, then every invocation fails with
+the broker's own error (`component=router`, from the mcp-gateway
+Deployment's log):
+
+```
+failed to create session for mcp server: failed to create client:
+transport error: server returned 4xx for initialize POST, likely a legacy SSE server
+```
+
+That is the broker failing to open its *upstream* session, not Codex
+failing to reach the broker. Evidence it is a broker/client interop bug
+rather than a gateway misconfiguration:
+
+- the same gateway, at the same moment, serves Claude Code tool calls
+  correctly end to end;
+- a raw `curl` MCP handshake from inside the very same Codex sandbox
+  returns all 16 tools;
+- an unauthenticated request returns 401, not the observed 4xx, so this
+  is not simply a missing token.
+
+Codex's client also gets `DELETE /mcp → 403` on session teardown, which
+looks like the authz AuthPolicy's CEL predicate finding no JSON-RPC body
+on a DELETE — harmless, but another sign the gateway and rmcp disagree
+about the streamable-HTTP contract. Worth filing against the MCP Gateway
+Operator (Tech Preview) alongside the `<gateway>-istio` naming bug.
+
+Until that is fixed, use Codex **without** `--gw`; Claude Code is the
+gateway-routed path that works.
+
 ## Already fixed on this branch (verified locally, no cluster needed)
 
 - **`util/parrot`**: ran `make bump-openshell-sdk OPENSHELL_SDK_TAG=v0.1.2`,

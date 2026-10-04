@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Provisions a Codex sandbox for one banker, per Annex A's "Codex + BYO LLM
-# + MCP tool" recipe in the README: a workspace-scoped inference.local
-# route, a byo-codex provider (network policy limited to
-# inference.local:443 + OPENAI_API_KEY injection), the sandbox itself
+# + MCP tool" recipe in the README: a byo-codex provider (network policy
+# limited to the Codex LLM endpoint + API-key injection), the sandbox itself
 # (codex-<user-id>, with /sandbox/.codex/config.toml baked in at creation
 # time via --upload — no `sandbox exec` needed to configure it), and the
 # codex-recipe policy.
@@ -32,11 +31,14 @@ set -euo pipefail
 # operations regardless of workspace (see "Workspace isolation" in the
 # README). Assumes <user-id> was already onboarded via 03-onboard-user.sh
 # (their own workspace and a `user-<id>` provider already exist) and that
-# Part I steps 1-5 have run. Requires OPENAI_API_KEY, OPENAI_BASE_URL, and
-# OPENAI_MODEL set in .env. Idempotent — provider/profile/sandbox create
-# calls tolerate "already exists" (matching 03-onboard-user.sh's own
-# `|| true` convention) so re-running just re-applies inference set,
-# config.toml, and policy against what's already there.
+# Part I steps 1-5 have run. Requires CODEX_API_KEY, CODEX_BASE_URL and
+# CODEX_MODEL in .env (falling back to OPENAI_*); CODEX_BASE_URL must be
+# an OpenAI *Responses*-API endpoint -- see step 1 below.
+#
+# Idempotent — provider/profile/sandbox create calls tolerate "already
+# exists" (matching 03-onboard-user.sh's own `|| true` convention) so
+# re-running just re-applies config.toml and policy against what's already
+# there.
 #
 # SANDBOX_PREFIX (optional, default "") is prepended to the sandbox name
 # (<prefix>codex-<user-id>) — mirrors 15-provision-claude-sandbox.sh's own
@@ -101,34 +103,62 @@ SANDBOX_NAME="${SANDBOX_PREFIX}codex-${USER_ID}"
 cd "$DEMO_DIR"
 
 # ---------------------------------------------------------------------------
-# Step 1: inference provider + workspace-scoped inference.local routing.
-# Only type `openai` providers can drive inference.local. Runs once per
-# banker's workspace — there's no shared/global inference route.
-# ---------------------------------------------------------------------------
-openshell provider create --name byo-inference --type openai \
-  --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
-  --config "OPENAI_BASE_URL=$OPENAI_BASE_URL" \
-  --workspace "${USER_ID}" || true
+# Step 1: resolve the Codex LLM endpoint.
+#
+# There is no step-1 provider/route to create any more. This used to build
+# a `byo-inference` provider and point a workspace-scoped `inference.local`
+# route at it (OpenShell's privacy router, which stripped caller
+# credentials and injected the real key server-side). OpenShell 0.1.2
+# removed the feature outright -- `openshell inference` is now an
+# unrecognized subcommand -- so Codex talks to the endpoint directly, the
+# same way the Claude Code harness always has, with the credential injected
+# by the byo-codex provider profile instead.
+#
+# CODEX_* rather than OPENAI_*, because they are usually different
+# endpoints. Codex requires the OpenAI *Responses* API: codex-cli rejects
+# `wire_api = "chat"` outright since 0.146 ("no longer supported", a hard
+# config-load error) and sends MCP tools as `"type": "namespace"` tools
+# that only the Responses API carries. DeepSeek's own API serves it
+# (verified: POST https://api.deepseek.com/responses -> 200); an OpenShift
+# MaaS endpoint does not (its /v1/responses 500s), yet MaaS is exactly
+# where OPENAI_* tends to point for the chat-completions consumers
+# (mcp-market-news' generator, session-auditor). Falls back to OPENAI_* so
+# a single-endpoint setup keeps working.
+#
+# Per-user key with the same convention as scripts/15 and /16 -- see the
+# comment there for why this matters for upstream token accounting.
+USER_ID_UC=$(printf '%s' "$USER_ID" | tr '[:lower:]-' '[:upper:]_')
+_CODEX_KEY_VAR="CODEX_API_KEY_${USER_ID_UC}"
+CODEX_API_KEY="${!_CODEX_KEY_VAR:-${CODEX_API_KEY:-${OPENAI_API_KEY:-}}}"
+CODEX_BASE_URL="${CODEX_BASE_URL:-${OPENAI_BASE_URL:-}}"
+CODEX_MODEL="${CODEX_MODEL:-${OPENAI_MODEL:-}}"
+: "${CODEX_API_KEY:?set ${_CODEX_KEY_VAR}, CODEX_API_KEY or OPENAI_API_KEY in .env}"
+: "${CODEX_BASE_URL:?set CODEX_BASE_URL (Responses-API endpoint) in .env}"
+: "${CODEX_MODEL:?set CODEX_MODEL in .env}"
+if [ -n "${!_CODEX_KEY_VAR:-}" ]; then
+  echo "Using per-user Codex key from ${_CODEX_KEY_VAR}."
+else
+  echo "No ${_CODEX_KEY_VAR} set; falling back to the shared Codex key."
+fi
 
-# --no-verify: when the gateway was installed with server.oidc.caConfigMapName
-# set (see README's "OIDC issuer TLS trust" section — needed whenever
-# Keycloak's Route rides a self-signed default ingress cert), the gateway's
-# outbound TLS trust for endpoint verification calls is scoped to that CA
-# only, not the public web PKI roots too — verifying a real CA-signed
-# endpoint like OPENAI_BASE_URL then fails even though the endpoint itself
-# is fine (confirmed live: a raw curl to the same URL succeeds). Endpoint
-# reachability is verified by the recipe's own test call later anyway.
-openshell inference set \
-  --provider byo-inference \
-  --model "$OPENAI_MODEL" \
-  --timeout 120 \
-  --no-verify \
-  --workspace "${USER_ID}"
+# host/port for the provider profile's <llm-host>/<llm-port>, same parsing
+# as 15-provision-claude-sandbox.sh does for ANTHROPIC_BASE_URL.
+CODEX_HOST_PORT="${CODEX_BASE_URL#http://}"
+CODEX_HOST_PORT="${CODEX_HOST_PORT#https://}"
+CODEX_HOST_PORT="${CODEX_HOST_PORT%%/*}"
+CODEX_LLM_HOST="${CODEX_HOST_PORT%%:*}"
+if [[ "$CODEX_HOST_PORT" == *:* ]]; then
+  CODEX_LLM_PORT="${CODEX_HOST_PORT##*:}"
+else
+  CODEX_LLM_PORT=443
+fi
+echo "Codex LLM endpoint: ${CODEX_LLM_HOST}:${CODEX_LLM_PORT} (model ${CODEX_MODEL})"
 
 # ---------------------------------------------------------------------------
-# Step 2: Codex-specific provider — locks network access to
-# inference.local:443 (the privacy router), injects OPENAI_API_KEY, and
-# declares the codex binary (see providers/byo-codex-profile.yaml).
+# Step 2: Codex-specific provider — locks network access to the Codex LLM
+# endpoint resolved above, injects the key as OPENAI_API_KEY (the env var
+# codex-cli reads, via `env_key` in config.toml), and declares the codex
+# binary (see providers/byo-codex-profile.yaml).
 # ---------------------------------------------------------------------------
 # `|| true` only tolerates "already exists" on first run — confirmed live
 # that `import` against an already-imported profile ID is a hard error, not
@@ -143,11 +173,12 @@ openshell inference set \
 # and scripts/lib-otel-env.sh for the same constraint on the Claude side).
 CODEX_PROFILE_TMPFILE=$(mktemp --suffix=.yaml)
 sed -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" \
+  -e "s/<llm-host>/${CODEX_LLM_HOST}/" -e "s/<llm-port>/${CODEX_LLM_PORT}/" \
   providers/byo-codex-profile.yaml > "$CODEX_PROFILE_TMPFILE"
 openshell provider profile import -f "$CODEX_PROFILE_TMPFILE" --workspace "${USER_ID}" || true
 rm -f "$CODEX_PROFILE_TMPFILE"
 openshell provider create --name byo-codex --type byo-codex \
-  --credential "OPENAI_API_KEY=$OPENAI_API_KEY" \
+  --credential "OPENAI_API_KEY=$CODEX_API_KEY" \
   --workspace "${USER_ID}" || true
 
 # ---------------------------------------------------------------------------
@@ -159,11 +190,11 @@ openshell provider create --name byo-codex --type byo-codex \
 CODEX_CONFIG=$(mktemp)
 cat > "$CODEX_CONFIG" <<EOF
 model_provider = "openshell-byo"
-model = "${OPENAI_MODEL}"
+model = "${CODEX_MODEL}"
 
 [model_providers.openshell-byo]
 name = "OpenShell BYO Router"
-base_url = "https://inference.local/v1"
+base_url = "${CODEX_BASE_URL}"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
 
@@ -214,14 +245,12 @@ fi
 # safeguard deletes the still-rejected sandbox on its own clock in the
 # meantime. A policy-less `sandbox create` reliably loses that race.
 # Passing --policy (and --upload) at creation time avoids the race
-# entirely — confirmed live (on the Claude Code sandbox; this script's own
-# `openshell inference set` call above means it can't be run this far on
-# 0.1.2 yet to re-confirm here) that `sandbox create --policy ... --upload
-# ...` returns normally, no backgrounding/sleep tricks needed.
+# entirely — `sandbox create --policy ... --upload ...` returns normally,
+# no backgrounding/sleep tricks needed.
 POLICY_TMPFILE=$(mktemp --suffix=.yaml)
 POLICY_TEMPLATE_ARGS=(
   --set openshellNamespace="${OPENSHELL_NAMESPACE}"
-  --set llmHost=inference.local
+  --set llmHost="${CODEX_LLM_HOST}"
   --set recipe=codex
 )
 if [ "$GW" = true ]; then
