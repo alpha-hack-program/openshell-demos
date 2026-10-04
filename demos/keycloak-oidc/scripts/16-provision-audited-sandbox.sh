@@ -88,6 +88,20 @@ cd "$DEMO_DIR"
 # *-audit image and prefixed so it creates a second sandbox rather than
 # touching the banker's existing one.
 # ---------------------------------------------------------------------------
+# Per-user keys for the auditor's own classification call, same convention
+# and fallback as scripts/15 uses for the agent's key
+# (ANTHROPIC_API_KEY_BOB / OPENAI_API_KEY_BOB beat the shared value). Worth
+# doing separately: the classification call is a second, independent spend
+# against the LLM, so leaving it on a shared key would pool exactly the
+# usage the per-user agent keys were meant to separate.
+#
+# Resolved before the case below, which reads ANTHROPIC_API_KEY directly.
+USER_ID_UC=$(printf '%s' "$USER_ID" | tr '[:lower:]-' '[:upper:]_')
+_A_KEY_VAR="ANTHROPIC_API_KEY_${USER_ID_UC}"
+_O_KEY_VAR="OPENAI_API_KEY_${USER_ID_UC}"
+ANTHROPIC_API_KEY="${!_A_KEY_VAR:-${ANTHROPIC_API_KEY:-}}"
+OPENAI_API_KEY="${!_O_KEY_VAR:-${OPENAI_API_KEY:-}}"
+
 case "$AGENT" in
   claude)
     : "${CLAUDE_AUDIT_IMAGE:?set CLAUDE_AUDIT_IMAGE in .env (see util/session-auditor/README.md)}"
@@ -128,7 +142,7 @@ case "$AGENT" in
 esac
 
 if [ "$AUDITOR_PROVIDER_STYLE" = "openai" ]; then
-  : "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env (classification backend credential)}"
+  : "${OPENAI_API_KEY:?set ${_O_KEY_VAR} (preferred) or OPENAI_API_KEY in .env (classification backend credential)}"
   : "${OPENAI_MODEL:?set OPENAI_MODEL in .env (classification backend model)}"
   : "${OPENAI_BASE_URL:?set OPENAI_BASE_URL in .env (classification backend URL)}"
   AUDITOR_CREDENTIAL_KEY="AUDITOR_OPENAI_API_KEY"

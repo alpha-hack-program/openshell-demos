@@ -89,7 +89,32 @@ if [ "$GW" = true ]; then
   source "$SCRIPT_DIR/lib-mcp-gateway.sh"
   MCP_GATEWAY_URL=$(mcp_gateway_url) || exit 1
 fi
-: "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}"
+# Per-user LLM key, falling back to the shared one. ANTHROPIC_API_KEY_BOB
+# wins over ANTHROPIC_API_KEY when provisioning bob.
+#
+# The provider is already per-workspace (`provider create ... --workspace
+# "${USER_ID}"` below), so each banker has had their own credential slot
+# all along -- only the value was shared. Giving each their own key is
+# what makes upstream token accounting per-banker rather than one pooled
+# bill, which matters once the endpoint meters per key (an OpenShift MaaS
+# subscription does).
+#
+# Rotating a key later does NOT require re-provisioning: the sandbox env
+# holds a resolve-placeholder, not the key, and the proxy substitutes the
+# current value per request. Verified live --
+#   openshell provider update byo-claude \
+#     --credential "ANTHROPIC_AUTH_TOKEN=<new>" --workspace <user> --wait
+# takes effect on a running sandbox (a bad key starts failing immediately,
+# a good one recovers, with no sandbox touched).
+USER_ID_UC=$(printf '%s' "$USER_ID" | tr '[:lower:]-' '[:upper:]_')
+_USER_KEY_VAR="ANTHROPIC_API_KEY_${USER_ID_UC}"
+ANTHROPIC_API_KEY="${!_USER_KEY_VAR:-${ANTHROPIC_API_KEY:-}}"
+: "${ANTHROPIC_API_KEY:?set ${_USER_KEY_VAR} (preferred) or ANTHROPIC_API_KEY in .env}"
+if [ -n "${!_USER_KEY_VAR:-}" ]; then
+  echo "Using per-user LLM key from ${_USER_KEY_VAR}."
+else
+  echo "No ${_USER_KEY_VAR} set; falling back to the shared ANTHROPIC_API_KEY."
+fi
 : "${ANTHROPIC_BASE_URL:?set ANTHROPIC_BASE_URL in .env}"
 : "${ANTHROPIC_MODEL:?set ANTHROPIC_MODEL in .env}"
 
