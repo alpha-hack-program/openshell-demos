@@ -82,6 +82,15 @@ for old, new in (
     ("authorized_calls_total", "authorized_calls"),
     ("authorized_hits_total", "authorized_hits"),
     ("limited_calls_total", "limited_calls"),
+    # Second, independent defect: the stock dashboard reads from the Data
+    # Science MonitoringStack, whose `namespaceSelector: null` restricts it
+    # to its own namespace -- but Limitador's PodMonitor lives in
+    # kuadrant-system, so that stack holds none of these counters. Even
+    # perfectly named queries return nothing there. The cluster
+    # Thanos-querier datasource federates user-workload monitoring, which
+    # is where kuadrant-system/kuadrant-limitador-monitor actually lands;
+    # verified it returns all 7 authorized_calls series.
+    ("data-science-prometheus-datasource", "cluster-prometheus-datasource"),
 ):
     total += blob.count(old)
     blob = blob.replace(old, new)
