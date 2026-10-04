@@ -5,12 +5,27 @@ category: inference
 inference_capable: true
 
 credentials:
+  # Bearer rather than x-api-key, and therefore ANTHROPIC_AUTH_TOKEN rather
+  # than ANTHROPIC_API_KEY, because that is the only form both supported
+  # endpoint styles accept. Claude Code picks the header from whichever of
+  # the two env vars is set: ANTHROPIC_API_KEY -> `x-api-key`,
+  # ANTHROPIC_AUTH_TOKEN -> `Authorization: Bearer`.
+  #
+  # An OpenShift MaaS / AI-Gateway endpoint rejects `x-api-key` outright
+  # (401) and requires Bearer. Anthropic-compatible vendor endpoints such
+  # as DeepSeek's /anthropic accept either, so Bearer works against both --
+  # verified live against each. `header_name` must stay lowercase
+  # `authorization` to match the proxy's own matching, same as
+  # user-refresh-profile.yaml.
+  #
+  # Note this is the *sandbox-side* env var name only. .env still calls the
+  # value ANTHROPIC_API_KEY; scripts/15 maps it across.
   - name: api_key
-    description: LLM API key, injected as ANTHROPIC_API_KEY for Claude Code
-    env_vars: [ANTHROPIC_API_KEY]
+    description: LLM API key, injected as ANTHROPIC_AUTH_TOKEN for Claude Code
+    env_vars: [ANTHROPIC_AUTH_TOKEN]
     required: true
-    auth_style: header
-    header_name: x-api-key
+    auth_style: bearer
+    header_name: authorization
 
 endpoints:
   # <llm-host>/<llm-port> are both substituted by

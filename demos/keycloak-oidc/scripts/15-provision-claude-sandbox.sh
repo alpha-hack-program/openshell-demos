@@ -140,7 +140,7 @@ openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}" || true
 rm -f "$TMPFILE"
 
 openshell provider create --name byo-claude --type byo-claude \
-  --credential "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+  --credential "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_API_KEY" \
   --workspace "${USER_ID}" || true
 
 # ---------------------------------------------------------------------------
