@@ -115,6 +115,24 @@ newsGenerator:
   # timeout). Raise this for a fast endpoint (e.g. real api.openai.com) to
   # cut the number of calls; lower it if you still see 504s.
   chunkSize: ""
+  # Optional. Set true when the generator's model is a *reasoning* model,
+  # to send `chat_template_kwargs: {enable_thinking: false}` alongside the
+  # request (news_generator's NEWS_GENERATION_DISABLE_THINKING).
+  #
+  # A reasoning model spends part of the 4000-token budget on a <think>
+  # block before emitting any JSON, and nothing in the prompt bounds it.
+  # Measured against qwen3-8b on a 3-item chunk: ~2000 tokens to reasoning
+  # on average, so the JSON array usually still fits -- but when the model
+  # rambles the response is truncated mid-think, no array is produced, and
+  # the run dies with "could not find a JSON array or object in LLM
+  # response: <think>". Batch 1 makes ~12 such calls and needs only one to
+  # lose, so it shows up as an intermittently CrashLooping init container
+  # rather than a clean, repeatable failure.
+  #
+  # With it set, the same chunk used ~600 tokens and ran ~4.6x faster.
+  # Left false by default: it is a vLLM/Qwen chat-template extension, not
+  # OpenAI schema, and some endpoints reject unknown body fields.
+  disableThinking: false
   intervalMinutes: 5
   batchSize: 5
   pvcSize: "1Gi"
@@ -385,7 +403,7 @@ servers:
   - name: mcp-market-news
     image:
       repository: "quay.io/atarazana/mcp-market-news"
-      tag: "0.2.3"     # 0.2.3 makes the chunk size configurable (NEWS_GENERATION_CHUNK_SIZE / newsGenerator.chunkSize above, default 3) and applies chunking to the loop drip-feed cycle too, not just batch 1 — 0.2.2 chunked only batch-1 generation to avoid a 504 from a 30s Route timeout on slower BYO-LLM endpoints (7 items/call still too slow against this cluster's endpoint) — 0.2.1 adds OPENAI_CA_CERT_PATH support in news_generator (see newsGenerator.caConfigMapName above) — 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
+      tag: "0.2.4"     # 0.2.4 adds NEWS_GENERATION_DISABLE_THINKING (newsGenerator.disableThinking above) for reasoning models that otherwise burn the token budget inside <think> and emit no JSON — 0.2.3 makes the chunk size configurable (NEWS_GENERATION_CHUNK_SIZE / newsGenerator.chunkSize above, default 3) and applies chunking to the loop drip-feed cycle too, not just batch 1 — 0.2.2 chunked only batch-1 generation to avoid a 504 from a 30s Route timeout on slower BYO-LLM endpoints (7 items/call still too slow against this cluster's endpoint) — 0.2.1 adds OPENAI_CA_CERT_PATH support in news_generator (see newsGenerator.caConfigMapName above) — 0.2.0 drops candle/hf-hub in favor of the shared embeddings InferenceService above (see embedder.rs) — 0.1.4 crashed in news_generator's seed prompts against DeepSeek, see git history
       pullPolicy: IfNotPresent
     port: 8000
     internalPort: 8002      # Containerfile: ARG PORT=8002 (confirmed)

@@ -55,6 +55,11 @@ HELM_SET_ARGS=(
   --set "newsGenerator.openaiApiKey=${PLATFORM_OPENAI_API_KEY}"
   --set "newsGenerator.openaiBaseUrl=${PLATFORM_OPENAI_BASE_URL}"
   --set "newsGenerator.openaiModel=${PLATFORM_OPENAI_MODEL}"
+  # Set this when the generator's model is a reasoning model — see
+  # mcp-servers/values.yaml's newsGenerator.disableThinking comment for
+  # what goes wrong without it (intermittent init CrashLoop, "could not
+  # find a JSON array or object in LLM response: <think>").
+  --set "newsGenerator.disableThinking=${NEWS_GENERATION_DISABLE_THINKING:-false}"
 )
 
 # If step 2 created openshell-oidc-ca (self-signed default ingress cert —

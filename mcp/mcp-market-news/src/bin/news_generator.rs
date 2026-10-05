@@ -197,7 +197,7 @@ async fn call_openai(
     model: &str,
     prompt: &str,
 ) -> anyhow::Result<String> {
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         // Generous for the largest single call this makes (a
         // BATCH1_CHUNK_SIZE-item JSON array) without being so large that a
@@ -208,6 +208,36 @@ async fn call_openai(
             { "role": "user", "content": prompt }
         ]
     });
+
+    // Reasoning models spend part of `max_tokens` on a <think> block
+    // before any JSON appears, and that block is not bounded by the
+    // prompt. Measured against qwen3-8b on a 3-item chunk: ~2000 of the
+    // 4000 tokens went to reasoning on average, leaving the JSON array to
+    // fit in what remained -- usually, but not always. When reasoning
+    // happens to run long the response is truncated mid-think, no array
+    // is ever emitted, and `parse_generated_items` fails the whole run
+    // with "could not find a JSON array or object in LLM response:
+    // <think>". Because it depends on how long the model rambles, it hits
+    // intermittently: a single chunk usually succeeds, but batch 1 makes
+    // ~12 of these calls and only needs one to lose.
+    //
+    // `enable_thinking: false` is the vLLM/Qwen chat-template switch that
+    // suppresses the block entirely. Same measurement with it set: ~600
+    // tokens and ~4.6x faster, so the array has the whole budget. Off by
+    // default because it is a chat-template extension, not part of the
+    // OpenAI schema, and some endpoints reject unknown body fields --
+    // enable it only for models that need it.
+    let disable_thinking = std::env::var("NEWS_GENERATION_DISABLE_THINKING")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    if disable_thinking {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "chat_template_kwargs".to_string(),
+                serde_json::json!({ "enable_thinking": false }),
+            );
+        }
+    }
 
     let resp = client
         .post(format!("{base_url}/v1/chat/completions"))

@@ -150,6 +150,10 @@ spec:
             - name: NEWS_GENERATION_CHUNK_SIZE
               value: {{ $newsGen.chunkSize | quote }}
             {{- end }}
+            {{- if $newsGen.disableThinking }}
+            - name: NEWS_GENERATION_DISABLE_THINKING
+              value: "true"
+            {{- end }}
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # news_generator also embeds each corpus item as it writes
             # news.tv (see mcp-market-news's src/bin/news_generator.rs) —
@@ -197,6 +201,10 @@ spec:
             {{- if $newsGen.chunkSize }}
             - name: NEWS_GENERATION_CHUNK_SIZE
               value: {{ $newsGen.chunkSize | quote }}
+            {{- end }}
+            {{- if $newsGen.disableThinking }}
+            - name: NEWS_GENERATION_DISABLE_THINKING
+              value: "true"
             {{- end }}
             {{- if and .needsEmbeddings $embeddings.enabled }}
             # news_generator also embeds each corpus item as it writes
