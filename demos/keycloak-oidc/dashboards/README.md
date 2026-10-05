@@ -93,10 +93,11 @@ Two effects compound into a token panel that looks broken:
    bankers' real work — only whatever still speaks chat-completions.
 2. What *does* still speak chat-completions is mostly the
    `mcp-market-news` news-generator, a background loop that regenerates a
-   batch every few minutes forever. Whoever owns the key in
-   `OPENAI_API_KEY` is billed for all of it.
+   batch every few minutes forever. Whoever owns the key it runs with
+   (`PLATFORM_OPENAI_API_KEY`, falling back to `OPENAI_API_KEY`) is billed
+   for all of it.
 
-Point `OPENAI_API_KEY` at a banker's key and that banker's totals dwarf
+Point that at a banker's key and that banker's totals dwarf
 everyone else's — observed here at ~974k tokens for the key-owner against
 ~6.4k and ~2.1k for two bankers actively running scenes. The others are
 present in the data, just rounded to nothing on a scale set by the
@@ -108,5 +109,8 @@ sum by (user) (authorized_calls{limitador_namespace=~".*deepseek-flash$"})
 sum by (user) (authorized_hits{limitador_namespace=~".*deepseek-flash$"})
 ```
 
-Use a dedicated platform/service key for `OPENAI_API_KEY` to keep
-per-banker attribution meaningful — see the note in `.env.example`.
+Set `PLATFORM_OPENAI_API_KEY` to a dedicated platform/service key (ideally
+on its own `MaaSSubscription`) to keep per-banker attribution meaningful —
+see the note in `.env.example`. `scripts/06-deploy-mcp-servers.sh` prints
+which key it used, so a silent fallback to a banker's key is visible at
+deploy time rather than later in the billing data.
