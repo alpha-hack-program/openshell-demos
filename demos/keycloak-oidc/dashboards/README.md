@@ -109,6 +109,35 @@ sum by (user) (authorized_calls{limitador_namespace=~".*deepseek-flash$"})
 sum by (user) (authorized_hits{limitador_namespace=~".*deepseek-flash$"})
 ```
 
+### "All three users show on All time, but not on the last 30 minutes"
+
+Also expected, and the clearest symptom that the panels are working
+rather than failing. Every panel is `increase(...[window])`, so a user
+only produces a series if they had traffic **inside that window**. An
+idle banker has no series at all and vanishes from the panel entirely
+instead of showing a zero row. Counters accumulate forever, so a wide
+range catches every banker who ever ran a turn — which is why "All time"
+always looks complete.
+
+What makes this pronounced here is how little per-user chat-completions
+traffic the demo actually produces. The agents talk to the Messages and
+Responses models, whose tokens are never counted (above), so the only
+thing putting a banker on the token panels is `session-auditor`'s
+classification call — **one request per agent turn**. A banker who is not
+mid-scene contributes nothing.
+
+To see all three in a narrow window, give each of them a turn and look
+again. Measured right after one turn each, inside a 20-minute window:
+
+| user | requests on `deepseek-flash` | tokens |
+|---|---|---|
+| alice | 1 | 633 |
+| bob | 1 | 880 |
+| charlie | 1 | 621 |
+
+So: before reading a narrow window as data loss, check whether anyone was
+actually working during it.
+
 Set `PLATFORM_OPENAI_API_KEY` to a dedicated platform/service key (ideally
 on its own `MaaSSubscription`) to keep per-banker attribution meaningful —
 see the note in `.env.example`. `scripts/06-deploy-mcp-servers.sh` prints
