@@ -83,3 +83,30 @@ per-user **token** accounting only covers OpenAI-format models. The same
 gap means `tokenRateLimits` on a subscription are effectively unenforced
 for Messages-format models, which is worth raising upstream alongside the
 `_total` naming mismatch.
+
+### "Only one user shows up" is usually not a dashboard bug
+
+Two effects compound into a token panel that looks broken:
+
+1. The agents run on the Messages and Responses models, whose tokens are
+   never counted (above). So the token panels see almost none of the
+   bankers' real work — only whatever still speaks chat-completions.
+2. What *does* still speak chat-completions is mostly the
+   `mcp-market-news` news-generator, a background loop that regenerates a
+   batch every few minutes forever. Whoever owns the key in
+   `OPENAI_API_KEY` is billed for all of it.
+
+Point `OPENAI_API_KEY` at a banker's key and that banker's totals dwarf
+everyone else's — observed here at ~974k tokens for the key-owner against
+~6.4k and ~2.1k for two bankers actively running scenes. The others are
+present in the data, just rounded to nothing on a scale set by the
+background traffic. Confirm with the raw counter before concluding a panel
+is broken:
+
+```promql
+sum by (user) (authorized_calls{limitador_namespace=~".*deepseek-flash$"})
+sum by (user) (authorized_hits{limitador_namespace=~".*deepseek-flash$"})
+```
+
+Use a dedicated platform/service key for `OPENAI_API_KEY` to keep
+per-banker attribution meaningful — see the note in `.env.example`.
