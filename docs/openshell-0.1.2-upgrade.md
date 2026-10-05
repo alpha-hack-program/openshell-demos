@@ -539,6 +539,49 @@ the answer is delivered — most likely the authz AuthPolicy's CEL
 predicate finding no JSON-RPC body on a DELETE. Worth filing upstream
 alongside the header bug and the `<gateway>-istio` naming bug.
 
+### Codex "Model metadata not found" — leave it alone
+
+Every codex turn prints:
+
+```
+warning: Model metadata for `deepseek-flash-responses` not found.
+Defaulting to fallback metadata; this can degrade performance and cause issues.
+```
+
+codex resolves the model against a catalog bundled with its binary, which
+only knows OpenAI's own slugs, so any MaaS/BYO name misses. The warning
+is not purely cosmetic — the fallback supplies the context window and
+auto-compact threshold.
+
+**Both fixes were tried on `aud-codex-bob` and both were rejected.**
+
+`model_context_window` / `model_max_output_tokens` do not silence it; the
+warning still prints every turn (upstream
+[openai/codex#21070](https://github.com/openai/codex/issues/21070)).
+
+`model_catalog_json` does silence it — and breaks tool calling outright.
+codex refuses a catalog entry carrying neither `base_instructions` nor
+`model_messages.instructions_template`, so the entry has to be cloned
+from a real one (`gpt-6-astra` is the first with instructions), which
+drags GPT-specific instructions and capability flags along with it. The
+BYO model cannot honour them. Same sandbox, same prompt, only the
+`model_catalog_json` line differing:
+
+| | warning | MCP tool calls | DSML leaked |
+|---|---|---|---|
+| catalog ON | 0 | **0** | 10 |
+| catalog OFF | 1 | **2** | 0 |
+
+With the catalog on, the model stopped invoking tools and instead emitted
+raw `<|DSML|>` tool syntax as literal text in its reply — the same
+leakage class seen when MCP never connects. Trading every tool call for a
+quieter log is a bad deal, so the warning stays.
+
+Revisit only if codex gains a way to supply metadata without
+instructions, or the gateway serves a catalog. There is a comment in
+`scripts/14-provision-codex-sandbox.sh` at the `config.toml` heredoc
+recording this, so the experiment is not repeated.
+
 ## Already fixed on this branch (verified locally, no cluster needed)
 
 - **`util/parrot`**: ran `make bump-openshell-sdk OPENSHELL_SDK_TAG=v0.1.2`,

@@ -187,6 +187,29 @@ openshell provider create --name byo-codex --type byo-codex \
 # server), then apply the codex-recipe policy chart with all of them on
 # the egress allow-list.
 # ---------------------------------------------------------------------------
+# Deliberately NO model_catalog_json here, despite every turn printing
+#   warning: Model metadata for `<model>` not found. Defaulting to fallback
+#   metadata; this can degrade performance and cause issues.
+# codex looks the model up in a catalog bundled with its binary, which only
+# knows OpenAI's own slugs, so a MaaS/BYO name is never there.
+#
+# Tried and rejected, measured on aud-codex-bob:
+#   - model_context_window / model_max_output_tokens: does NOT silence it; the
+#     warning still prints every turn (upstream openai/codex#21070).
+#   - model_catalog_json with an entry generated in-sandbox from `codex debug
+#     models`: silences it and BREAKS TOOL CALLING. A catalog entry is
+#     rejected unless it carries base_instructions or
+#     model_messages.instructions_template, so the entry has to be cloned from
+#     a real one (gpt-6-astra), and that drags along GPT-specific instructions
+#     and capability flags the BYO model cannot honour. Side-by-side on the
+#     same sandbox, same prompt:
+#       catalog ON : warning 0, MCP tool calls 0,  DSML markup leaked into the
+#                    reply 10x -- the model emitted raw <|DSML|> tool syntax
+#                    as text instead of invoking anything
+#       catalog OFF: warning 1, MCP tool calls 2,  no leakage, correct answer
+#     Losing every tool call is far worse than a cosmetic warning, so the
+#     warning stays until codex can take metadata without instructions
+#     (or the catalog is served by the gateway).
 CODEX_CONFIG=$(mktemp)
 cat > "$CODEX_CONFIG" <<EOF
 model_provider = "openshell-byo"
