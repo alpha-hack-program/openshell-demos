@@ -252,36 +252,24 @@ esac
 : "${CLUSTER_APPS_DOMAIN:?set CLUSTER_APPS_DOMAIN in .env}"
 
 # Classification backend for session-auditor's Stop hook (harmless no-op
-# against non-audited sandboxes — see the --aud note above). Same
-# AUDITOR_PROVIDER_STYLE convention as 16-provision-audited-sandbox.sh:
-# "anthropic" (default) needs ANTHROPIC_BASE_URL/ANTHROPIC_MODEL and the
-# hook reads AUDITOR_ANTHROPIC_MODEL; "openai" needs OPENAI_BASE_URL/
-# OPENAI_MODEL and the hook reads AUDITOR_OPENAI_MODEL instead — sending
-# the anthropic-style pair regardless of AUDITOR_PROVIDER_STYLE (the
-# previous behavior here) makes the Stop hook fail soft with a
-# permanently-missing classification metric on an openai-style setup,
-# --agent codex or not.
-AUDITOR_PROVIDER_STYLE="${AUDITOR_PROVIDER_STYLE:-anthropic}"
-case "$AUDITOR_PROVIDER_STYLE" in
-  anthropic)
-    : "${ANTHROPIC_BASE_URL:?set ANTHROPIC_BASE_URL in .env (classification backend URL)}"
-    : "${ANTHROPIC_MODEL:?set ANTHROPIC_MODEL in .env (classification backend model)}"
-    AUDITOR_MODEL_KEY="AUDITOR_ANTHROPIC_MODEL"
-    AUDITOR_BASE_URL_VALUE="$ANTHROPIC_BASE_URL"
-    AUDITOR_MODEL_VALUE="$ANTHROPIC_MODEL"
-    ;;
-  openai)
-    : "${OPENAI_BASE_URL:?set OPENAI_BASE_URL in .env (classification backend URL)}"
-    : "${OPENAI_MODEL:?set OPENAI_MODEL in .env (classification backend model)}"
-    AUDITOR_MODEL_KEY="AUDITOR_OPENAI_MODEL"
-    AUDITOR_BASE_URL_VALUE="$OPENAI_BASE_URL"
-    AUDITOR_MODEL_VALUE="$OPENAI_MODEL"
-    ;;
-  *)
-    echo "invalid AUDITOR_PROVIDER_STYLE '$AUDITOR_PROVIDER_STYLE' (expected anthropic or openai)" >&2
-    exit 1
-    ;;
-esac
+# against non-audited sandboxes — see the --aud note above). Delegated to
+# lib-auditor-env.sh so the AUDITOR_PROVIDER_STYLE -> env-var mapping
+# lives in exactly one place.
+#
+# This used to be an inline copy of that mapping, and it got the model key
+# right (AUDITOR_OPENAI_MODEL under the openai style) while omitting
+# AUDITOR_API_STYLE itself. The binary defaults that to "anthropic", so it
+# went looking for the Anthropic key/model pair, found neither, and
+# skipped classification on every turn -- the exact failure the old
+# comment here claimed to have fixed. It fails soft: the turn completes,
+# heartbeats keep arriving, the sandbox still renders on the dashboard,
+# and the only trace is a line in /tmp/session-auditor-hook.log inside the
+# sandbox. Downstream it also means no classification call, hence no
+# per-user LLM traffic for that banker and an empty row on the MaaS Usage
+# dashboard.
+# shellcheck source=lib-auditor-env.sh
+source "$SCRIPT_DIR/lib-auditor-env.sh"
+auditor_env_args
 
 # Always this banker's own identity, regardless of what your shell had
 # exported before — see the header note above for why this is deliberate,
@@ -338,8 +326,7 @@ run_turn() {
   fi
   "$UI" --sandbox "$sandbox" --workspace "$USER_ID" --agent "$agent" \
     "${OTEL_ENV_ARGS[@]}" \
-    --env "AUDITOR_LLM_BASE_URL=$AUDITOR_BASE_URL_VALUE" \
-    --env "${AUDITOR_MODEL_KEY}=$AUDITOR_MODEL_VALUE" \
+    "${AUDITOR_ENV_ARGS[@]}" \
     --prompt "$prompt"
 }
 
