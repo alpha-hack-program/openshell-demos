@@ -1,0 +1,288 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <style>
+    /* ── Light mode (default) ── */
+    .bg             { fill: #f8fafc }
+    .surface        { fill: #f1f5f9 }
+    .card           { fill: #ffffff }
+    .header-text    { fill: #f8fafc }
+    .header-muted   { fill: #94a3b8 }
+    .text           { fill: #1e293b }
+    .text-mid       { fill: #475569 }
+    .text-muted     { fill: #64748b }
+    .text-faint     { fill: #94a3b8 }
+    .line-subtle    { stroke: #cbd5e1 }
+    .border-subtle  { stroke: #e2e8f0 }
+
+    .fill-blue      { fill: #dbeafe }
+    .stroke-blue    { stroke: #2563eb }
+    .text-blue      { fill: #1e40af }
+    .arrow-blue     { fill: #2563eb }
+    .line-blue      { stroke: #2563eb }
+
+    .fill-indigo    { fill: #e0e7ff }
+    .stroke-indigo  { stroke: #4f46e5 }
+    .text-indigo    { fill: #3730a3 }
+    .arrow-indigo   { fill: #4f46e5 }
+    .line-indigo    { stroke: #4f46e5 }
+
+    .fill-amber     { fill: #fef3c7 }
+    .stroke-amber   { stroke: #d97706 }
+    .text-amber     { fill: #92400e }
+    .arrow-amber    { fill: #d97706 }
+    .line-amber     { stroke: #d97706 }
+
+    .fill-teal      { fill: #ccfbf1 }
+    .stroke-teal    { stroke: #0d9488 }
+    .text-teal      { fill: #115e59 }
+    .arrow-teal     { fill: #0d9488 }
+    .line-teal      { stroke: #0d9488 }
+
+    .fill-green     { fill: #dcfce7 }
+    .stroke-green   { stroke: #16a34a }
+    .text-green     { fill: #166534 }
+
+    .alt-border     { stroke: #94a3b8 }
+    .alt-label-bg   { fill: #e2e8f0 }
+    .alt-label-text { fill: #475569 }
+
+    /* ── Dark mode ── */
+    @media (prefers-color-scheme: dark) {
+      .bg             { fill: #0f172a }
+      .surface        { fill: #1e293b }
+      .card           { fill: #1e293b }
+      .header-text    { fill: #e2e8f0 }
+      .header-muted   { fill: #64748b }
+      .text           { fill: #e2e8f0 }
+      .text-mid       { fill: #94a3b8 }
+      .text-muted     { fill: #94a3b8 }
+      .text-faint     { fill: #64748b }
+      .line-subtle    { stroke: #475569 }
+      .border-subtle  { stroke: #334155 }
+
+      .fill-blue      { fill: #1e3a5f }
+      .stroke-blue    { stroke: #60a5fa }
+      .text-blue      { fill: #93c5fd }
+      .arrow-blue     { fill: #60a5fa }
+      .line-blue      { stroke: #60a5fa }
+
+      .fill-indigo    { fill: #272461 }
+      .stroke-indigo  { stroke: #818cf8 }
+      .text-indigo    { fill: #a5b4fc }
+      .arrow-indigo   { fill: #818cf8 }
+      .line-indigo    { stroke: #818cf8 }
+
+      .fill-amber     { fill: #3b2f10 }
+      .stroke-amber   { stroke: #fbbf24 }
+      .text-amber     { fill: #fcd34d }
+      .arrow-amber    { fill: #fbbf24 }
+      .line-amber     { stroke: #fbbf24 }
+
+      .fill-teal      { fill: #0f3d3a }
+      .stroke-teal    { stroke: #2dd4bf }
+      .text-teal      { fill: #5eead4 }
+      .arrow-teal     { fill: #2dd4bf }
+      .line-teal      { stroke: #2dd4bf }
+
+      .fill-green     { fill: #14382a }
+      .stroke-green   { stroke: #4ade80 }
+      .text-green     { fill: #86efac }
+
+      .alt-border     { stroke: #475569 }
+      .alt-label-bg   { fill: #334155 }
+      .alt-label-text { fill: #94a3b8 }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" class="arrow-blue"/>
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" class="arrow-indigo"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" class="arrow-amber"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 7" refX="10" refY="3.5"
+            markerWidth="9" markerHeight="6.3" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" class="arrow-teal"/>
+    </marker>
+    <linearGradient id="header-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="1280" height="820" class="bg"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1280" height="56" fill="url(#header-grad)"/>
+  <text x="40" y="35" font-size="18" font-weight="600" class="header-text">Who can run which MCP tool — the <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">openshell</tspan> realm</text>
+  <text x="1240" y="34" font-size="10.5" text-anchor="end" class="header-muted">demos/keycloak-oidc/keycloak/realm-export.json + mcp-servers/values.yaml</text>
+
+  <!-- Column headers -->
+  <text x="40"  y="88" font-size="10" font-weight="700" letter-spacing="1.1" class="text-faint">USERS</text>
+  <text x="240" y="88" font-size="10" font-weight="700" letter-spacing="1.1" class="text-faint">GROUPS</text>
+  <text x="460" y="88" font-size="10" font-weight="700" letter-spacing="1.1" class="text-faint">REALM ROLES (COMPOSITE)</text>
+  <text x="730" y="88" font-size="10" font-weight="700" letter-spacing="1.1" class="text-faint">MCP SERVERS · CLIENT ROLES → TOOLS</text>
+  <text x="1240" y="88" font-size="9" text-anchor="end" class="text-faint">server name = Keycloak client id = resource_access key</text>
+  <line x1="40" y1="98" x2="1240" y2="98" class="border-subtle" stroke-width="1"/>
+
+  <!-- ══════════ ARROWS (drawn first, under the nodes) ══════════ -->
+  <!-- users → banker -->
+  <path d="M 190 285 C 300 285, 350 326, 453 326" fill="none" class="line-blue" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <path d="M 190 352 L 453 352" fill="none" class="line-blue" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <path d="M 190 414 C 300 414, 350 378, 453 378" fill="none" class="line-blue" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <!-- alice → group -->
+  <path d="M 190 303 L 212 303 L 212 627 L 233 627" fill="none" class="line-teal" stroke-width="1.5" marker-end="url(#arrow-teal)"/>
+  <!-- group → compatibility-user -->
+  <path d="M 410 627 L 453 627" fill="none" class="line-teal" stroke-width="1.5" marker-end="url(#arrow-teal)"/>
+  <!-- banker → 4 servers -->
+  <path d="M 660 324 C 696 324, 696 199, 724 199" fill="none" class="line-indigo" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <path d="M 660 341 C 696 341, 696 317, 724 317" fill="none" class="line-indigo" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <path d="M 660 363 C 696 363, 696 411, 724 411" fill="none" class="line-indigo" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <path d="M 660 380 C 696 380, 696 513, 724 513" fill="none" class="line-indigo" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+  <!-- compatibility-user → compatibility server -->
+  <path d="M 660 627 L 724 627" fill="none" class="line-amber" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+  <!-- ══════════ USERS ══════════ -->
+  <rect x="40" y="271" width="150" height="38" rx="18" class="fill-blue"/>
+  <rect x="40" y="271" width="150" height="38" rx="18" fill="none" class="stroke-blue" stroke-width="1.5"/>
+  <text x="115" y="289" font-size="13" font-weight="600" text-anchor="middle" class="text-blue">alice</text>
+  <text x="115" y="302" font-size="8.5" text-anchor="middle" class="text-blue">banker + compatibility-user</text>
+
+  <rect x="40" y="333" width="150" height="38" rx="18" class="fill-blue"/>
+  <rect x="40" y="333" width="150" height="38" rx="18" fill="none" class="stroke-blue" stroke-width="1.5"/>
+  <text x="115" y="351" font-size="13" font-weight="600" text-anchor="middle" class="text-blue">bob</text>
+  <text x="115" y="364" font-size="8.5" text-anchor="middle" class="text-blue">banker</text>
+
+  <rect x="40" y="395" width="150" height="38" rx="18" class="fill-blue"/>
+  <rect x="40" y="395" width="150" height="38" rx="18" fill="none" class="stroke-blue" stroke-width="1.5"/>
+  <text x="115" y="413" font-size="13" font-weight="600" text-anchor="middle" class="text-blue">charlie</text>
+  <text x="115" y="426" font-size="8.5" text-anchor="middle" class="text-blue">banker</text>
+
+  <!-- Notes box -->
+  <rect x="40" y="470" width="370" height="100" rx="8" class="surface"/>
+  <rect x="40" y="470" width="370" height="100" rx="8" fill="none" class="border-subtle" stroke-width="1"/>
+  <text x="56" y="491" font-size="10" font-weight="700" letter-spacing="0.6" class="text-mid">ALSO IN THE REALM — NOT MCP PERMISSIONS</text>
+  <text x="56" y="510" font-size="9.5" class="text-muted"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="600">openshell-user</tspan> — OpenShell gateway login. Held by all</text>
+  <text x="56" y="523" font-size="9.5" class="text-muted">three bankers. Grants no MCP tool access by itself.</text>
+  <text x="56" y="543" font-size="9.5" class="text-muted"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="600">openshell-admin</tspan> — held by <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">openshell-admin</tspan> and</text>
+  <text x="56" y="556" font-size="9.5" class="text-muted"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">openshell-onboarding-svc</tspan>. Also no MCP tool roles.</text>
+
+  <!-- ══════════ GROUP ══════════ -->
+  <rect x="240" y="601" width="170" height="52" rx="8" class="fill-teal"/>
+  <rect x="240" y="601" width="170" height="52" rx="8" fill="none" class="stroke-teal" stroke-width="1.5"/>
+  <text x="325" y="621" font-size="12" font-weight="600" text-anchor="middle" class="text-teal" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/compatibility-users</text>
+  <text x="325" y="637" font-size="8.5" text-anchor="middle" class="text-teal">group · realmRoles: [compatibility-user]</text>
+  <text x="325" y="648" font-size="8.5" text-anchor="middle" class="text-teal">alice is the only member</text>
+
+  <!-- ══════════ REALM ROLES ══════════ -->
+  <rect x="460" y="310" width="200" height="84" rx="8" class="fill-indigo"/>
+  <rect x="460" y="310" width="200" height="84" rx="8" fill="none" class="stroke-indigo" stroke-width="1.5"/>
+  <text x="560" y="332" font-size="14" font-weight="700" text-anchor="middle" class="text-indigo" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">banker</text>
+  <text x="560" y="348" font-size="8.5" text-anchor="middle" class="text-indigo">composite realm role · expands into</text>
+  <text x="560" y="363" font-size="9" text-anchor="middle" class="text-indigo">4 realm roles (Envoy gate)</text>
+  <text x="560" y="376" font-size="9" text-anchor="middle" class="text-indigo">+ 10 client roles (gateway gate)</text>
+  <text x="560" y="388" font-size="8" text-anchor="middle" class="text-indigo">baseline for every Meridian banker</text>
+
+  <rect x="460" y="598" width="200" height="58" rx="8" class="fill-amber"/>
+  <rect x="460" y="598" width="200" height="58" rx="8" fill="none" class="stroke-amber" stroke-width="1.5"/>
+  <text x="560" y="618" font-size="12.5" font-weight="700" text-anchor="middle" class="text-amber" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">compatibility-user</text>
+  <text x="560" y="633" font-size="8.5" text-anchor="middle" class="text-amber">composite · 1 client role, and is itself</text>
+  <text x="560" y="645" font-size="8.5" text-anchor="middle" class="text-amber">the realm role the Envoy gate wants</text>
+
+  <!-- ══════════ SERVER CARDS ══════════ -->
+  <!-- 1. mcp-portfolio -->
+  <rect x="730" y="140" width="510" height="118" rx="8" class="card"/>
+  <rect x="730" y="140" width="510" height="118" rx="8" fill="none" class="stroke-indigo" stroke-width="1.5"/>
+  <text x="746" y="162" font-size="12.5" font-weight="700" class="text" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-gateway-system/mcp-portfolio</text>
+  <text x="746" y="178" font-size="9" class="text-muted">Gate 1 (Envoy sidecar) · realm_access.roles ∋ <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-portfolio-user</tspan></text>
+  <line x1="746" y1="186" x2="1224" y2="186" class="border-subtle" stroke-width="1"/>
+  <circle cx="752" cy="198" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="202" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:list_my_clients</text>
+  <text x="980" y="202" font-size="9" class="text-faint">list the banker's assigned clients with AUM &amp; risk</text>
+  <circle cx="752" cy="214" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="218" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_positions</text>
+  <text x="980" y="218" font-size="9" class="text-faint">portfolio positions for one client</text>
+  <circle cx="752" cy="230" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="234" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_performance</text>
+  <text x="980" y="234" font-size="9" class="text-faint">performance metrics for one client</text>
+  <circle cx="752" cy="246" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="250" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_top_client_by_aum</text>
+  <text x="980" y="250" font-size="9" class="text-faint">top client by assets under management</text>
+
+  <!-- 2. mcp-crm-calendar -->
+  <rect x="730" y="274" width="510" height="86" rx="8" class="card"/>
+  <rect x="730" y="274" width="510" height="86" rx="8" fill="none" class="stroke-indigo" stroke-width="1.5"/>
+  <text x="746" y="296" font-size="12.5" font-weight="700" class="text" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-gateway-system/mcp-crm-calendar</text>
+  <text x="746" y="312" font-size="9" class="text-muted">Gate 1 (Envoy sidecar) · realm_access.roles ∋ <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-crm-calendar-user</tspan></text>
+  <line x1="746" y1="320" x2="1224" y2="320" class="border-subtle" stroke-width="1"/>
+  <circle cx="752" cy="332" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="336" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_upcoming_meetings</text>
+  <text x="980" y="336" font-size="9" class="text-faint">the banker's upcoming meetings</text>
+  <circle cx="752" cy="348" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="352" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_meeting_notes</text>
+  <text x="980" y="352" font-size="9" class="text-faint">notes from one meeting</text>
+
+  <!-- 3. mcp-market-news -->
+  <rect x="730" y="376" width="510" height="70" rx="8" class="card"/>
+  <rect x="730" y="376" width="510" height="70" rx="8" fill="none" class="stroke-indigo" stroke-width="1.5"/>
+  <text x="746" y="398" font-size="12.5" font-weight="700" class="text" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-gateway-system/mcp-market-news</text>
+  <text x="746" y="414" font-size="9" class="text-muted">Gate 1 (Envoy sidecar) · realm_access.roles ∋ <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-market-news-user</tspan></text>
+  <line x1="746" y1="422" x2="1224" y2="422" class="border-subtle" stroke-width="1"/>
+  <circle cx="752" cy="434" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="438" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_relevant_news</text>
+  <text x="980" y="438" font-size="9" class="text-faint">search market news by semantic relevance</text>
+
+  <!-- 4. mcp-kyc-compliance -->
+  <rect x="730" y="462" width="510" height="102" rx="8" class="card"/>
+  <rect x="730" y="462" width="510" height="102" rx="8" fill="none" class="stroke-indigo" stroke-width="1.5"/>
+  <text x="746" y="484" font-size="12.5" font-weight="700" class="text" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-gateway-system/mcp-kyc-compliance</text>
+  <text x="746" y="500" font-size="9" class="text-muted">Gate 1 (Envoy sidecar) · realm_access.roles ∋ <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-kyc-compliance-user</tspan></text>
+  <line x1="746" y1="508" x2="1224" y2="508" class="border-subtle" stroke-width="1"/>
+  <circle cx="752" cy="520" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="524" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:get_risk_profile</text>
+  <text x="980" y="524" font-size="9" class="text-faint">risk profile + KYC status for a client</text>
+  <circle cx="752" cy="536" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="540" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:check_suitability</text>
+  <text x="980" y="540" font-size="9" class="text-faint">product suitability for a client</text>
+  <circle cx="752" cy="552" r="2.5" class="arrow-indigo"/>
+  <text x="762" y="556" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:search_regulatory_guidance</text>
+  <text x="980" y="556" font-size="9" class="text-faint">search the regulatory-guidance corpus</text>
+
+  <!-- divider: everything above = banker baseline -->
+  <line x1="724" y1="574" x2="1240" y2="574" class="alt-border" stroke-width="1" stroke-dasharray="6,3"/>
+  <rect x="724" y="566" width="230" height="15" rx="4" class="alt-label-bg"/>
+  <text x="732" y="577" font-size="8.5" font-weight="600" letter-spacing="0.4" class="alt-label-text">▲ BANKER BASELINE — alice, bob, charlie</text>
+  <rect x="990" y="566" width="250" height="15" rx="4" class="alt-label-bg"/>
+  <text x="1232" y="577" font-size="8.5" font-weight="600" letter-spacing="0.4" text-anchor="end" class="alt-label-text">GRANTED SEPARATELY — alice only ▼</text>
+
+  <!-- 5. mcp-compatibility -->
+  <rect x="730" y="592" width="510" height="70" rx="8" class="card"/>
+  <rect x="730" y="592" width="510" height="70" rx="8" fill="none" class="stroke-amber" stroke-width="1.5"/>
+  <text x="746" y="614" font-size="12.5" font-weight="700" class="text" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">mcp-gateway-system/mcp-compatibility</text>
+  <text x="746" y="630" font-size="9" class="text-muted">Gate 1 (Envoy sidecar) · realm_access.roles ∋ <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">compatibility-user</tspan></text>
+  <line x1="746" y1="638" x2="1224" y2="638" class="border-subtle" stroke-width="1"/>
+  <circle cx="752" cy="650" r="2.5" class="arrow-amber"/>
+  <text x="762" y="654" font-size="10.5" class="text-mid" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:calc_tax</text>
+  <text x="980" y="654" font-size="9" class="text-faint">calculate tax for a given income</text>
+
+  <!-- ══════════ LEGEND / HOW TO READ ══════════ -->
+  <rect x="40" y="686" width="1200" height="104" rx="8" class="surface"/>
+  <rect x="40" y="686" width="1200" height="104" rx="8" fill="none" class="border-subtle" stroke-width="1"/>
+  <text x="58" y="708" font-size="11.5" font-weight="700" letter-spacing="0.5" class="text">HOW TO READ THIS — a call to tool T on server S succeeds only if the caller's access token clears BOTH gates</text>
+  <circle cx="64" cy="727" r="3" class="arrow-indigo"/>
+  <text x="76" y="731" font-size="10" class="text-mid"><tspan font-weight="700">Gate 1 — Envoy sidecar</tspan> on each MCP server pod: verifies the JWT against Keycloak's JWKS, then requires that <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">realm_access.roles</tspan> contains the card's role (grey line). Server-level, not per-tool.</text>
+  <circle cx="64" cy="745" r="3" class="arrow-amber"/>
+  <text x="76" y="749" font-size="10" class="text-mid"><tspan font-weight="700">Gate 2 — MCP Gateway AuthPolicy</tspan> (Authorino CEL, <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool-access-check</tspan>): requires <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">resource_access["S"].roles</tspan> to contain <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tool:T</tspan>, keyed by the <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">x-mcp-servername</tspan> header. Per-tool.</text>
+  <circle cx="64" cy="763" r="3" class="arrow-blue"/>
+  <text x="76" y="767" font-size="10" class="text-mid">Keycloak <tspan font-weight="700">composite roles</tspan> are what emit both claim shapes from one grant: holding <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">banker</tspan> alone clears Gate 1 and Gate 2 for all four servers above the divider.</text>
+  <circle cx="64" cy="781" r="3" class="arrow-indigo"/>
+  <text x="76" y="785" font-size="10" class="text"><tspan font-weight="700">So:</tspan> <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700">alice</tspan> can run all 11 tools. <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700">bob</tspan> and <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700">charlie</tspan> can run the 10 above the divider — <tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace">calc_tax</tspan> gets them a 403 from Gate 2 (and never reaches the pod, Gate 1 rejects it too).</text>
+</svg>
