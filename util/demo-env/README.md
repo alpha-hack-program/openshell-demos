@@ -86,6 +86,28 @@ about, because none of them looks like a file problem when it bites:
 An expired *access* token is reported as information, not a problem, when
 a refresh token is present — the CLI rotates it on next use.
 
+### Parked identities
+
+Keeping a second cluster's logins alongside the current ones under a
+suffixed directory name — `oc-alice-<cluster>/` — is the hand-rolled
+version of what slots are for, and plenty of machines already have one.
+Such a set is registered against another cluster *by design*, so judging
+it against this `.env` would report four stale logins that aren't.
+
+So the stale-registration check distinguishes stale from parked:
+
+- One of the canonical four pointing elsewhere is a **failure**. That's
+  the real case — a run against a second cluster has overwritten this
+  run's logins.
+- A discovered, non-canonical identity pointing elsewhere is **parked**:
+  one info line, remaining checks skipped.
+- Naming it with `-i <id>` opts back into the full checks, whatever it is.
+
+Relatedly, the token-subject check compares against the *leading*
+component of the directory name, because the suffix is a local label and
+Keycloak only ever knows `alice`. A token for alice in `oc-bob/` is still
+a failure.
+
 ## Slots
 
 A slot is one complete demo state. The usual shape is one per cluster:

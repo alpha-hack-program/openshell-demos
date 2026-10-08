@@ -77,6 +77,14 @@ else
   cp "$ADMIN_MTLS_DIR/ca.crt" "$ADMIN_MTLS_DIR/tls.crt" "$ADMIN_MTLS_DIR/tls.key" "$MTLS_DIR/"
 fi
 
+# Both branches above land tls.key at 0644 under the usual 022 umask --
+# shell redirection ignores the source Secret's permissions entirely, and
+# `cp` without -p applies the umask too. Nothing fails as a result, which
+# is why it goes unnoticed: this is a client key readable by every other
+# account on the machine. Covers both branches, so it stays correct
+# whichever path ran.
+chmod 600 "$MTLS_DIR/tls.key"
+
 openshell gateway remove "$GATEWAY_NAME" 2>/dev/null || true
 echo "Registering gateway and opening a browser for ${USER_ID}'s OIDC login..."
 openshell gateway add "https://${ROUTE_HOST}:443" \

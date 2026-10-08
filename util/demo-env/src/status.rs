@@ -18,7 +18,7 @@
 
 use std::path::Path;
 
-use crate::layout::{IdentityPaths, Layout, Scope};
+use crate::layout::{CANONICAL_IDENTITIES, IdentityPaths, Layout, Scope};
 use crate::probe::{self, GatewayMetadata, OidcBundle};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize)]
@@ -124,7 +124,12 @@ impl Report {
 }
 
 /// Run every check for the requested scopes and identities.
-pub fn run(layout: &Layout, identities: &[String], scopes: &[Scope]) -> Report {
+///
+/// `explicit` says whether the caller named these identities with
+/// `-i`, as opposed to them coming from directory discovery. It changes
+/// how an identity registered against another cluster is judged — see
+/// [`check_identity`].
+pub fn run(layout: &Layout, identities: &[String], explicit: bool, scopes: &[Scope]) -> Report {
     let mut report = Report::default();
 
     // The .env is checked unconditionally: it supplies the expected
@@ -137,7 +142,7 @@ pub fn run(layout: &Layout, identities: &[String], scopes: &[Scope]) -> Report {
     }
     if scopes.contains(&Scope::Identities) {
         for id in identities {
-            check_identity(layout, id, &mut report);
+            check_identity(layout, id, explicit, &mut report);
         }
     }
     if scopes.contains(&Scope::Demo) {
@@ -288,7 +293,7 @@ fn check_shared(layout: &Layout, report: &mut Report) {
     }
 }
 
-fn check_identity(layout: &Layout, id: &str, report: &mut Report) {
+fn check_identity(layout: &Layout, id: &str, explicit: bool, report: &mut Report) {
     let paths = layout.identity(id);
     if !paths.exists() {
         report.push_fix(
@@ -300,6 +305,34 @@ fn check_identity(layout: &Layout, id: &str, report: &mut Report) {
         );
         return;
     }
+
+    // Parked, not stale. Keeping a second cluster's logins alongside the
+    // current ones under a suffixed directory name
+    // (`oc-alice-<cluster>/`) is a reasonable thing to do — it is the
+    // hand-rolled version of what slots are for. Such a set is registered
+    // against another cluster by design, so reporting four stale logins
+    // for it is noise that buries the real check.
+    //
+    // The real check is still the valuable one and is kept intact for the
+    // case it exists for: one of the canonical four pointing elsewhere
+    // means a run against a second cluster has overwritten this run's
+    // logins. So only a *discovered*, non-canonical identity is allowed to
+    // be parked — and naming it with `-i` opts back into the full checks.
+    if !explicit
+        && !CANONICAL_IDENTITIES.contains(&id)
+        && let Some(elsewhere) = parked_endpoint(layout, &paths)
+    {
+        report.push(
+            id,
+            "parked",
+            Level::Info,
+            format!(
+                "registered against {elsewhere}, not this cluster — skipped (check it with `-i {id}`)"
+            ),
+        );
+        return;
+    }
+
     report.push(
         id,
         "identity tree",
@@ -310,6 +343,17 @@ fn check_identity(layout: &Layout, id: &str, report: &mut Report) {
     check_registration(layout, id, &paths, report);
     check_token(id, &paths, report);
     check_mtls(layout, id, &paths, report);
+}
+
+/// The other cluster this identity is registered against, if it is
+/// readable and genuinely differs from the one `.env` names. `None` when
+/// it matches, when either endpoint is unknown, or when the registration
+/// can't be read — all cases the normal checks should report on properly
+/// rather than silently skip.
+fn parked_endpoint(layout: &Layout, paths: &IdentityPaths) -> Option<String> {
+    let expected = layout.env.expected_endpoint()?;
+    let actual = GatewayMetadata::read(&paths.metadata()).ok()?.endpoint?;
+    (actual != expected).then_some(actual)
 }
 
 fn check_registration(layout: &Layout, id: &str, paths: &IdentityPaths, report: &mut Report) {
@@ -482,11 +526,32 @@ fn check_token(id: &str, paths: &IdentityPaths, report: &mut Report) {
     }
 }
 
-/// The admin persona's directory is `oc-admin`, but its Keycloak account
-/// is `openshell-admin` (see the README's step 1a credentials note), so a
-/// bare equality check would flag every correct admin login.
+/// Does this access token belong to the persona whose directory it is in?
+///
+/// The directory name is a *local* label and need not equal the Keycloak
+/// username. Three ways they legitimately differ:
+///
+/// * admin's directory is `oc-admin`, its Keycloak account is
+///   `openshell-admin` (see the README's step 1a credentials note);
+/// * the issuer may return an email, whose local part is the username;
+/// * a directory may carry a suffix to park a second cluster's logins
+///   beside the current ones — `oc-alice-<cluster>/` still holds a token
+///   for plain `alice`, and calling that a wrong-persona login is false.
+///
+/// What stays caught is the case this check exists for: alice's token
+/// landing in `oc-bob/`. The deliberate looseness is that a directory
+/// named `<subject>-<anything>` is accepted for `<subject>`, so a Keycloak
+/// user literally named `alice` would be accepted in `oc-alice-bob/`.
 fn subject_matches(id: &str, subject: &str) -> bool {
-    subject == id || subject == format!("openshell-{id}") || subject.split('@').next() == Some(id)
+    if subject == id {
+        return true;
+    }
+    let subject = subject.split('@').next().unwrap_or(subject);
+    if subject == id {
+        return true;
+    }
+    let base = subject.strip_prefix("openshell-").unwrap_or(subject);
+    base == id || id.starts_with(&format!("{base}-"))
 }
 
 fn check_mtls(layout: &Layout, id: &str, paths: &IdentityPaths, report: &mut Report) {
@@ -679,6 +744,25 @@ mod tests {
         assert!(subject_matches("alice", "alice"));
         assert!(subject_matches("alice", "alice@example.com"));
         assert!(!subject_matches("bob", "alice"));
+    }
+
+    /// A directory suffixed to park a second cluster's logins still holds
+    /// a token for the plain persona — `oc-alice-rhgaudi3s2/` is alice.
+    #[test]
+    fn a_cluster_suffixed_directory_is_not_a_wrong_persona() {
+        assert!(subject_matches("alice-rhgaudi3s2", "alice"));
+        assert!(subject_matches("bob-rhgaudi3s2", "bob"));
+        assert!(subject_matches("admin-rhgaudi3s2", "openshell-admin"));
+        assert!(subject_matches("charlie-sandbox341", "charlie@example.com"));
+    }
+
+    /// The case the check exists for has to survive the looseness above.
+    #[test]
+    fn a_token_in_the_wrong_personas_directory_is_still_caught() {
+        assert!(!subject_matches("bob", "alice"));
+        assert!(!subject_matches("bob-rhgaudi3s2", "alice"));
+        assert!(!subject_matches("alice", "openshell-admin"));
+        assert!(!subject_matches("charlie-rhgaudi3s2", "bob"));
     }
 
     #[test]

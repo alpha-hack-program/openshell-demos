@@ -417,7 +417,12 @@ fn cmd_status(
     strict: bool,
     json: bool,
 ) -> Result<ExitCode, String> {
-    let report = status::run(layout, &selection.identities(layout), &selection.scopes());
+    let report = status::run(
+        layout,
+        &selection.identities(layout),
+        selection.identity_filter().is_some(),
+        &selection.scopes(),
+    );
 
     if json {
         println!(

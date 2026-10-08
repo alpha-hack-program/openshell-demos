@@ -119,6 +119,10 @@ if [[ ! -f "$GATEWAY_METADATA" ]]; then
     -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
   oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
     -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+  # Shell redirection creates the file at 0644 under the usual 022 umask,
+  # leaving a client private key readable by every other account on the
+  # machine. Nothing fails as a result, which is why it goes unnoticed.
+  chmod 600 "$MTLS_DIR/tls.key"
 
   # Let's Encrypt path: the gRPC control channel pins trust to this ca.crt
   # and doesn't fall back to the system trust store — append the issuing

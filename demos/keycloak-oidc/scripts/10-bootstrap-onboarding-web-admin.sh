@@ -62,6 +62,10 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+# Shell redirection creates the file at 0644 under the usual 022 umask,
+# leaving a client private key readable by every other account on the
+# machine. Nothing fails as a result, which is why it goes unnoticed.
+chmod 600 "$MTLS_DIR/tls.key"
 
 if [[ -n "${LETSENCRYPT_CLUSTER_ISSUER:-}" ]]; then
   echo | openssl s_client -connect "${ROUTE_HOST}:443" -servername "${ROUTE_HOST}" -showcerts 2>/dev/null \

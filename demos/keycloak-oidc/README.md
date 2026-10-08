@@ -1246,6 +1246,11 @@ oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
 oc -n "$OPENSHELL_NAMESPACE" get secret openshell-client-tls \
   -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+# The redirection above creates tls.key at 0644 under the usual 022 umask,
+# leaving a client private key readable by every other account on the
+# machine. Nothing fails as a result, which is why it goes unnoticed —
+# `demo-env status` flags it.
+chmod 600 "$MTLS_DIR/tls.key"
 
 # If using the Let's Encrypt path (LETSENCRYPT_CLUSTER_ISSUER set), the CLI's
 # gRPC control channel pins trust to this ca.crt bundle and does NOT fall back
@@ -2228,6 +2233,8 @@ mkdir -p "$MTLS_DIR"
 # four-terminal convention above.
 ADMIN_CONFIG_HOME="${ADMIN_XDG_CONFIG_HOME:-$HOME/.config}"
 cp "$ADMIN_CONFIG_HOME/openshell/gateways/$GATEWAY_NAME/mtls/"{ca.crt,tls.crt,tls.key} "$MTLS_DIR/"
+# `cp` without -p applies the umask, so tls.key lands at 0644 here too.
+chmod 600 "$MTLS_DIR/tls.key"
 # Admin's ca.crt (step 2b) already has the Let's Encrypt issuing chain
 # appended if LETSENCRYPT_CLUSTER_ISSUER was used — don't append it again
 # here, or duplicate PEM blocks will confuse some TLS stacks.
