@@ -5,6 +5,7 @@
 [![CI agent-proxy](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-agent-proxy.yml)
 [![CI parrot](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-parrot.yml)
 [![CI session-auditor](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-session-auditor.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-session-auditor.yml)
+[![CI demo-env](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-demo-env.yml/badge.svg)](https://github.com/alpha-hack-program/openshell-demos/actions/workflows/ci-demo-env.yml)
 
 > **Experimental — not production-ready.**
 > These demos build on top of the
@@ -44,6 +45,7 @@ Cross-cutting guides and reference material that apply across demos:
 | [`docs/headless-browser-automation.md`](docs/headless-browser-automation.md) | Playwright setup for automating OAuth flows in headless / CI environments |
 | [`docs/guide-testing-protocol.md`](docs/guide-testing-protocol.md) | Methodology for testing a demo guide end to end: follow every step literally, handle failures, resolve `[VERIFY]` tags |
 | [`demos/keycloak-oidc/docs/evalhub-redteam.md`](demos/keycloak-oidc/docs/evalhub-redteam.md) | **DRAFT** — red-team evaluations with EvalHub + Garak + agent-proxy inside sandboxes (part of the keycloak-oidc demo) |
+| [`util/demo-env/README.md`](util/demo-env/README.md) | `demo-env` — check the keycloak-oidc demo's local files are in order, and snapshot/restore a whole set of persona logins per cluster |
 
 See [`CLAUDE.md`](CLAUDE.md) for the full build contract, conventions, and notes
 for Claude Code working in this repo.

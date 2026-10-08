@@ -250,6 +250,30 @@ standard, but has only been tested on Linux. See
 [`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#running-multiple-cli-identities-concurrently-on-one-machine)
 for the full pattern, including how to drive the login headlessly.
 
+**Checking all four at once, and keeping them**
+
+Each terminal's `openshell whoami` only tells you about that terminal.
+[`util/demo-env`](../../util/demo-env/README.md) checks every persona's
+files in one go — registration, OIDC session, mTLS material, and whether
+each points at the cluster this `.env` names — and prints the fix for
+anything it finds:
+
+```bash
+demo-env status
+```
+
+It also snapshots the whole set. Worth doing once all four logins are
+done, because these directories live under `$HOME` and are shared by
+every checkout on the machine: running this guide against a second
+cluster overwrites the first run's logins, and restoring a slot is much
+faster than redoing four browser logins.
+
+```bash
+demo-env save after-onboarding --note "all four bankers logged in"
+demo-env list
+demo-env restore after-onboarding
+```
+
 ### Architecture
 
 ![Per-user credential isolation architecture](docs/diagrams/architecture-overview.svg)

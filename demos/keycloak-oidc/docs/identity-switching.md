@@ -83,3 +83,25 @@ things:
   Both functions repopulate the same `OTEL_ENV_ARGS` array — call the
   right one again before your next `sandbox exec` if you switch sandboxes
   mid-session.
+
+## Checking and snapshotting what it switches between
+
+[`util/demo-env`](../../../util/demo-env/README.md) covers the two gaps
+above from the other side. `as.sh` points a shell at a persona and makes
+exactly one check on the way (the stale-cluster cross-check in point 4);
+`demo-env` inspects every persona's files without switching to any of
+them, and can keep more than one complete set:
+
+```bash
+demo-env status            # all four personas: registration, token, mTLS — with the fix for each problem
+demo-env where             # every path the demo reads, and whether it's there
+demo-env save cluster-a    # one slot = one cluster's worth of logins
+demo-env restore cluster-a
+```
+
+The snapshotting matters because the `oc-<id>` directories live under
+`$HOME` and are shared by every checkout on the machine — the same reason
+a stale registration is possible at all. Running the guide against a
+second cluster overwrites the first run's four browser logins, and a slot
+is what makes that reversible.
+
