@@ -48,6 +48,12 @@ struct Cli {
     #[arg(long, env = "OPENSHELL_NAMESPACE")]
     namespace: Option<String>,
 
+    /// MCP Gateway public host (e.g. mcp.apps.cluster.example.com), substituted
+    /// for <mcp-gateway-host> in the profile (if present) — only needed when
+    /// onboarding a user whose sandboxes will be provisioned with --gw
+    #[arg(long, env = "MCP_GATEWAY_HOST")]
+    mcp_gateway_host: Option<String>,
+
     /// OpenShell workspace to create the provider in. Defaults to the user ID —
     /// each onboarded user gets their own workspace. This does NOT create the
     /// workspace or grant membership; a platform admin must have already run
@@ -400,6 +406,16 @@ fn run() -> Result<(), String> {
             "[onboard] WARNING: profile still contains <openshell-namespace> — pass \
              --namespace or set OPENSHELL_NAMESPACE, or the resulting endpoint hosts \
              will be invalid."
+        );
+    }
+    if let Some(gw_host) = &cli.mcp_gateway_host {
+        profile_content = profile_content.replace("<mcp-gateway-host>", gw_host);
+    }
+    if profile_content.contains("<mcp-gateway-host>") {
+        eprintln!(
+            "[onboard] WARNING: profile still contains <mcp-gateway-host> — pass \
+             --mcp-gateway-host or set MCP_GATEWAY_HOST, or any sandbox provisioned \
+             with --gw will fail MCP calls with credential_endpoint_mismatch."
         );
     }
     let tmp_profile = std::env::temp_dir().join("onboard-profile.yaml");
