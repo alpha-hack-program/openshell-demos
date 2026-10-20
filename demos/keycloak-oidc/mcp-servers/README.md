@@ -47,31 +47,44 @@ connection goes to the Kubernetes Service defined in the HTTPRoute's
 
 ### Prerequisites
 
-Before enabling `mcpGateway`, install [`../mcp-gateway`](../mcp-gateway/)
-once per cluster — it declaratively creates the `Gateway`,
-`MCPGatewayExtension`, `GatewayClass`, and (with `auth.enabled`) the
-Authorino-TLS `EnvoyFilter` this chart's HTTPRoutes/
-MCPServerRegistrations/AuthPolicies attach to:
+Before enabling `mcpGateway`, install the shared MCP Gateway chart from the
+`llm-d-guide` repo (`gitops/instance/mcp-gateway`) once per cluster — it
+declaratively creates the `Gateway`, `MCPGatewayExtension`, `GatewayClass`,
+the `AuthPolicy` pair, and (with OIDC enabled) the Authorino-TLS
+`EnvoyFilter` this chart's HTTPRoutes/MCPServerRegistrations attach to.
+This chart (`mcp-servers`) only ever creates HTTPRoutes and
+MCPServerRegistrations for its own five servers — it does not create or
+own any gateway-level object itself, so other projects registering their
+own servers against the same shared Gateway is expected and not a
+conflict:
 
 ```bash
-helm upgrade --install mcp-gateway ../mcp-gateway \
-  --namespace "$OPENSHELL_NAMESPACE" \
+LLM_D_GUIDE_DIR=/path/to/llm-d-guide   # sibling checkout of that repo
+
+helm template mcp-gateway \
+  "${LLM_D_GUIDE_DIR}/gitops/instance/mcp-gateway" --include-crds \
   --set gateway.publicHost="mcp.${CLUSTER_APPS_DOMAIN}" \
-  --set keycloak.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
+  --set oidc.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  | oc apply -f -
 ```
+
+See `gitops/instance/mcp-gateway/README.md` in `llm-d-guide` for the full
+values reference, including the multi-tenant `extraTenants` model.
 
 The `rhcl-operator` CSV (Red Hat Connectivity Link, Kagenti/Kuadrant MCP
 gateway, v0.7.1+) and a `Kuadrant` CR must already exist on the cluster —
 one Subscription brings in `authorino-operator`/`limitador-operator` as OLM
 dependencies, so there's no separate "Kuadrant operator" to install even
-when `mcpGateway.auth.enabled` below is set. `../mcp-gateway` only creates
-CRs their CRDs define, never the operators or the `Kuadrant` CR itself. See
-the main demo README's [Installing RHCL](../README.md#installing-rhcl) for
-the install steps and gotchas.
+when the gateway's own OIDC auth is enabled. The gateway chart only
+creates CRs their CRDs define, never the operators or the `Kuadrant` CR
+itself. See the main demo README's
+[Installing RHCL](../README.md#installing-rhcl) for the install steps and
+gotchas.
 
 `mcpGateway.{gatewayName,gatewayNamespace,registrationNamespace,
-publicHost}` below must match `../mcp-gateway`'s `gateway.{name,namespace,
-publicHost}` / `extension.namespace`.
+publicHost}` below must match the gateway chart's own
+`gateway.{name,namespace,publicHost}` / `extension.namespace` for this
+tenant.
 
 ### Configuration
 

@@ -245,8 +245,24 @@ This works on Linux with the openshell CLI version in use (see
 [Prerequisites](#prerequisites)), running four concurrent
 identities (admin, alice, bob, charlie) with no state bleed between them
 and nothing written outside the chosen directories.
-**[VERIFY on macOS]** — the `XDG_CONFIG_HOME`/`XDG_STATE_HOME` mechanism is
-standard, but has only been tested on Linux. See
+
+**Confirmed on macOS** (2026-10-11, CLI 0.1.2, Intel/x86_64): the same
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME` scoping ran all four identities
+concurrently with no state bleed — each terminal's `openshell whoami`
+reported its own persona and its own realm roles. Two macOS-specific
+notes when driving this headlessly:
+
+- **The CLI opens the browser with `open`, not `xdg-open`.** The
+  interception stub list in
+  [`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#preventing-real-browser-popups)
+  already includes `open`, but on Linux it is `xdg-open` that actually
+  fires — on macOS it is `open`, so that stub is the one that matters.
+- **Several of this demo's scripts assumed GNU userland** (`mapfile`,
+  `mktemp --suffix=`, `sed 's|https\?://||'`). Those are fixed in-repo as
+  of this run; see [Troubleshooting](#d-troubleshooting) if you are on an
+  older checkout.
+
+See
 [`docs/headless-browser-automation.md`](../../docs/headless-browser-automation.md#running-multiple-cli-identities-concurrently-on-one-machine)
 for the full pattern, including how to drive the login headlessly.
 
@@ -398,7 +414,7 @@ banker membership in a workspace that already has one.
 | `jq`, `openssl` | Scripting, secret handling |
 | OpenShift cert-manager operator | Used to provision the gateway's TLS certificates — see [2a. Helm install](#2a-helm-install). The PKI-init-job alternative avoids this dependency but isn't walked through end to end in this guide |
 | RHCL operator (`rhcl-operator`, Red Hat Operators catalog) **and** the separate MCP Gateway operator (`mcp-gateway`, same catalog, Tech Preview) | **Optional** — only for gateway-routed MCP access (the default walkthrough below); direct access needs none of this. Two separate OLM packages, easy to miss the second one — see [Installing RHCL](#installing-rhcl) and [Installing the MCP Gateway Operator](#installing-the-mcp-gateway-operator) below |
-| Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the `mcp-gateway` chart creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
+| Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the shared MCP Gateway chart (see [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)) creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
 This guide is written against **OpenShell chart/CLI version `0.1.2`** —
@@ -557,24 +573,24 @@ oc get kuadrant kuadrant -n kuadrant-system
 > - **[VERIFY]** the `Kuadrant` CR can report `Ready: False` with a
 >   "Gateway API provider not installed" message if applied before any
 >   `GatewayClass` exists on the cluster. That's expected, not an error —
->   in this repo, the `mcp-gateway` chart ([step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once))
->   is what creates the `GatewayClass`; apply the `Kuadrant` CR whenever
->   convenient, before or after, it becomes `Ready: True` once the
->   `GatewayClass` exists.
+>   [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)'s chart is what
+>   creates the `GatewayClass`; apply the `Kuadrant` CR whenever convenient,
+>   before or after, it becomes `Ready: True` once the `GatewayClass`
+>   exists.
 
 #### Installing the MCP Gateway Operator
 
 **Also required for gateway-routed MCP access, in addition to RHCL above —
 easy to miss, since nothing about the `MCPGatewayExtension`/
-`MCPServerRegistration` CRDs `mcp-gateway/` (step 4a) depends on actually
-ships with `rhcl-operator`.** Confirmed live: a cluster with `rhcl-operator`
-installed and `Succeeded`, but without this second operator, has no
-`mcpgatewayextensions.mcp.kuadrant.io` CRD at all — `helm install
-./mcp-gateway` fails outright with `no matches for kind
-"MCPGatewayExtension"`, which reads like a Gateway API / RHCL version
-problem but isn't. This is a **separate** OLM package, confusingly similar
-name, Tech Preview, its own versioning scheme (`0.7.x`, unrelated to
-RHCL's own `1.4.x`):
+`MCPServerRegistration` CRDs [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)'s
+chart depends on actually ships with `rhcl-operator`.** Confirmed live: a
+cluster with `rhcl-operator` installed and `Succeeded`, but without this
+second operator, has no `mcpgatewayextensions.mcp.kuadrant.io` CRD at all —
+`helm template | oc apply` of the gateway chart fails outright with `no
+matches for kind "MCPGatewayExtension"`, which reads like a Gateway API /
+RHCL version problem but isn't. This is a **separate** OLM package,
+confusingly similar name, Tech Preview, its own versioning scheme (`0.7.x`,
+unrelated to RHCL's own `1.4.x`):
 
 ```bash
 # Verify the package is available (same catalog, different package than rhcl-operator)
@@ -625,11 +641,11 @@ oc get crd | grep mcp.kuadrant.io
 >   having real stability issues (auth failures, gateway pod memory
 >   pressure). Not a concern if you installed RHCL via the steps above on
 >   a current catalog, but worth knowing if a cluster has an older pin.
-> - This gap is exactly why `mcp-gateway/Chart.yaml`'s comment ("confirmed
->   live against sandbox268") didn't catch it originally — that reference
->   cluster already had this operator installed for an unrelated AI-gateway
->   workload sharing the same cluster, so the dependency was invisible
->   until testing against a cluster that only had RHCL's core operator.
+> - This gap went uncaught on the reference cluster this demo was first
+>   verified against (sandbox268) because that cluster already had this
+>   operator installed for an unrelated AI-gateway workload sharing the
+>   same cluster, so the dependency was invisible until testing against a
+>   cluster that only had RHCL's core operator.
 
 #### How OpenShell networking works
 
@@ -993,14 +1009,22 @@ This step installs the OpenShell gateway with OIDC and a passthrough Route
 in a single Helm install (2a), then extracts the mTLS client certificates
 and registers the gateway endpoint with the `openshell` CLI (2b).
 
-> **If you already have another OpenShell installation** on the same cluster
-> (the base demo, a previous run of this demo in a different namespace, etc.),
-> the Helm install below will fail because the chart creates cluster-scoped
-> resources (`openshell-node-reader` ClusterRole **and** ClusterRoleBinding)
-> that are already owned by the other release. **Tear down the previous
-> installation first** — e.g. `demos/base/scripts/99-teardown.sh` for the
-> base demo, or `demos/keycloak-oidc/scripts/99-teardown.sh full` (or
-> `keep-keycloak` to leave Keycloak in place) for a prior run of this demo.
+> **Another OpenShell installation on the same cluster is fine on 0.1.2.**
+> The chart suffixes its cluster-scoped resources with the namespace —
+> `openshell-node-reader-<namespace>` for both the ClusterRole and the
+> ClusterRoleBinding — so two releases in different namespaces don't
+> collide. Confirmed live (2026-10-11): installing this demo into
+> `keycloak-oidc-demo` on a cluster already running an unrelated OpenShell
+> release in another namespace succeeded, leaving
+> `openshell-node-reader-keycloak-oidc-demo` and
+> `openshell-node-reader-<other-ns>` side by side.
+>
+> On **0.0.106** these resources were named plain `openshell-node-reader`,
+> and a second install did fail on the conflict. If you're on that version,
+> or you simply want the old installation gone, tear it down first — e.g.
+> `demos/base/scripts/99-teardown.sh` for the base demo, or
+> `demos/keycloak-oidc/scripts/99-teardown.sh full` (or `keep-keycloak` to
+> leave Keycloak in place) for a prior run of this demo.
 
 #### 2a. Helm install
 
@@ -1292,9 +1316,29 @@ Log in as `openshell-admin` / `openshell-admin` (the account with the
 `openshell-admin` realm role — see the credentials note in
 [step 1a](#1a-render-the-realm-json)).
 
-#### 2d. Enable Providers v2
+#### 2d. Enable Providers v2 — no longer needed on 0.1.2
 
-This changes a **global** setting, so the CLI asks for confirmation — type
+**Skip this step on the version this guide targets.** Providers v2 is
+always on in 0.1.2 and the toggle no longer exists; the command below is
+kept only so readers upgrading from 0.0.106 recognise what replaced it.
+Running it now fails outright:
+
+```console
+$ openshell settings set --global --key providers_v2_enabled --value true --yes
+Error:   × unknown setting key 'providers_v2_enabled'. Allowed keys:
+  │ ocsf_json_enabled, ocsf_schema_version, agent_policy_proposals_enabled,
+  │ proposal_approval_mode
+```
+
+That error is harmless — nothing else in this guide depends on the
+setting, and [step 3](#3-onboard-a-banker)'s `provider profile import` /
+`provider create` work without it (confirmed live, 2026-10-11). Just move
+on to [Verify the gateway](#verify-the-gateway).
+
+<details>
+<summary>The old 0.0.106 command, for reference</summary>
+
+This changed a **global** setting, so the CLI asked for confirmation — type
 `y` and press Enter when prompted. (Running headlessly/non-interactively?
 Append `--yes` instead — see AGENTS.md.)
 
@@ -1302,6 +1346,8 @@ Append `--yes` instead — see AGENTS.md.)
 # Terminal A — admin
 openshell settings set --global --key providers_v2_enabled --value true
 ```
+
+</details>
 
 #### Verify the gateway
 
@@ -1413,7 +1459,32 @@ workspace for another.
 
 #### Step 3.1a — Self-service alternative: `onboarding-web`
 
-**This is the default, recommended path.** Each banker visits a URL, logs
+> **⚠ Currently broken against OpenShell 0.1.2 — use
+> [Step 3.1b](#step-31b--onboard-the-banker-with-the-onboard-tool)
+> instead.** The published images
+> (`quay.io/atarazana/onboarding-web:0.1.0` and `:0.1.1`) bake in
+> `openshell 0.0.106`, whose protobuf wire format the 0.1.2 gateway
+> rejects. Every banker login reaches Keycloak successfully and then dies
+> at the app's first backend call:
+>
+> ```
+> Could not look up your OpenShell workspace ('alice'):
+> openshell provider list --workspace alice failed (exit exit status: 1):
+> Error: × code: 'Internal error', message: "failed to decode Protobuf message:
+> ListProvidersRequest.workspace_scope: buffer underflow"
+> ```
+>
+> Confirmed live for all three bankers (2026-10-11). The fix is to rebuild
+> and publish the image at 0.1.2 —
+> `util/onboarding-web/Containerfile`'s `ARG OPENSHELL_VERSION` is already
+> bumped, but no matching tag has been pushed yet — then set
+> `image.tag` in `onboarding-web/values.yaml` to match. Tracked in
+> [`TODO.md`](../../TODO.md). The "Verified end to end against a live
+> cluster" note at the end of this section predates the 0.1.2 upgrade and
+> does not currently hold.
+
+**This is the default, recommended path** *(once the image above is
+rebuilt)*. Each banker visits a URL, logs
 in via Keycloak, and ends up with a working provider — with no admin
 running anything on their behalf at the moment they activate their own
 credential. If you'd rather an admin run one binary per banker from their
@@ -1435,6 +1506,38 @@ harness provisioning in steps 4 and 5. Once that's done, the banker
 visits `onboarding-web`'s URL, logs in as themselves, and the web app
 runs the `refresh configure`/`refresh rotate` calls that `onboard` would
 otherwise run on their behalf.
+
+> **Re-create each banker's sandbox after they activate.** The ordering
+> above — sandbox first, activation second — leaves the sandbox holding
+> the credential as it was at creation time, i.e. the `pending`
+> placeholder. `refresh configure`/`refresh rotate` updates the provider,
+> but **does not reach an already-running sandbox**, the same limitation
+> called out for `provider update` in
+> [Provision the Claude Code harness](#provision-the-claude-code-harness).
+> The symptom is quiet and easy to misread: the sandbox is `Ready`, but
+> Claude Code reports
+> `mcp_servers: [{"name": "gateway", "status": "failed"}]` with an empty
+> tool list, and the agent — having no tools at all — starts hallucinating
+> shell commands instead of calling MCP. Confirmed live (2026-10-11):
+> bankers whose sandboxes were created before activation all failed this
+> way, and simply re-running step 5's provisioning after a delete fixed
+> every one of them:
+>
+> ```bash
+> # Terminal A — admin, once per banker, after that banker has activated
+> openshell sandbox delete --workspace "$USER_ID" "claude-${USER_ID}"
+> ./scripts/15-provision-claude-sandbox.sh --gw "$USER_ID" <server-list>
+> ```
+>
+> Note the argument order — `--workspace` comes *before* the sandbox name
+> on `sandbox delete`; the reverse prints a usage error, and because
+> step 5's `sandbox create ... || true` silently no-ops on an existing
+> sandbox, a failed delete leaves the stale sandbox in place with no error
+> anywhere to tell you so.
+>
+> Step 3.1b doesn't have this problem when run in the guide's own order,
+> because `onboard` activates the credential *before* step 5 creates the
+> sandbox.
 
 **Who runs this:** Terminal A — admin, for all of the following (the
 `openshell-onboarding-svc` browser login in step 1 below is a *service*
@@ -1674,7 +1777,8 @@ instead of N.
 Two Gateway-API listeners on the same port implement this: an authn-only
 listener for external traffic, and an internal authz listener where
 Authorino evaluates per-tool/prompt permissions after the router has parsed
-the request. See [`mcp-gateway/README.md`](mcp-gateway/) for the full
+the request. See the shared MCP Gateway chart's own README in the
+`llm-d-guide` repo (`gitops/instance/mcp-gateway/README.md`) for the full
 mechanics (the two-listener pattern, internal hostname routing, what gets
 created on the cluster) and
 [`docs/token-exchange-design.md`](docs/token-exchange-design.md) for how
@@ -1696,19 +1800,29 @@ no `openshell` CLI identity is involved in this step at all, so there's no
 
 **Optional** — skip 4a entirely for direct-only access (then in
 [4b](#4b-deploy-mcp-servers), omit `MCP_GATEWAY_ENABLED`/
-`MCP_GATEWAY_AUTH_ENABLED`). The `mcp-gateway` chart creates cluster-scoped
-resources (`GatewayClass`, `Gateway`, `MCPGatewayExtension`, and, with auth
-enabled, the Authorino-TLS `EnvoyFilter`) — install it once per cluster,
-before any demo enables `mcpGateway` in its own `mcp-servers` release. It's
-outside `$OPENSHELL_NAMESPACE` by design (see
-[`mcp-gateway/README.md`](mcp-gateway/) for why), so it isn't torn down by
-this or any other demo's `helm uninstall`:
+`MCP_GATEWAY_AUTH_ENABLED`).
+
+This repo no longer carries its own `mcp-gateway/` chart. The Gateway
+infrastructure (`GatewayClass`, `Gateway`, `MCPGatewayExtension`, the
+`AuthPolicy` pair, and, with auth enabled, the Authorino-TLS `EnvoyFilter`)
+is owned by the shared, multi-tenant chart in the `llm-d-guide` repo
+(`gitops/instance/mcp-gateway`), so that one Gateway can host this demo's
+tenant alongside others on the same cluster without colliding. Install it
+once per cluster, before any demo enables `mcpGateway` in its own
+`mcp-servers` release. It's outside `$OPENSHELL_NAMESPACE` by design, so
+it isn't torn down by this or any other demo's `helm uninstall` — and it's
+applied directly rather than tracked as a Helm release, consistent with
+how `llm-d-guide` deploys everything else:
 
 ```bash
 source .env
-helm upgrade --install mcp-gateway ./mcp-gateway \
+LLM_D_GUIDE_DIR=/path/to/llm-d-guide   # sibling checkout of that repo
+
+helm template mcp-gateway \
+  "${LLM_D_GUIDE_DIR}/gitops/instance/mcp-gateway" --include-crds \
   --set gateway.publicHost="mcp.${CLUSTER_APPS_DOMAIN}" \
-  --set keycloak.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}"
+  --set oidc.issuer="https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}" \
+  | oc apply -f -
 ```
 
 Verify:
@@ -1717,14 +1831,15 @@ Verify:
 oc get gatewayclass mcp-gateway-class
 oc get gateway mcp-gateway -n openshift-ingress
 oc get mcpgatewayextension mcp-gateway-ext -n mcp-gateway-system
+oc get authpolicy mcp-gateway-authn mcp-gateway-authz -n openshift-ingress
 ```
 
-Requires [RHCL](#installing-rhcl) installed first. If the `Gateway`/
-`MCPGatewayExtension`/etc. already exist on the cluster from a previous,
-hand-built setup, see
-[`mcp-gateway/README.md`](mcp-gateway/#adopting-already-existing-resources)
-for adopting them into this chart's Helm release instead of `helm install`
-refusing them outright.
+Requires [RHCL](#installing-rhcl) installed first. See
+`gitops/instance/mcp-gateway/README.md` in `llm-d-guide` for the full
+values reference (multi-tenant `extraTenants`, the OIDC auth-vs-authz
+split, non-Keycloak providers) and for adopting objects left over from a
+previous hand-built setup — `oc apply` only ever updates by object
+identity, so re-running this command is always safe to repeat.
 
 #### 4b. Deploy MCP servers
 
@@ -1893,7 +2008,7 @@ provisioned should re-apply everything downstream, not fail on "already
 exists":
 
 ```bash
-LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed -E 's|^https?://||; s|/.*||')
 LLM_HOST="${LLM_HOST_PORT%%:*}"
 if [[ "$LLM_HOST_PORT" == *:* ]]; then
   LLM_PORT="${LLM_HOST_PORT##*:}"
@@ -2098,7 +2213,7 @@ source .env
 ```
 
 `--gw` routes each sandbox's MCP calls through the RHCL MCP Gateway
-([`mcp-gateway/`](mcp-gateway/), which must already be deployed — see
+(which must already be deployed — see
 [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)) instead of directly
 to each server — same server list either way, just reached through one
 broker endpoint instead of N direct ones. This is what every scene from
@@ -3380,6 +3495,30 @@ returned out-of-scope data, which this demo's own protections are
 designed to prevent — treat amber as the realistic ceiling for this
 scene, not a shortfall of the classifier.
 
+> **If the node stays green after an overreach turn, check the hook log
+> before concluding the classifier disagreed.** The `Stop` hook's own
+> classification call is a separate LLM request to
+> `AUDITOR_LLM_BASE_URL`, and when it fails the turn still completes
+> normally — the agent's answer is unaffected, no error surfaces in the
+> `sandbox exec` output, and the previous turn's score simply stays on the
+> dashboard. Confirmed live (2026-10-13): the first overreach turn logged
+>
+> ```
+> session-auditor: session <id>: classification failed: curl exited exit status: 56:
+> curl: (56) OpenSSL SSL_read: OpenSSL/3.5.8: error:0A000126:SSL routines::
+> unexpected eof while reading, errno 0
+> ```
+>
+> and left the dashboard showing the benign turn's `score=0`. Re-running
+> the identical prompt classified fine (`risk_level=blocked_attempt`,
+> `score=2`), so treat it as a transient failure of the auditor's outbound
+> call, not a verdict. The log to check, inside the sandbox:
+>
+> ```bash
+> openshell sandbox exec -n aud-claude-bob --workspace bob -- \
+>   tail -20 /tmp/session-auditor-hook.log
+> ```
+
 Meanwhile any other audited sandbox you provision the same way
 (`./scripts/16-provision-audited-sandbox.sh --gw charlie claude ...`, or
 `... codex ...` — Codex path still `[VERIFY]`, see the note above) stays
@@ -3498,8 +3637,9 @@ source .env
 ```
 
 Same `--gw` flag as `15-provision-claude-sandbox.sh` (see above) routes
-through the [MCP Gateway](mcp-gateway/) instead of direct per-server
-access — `[mcp_servers.gateway]` instead of one table per server. Omit
+through the MCP Gateway (see [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once))
+instead of direct per-server access — `[mcp_servers.gateway]` instead of
+one table per server. Omit
 `--gw` on all three for the direct-access alternative instead.
 
 This is the same sequence (policy profile → provider → `policy set`)
@@ -3960,6 +4100,33 @@ trust as end-to-end verification.
   — evaluation-only, never expose to a public network.
 
 ### D. Troubleshooting
+
+**Running this guide from macOS.** The scripts were written against GNU
+userland; macOS ships BSD tools and bash 3.2. All four problems below are
+fixed in-repo as of 2026-10-11 — this list is for recognising the symptoms
+on an older checkout, or when writing new scripts here:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `06-deploy-mcp-servers.sh: line 116: mapfile: command not found` — *after* the Helm install already succeeded | `mapfile`/`readarray` are bash 4+ builtins; macOS `/bin/bash` is 3.2 | Replaced with a `while IFS= read -r` loop |
+| `mktemp: illegal option -- -` | `mktemp --suffix=.yaml` is GNU-only | `"$(mktemp -d)/name.yaml"` instead |
+| Provider profile import fails with `invalid type: Option value, expected u32`, and the rendered profile shows `host: "https"` with an empty `port:` | `sed 's\|https\\?://\|\|'` — `\?` is a GNU BRE extension that BSD `sed` treats literally, so the scheme is never stripped and `https:` is parsed as host+port | `sed -E 's\|^https?://\|\|; s\|/.*\|\|'`, which is portable |
+| No `timeout`/`gtimeout` when scripting a stalled agent turn | Not part of base macOS | `brew install coreutils`, or background the process and poll with `kill -0` |
+
+Unrelated to userland, two more macOS notes: the `openshell` CLI opens the
+browser with **`open`**, not `xdg-open` (matters when intercepting the OAuth
+flow headlessly), and the `onboard` binary has **no published macOS x86_64
+asset** — on an Intel Mac, build it with
+`cd util/onboard && cargo build --release`.
+
+**An agent turn that hangs for many minutes.** Confirmed live: a scene
+calling `search_regulatory_guidance` ran >20 minutes with no output before
+being killed, while the embeddings `InferenceService` kept returning
+`200 OK` — i.e. the backend was healthy and the model was looping. This is
+the same BYO-LLM stall already noted under
+[Using parrot](#using-parrot-instead-of-raw-cli-invocations); a normal turn
+is 30–60s. Kill and retry rather than waiting it out, and put a time limit
+around each turn if you're scripting the scenes.
 
 **Profile `token_url` substitution.** The provider profile
 `providers/user-refresh-profile.yaml` contains `<keycloak-host>` as a
