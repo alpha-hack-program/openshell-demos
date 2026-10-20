@@ -9,8 +9,13 @@ local mTLS certs had all already been torn down
 itself (RHBK operator, Keycloak CR, realm) was **never touched** — this is
 purely an OpenShell version bump for `demos/keycloak-oidc`.
 `demos/base` is explicitly **out of scope** and stays pinned at 0.0.106.
-Branch: `v0.1.4-upgrade`. **Do not bump `OPENSHELL_CHART_VERSION` or
-declare the demo upgraded** until the remaining items below are resolved.
+Branch: `v0.1.4-upgrade`. **Cut over**: `OPENSHELL_CHART_VERSION` is now
+`0.1.4` in `demos/keycloak-oidc/.env.example` and every doc that echoes it
+as the guide's target version, following live verification of the main
+recipe (steps 2–5 + the curl-based isolation suite). The items in
+"Remaining work" below are follow-ups that don't block this cutover — see
+that section for what's still open (optional recipes untested, a
+not-yet-released `onboard` fix, a pending `PLATFORM_OPENAI_*` revert).
 
 0.1.3 is an intermediate release between 0.1.2 and 0.1.4 — both are
 covered here. The gateway is confirmed **0.1.4** live
@@ -162,26 +167,38 @@ confirm it actually closes that gotcha.
 Three of the four issues below are **macOS-only environment gaps** on the
 machine this session ran from (bash 3.2, BSD `sed`/`mktemp`) — this demo's
 scripts have evidently only ever been live-tested from Linux/Fedora
-toolbox before. None of these need a script change; they're noted here so
-a future macOS tester doesn't have to re-diagnose them. **Fixed locally by
-installing `gnu-sed` (`brew install gnu-sed`, prepended to `PATH` as
-`sed`) and exporting small `mapfile`/`mktemp --suffix=` shim functions**
-(bash allows overriding builtins with same-named exported functions,
-which propagate to child `#!/usr/bin/env bash` invocations) — no repo
-files touched for any of these three:
+toolbox before, despite the README's own
+[Troubleshooting](../demos/keycloak-oidc/README.md#d-troubleshooting)
+table claiming all three were "fixed in-repo as of 2026-10-11". **They
+weren't** — all three were still present, unmodified, in `scripts/06`/
+`14`/`15`/`16` on this branch. Diagnosed first with session-local
+workarounds (`brew install gnu-sed` prepended to `PATH`, and exported
+`mapfile`/`mktemp --suffix=` shim functions — bash allows overriding
+builtins with same-named exported functions, which propagate to child
+`#!/usr/bin/env bash` invocations), then **fixed for real in the scripts
+themselves**, matching the exact patterns the README's own
+(now-corrected) Troubleshooting table already specified, and reverified
+against plain BSD tools with no shims/overrides active:
 
-1. **`scripts/06-deploy-mcp-servers.sh:116` uses `mapfile -t`**, a bash-4+
+1. **`scripts/06-deploy-mcp-servers.sh:116` used `mapfile -t`**, a bash-4+
    builtin absent from macOS's system bash (3.2, GPL-licensing-frozen).
-2. **`scripts/15-provision-claude-sandbox.sh`/`14`/`16` use `mktemp
+   Replaced with a portable `while IFS= read -r` loop.
+2. **`scripts/15-provision-claude-sandbox.sh`/`14`/`16` used `mktemp
    --suffix=...`**, a GNU coreutils flag BSD `mktemp` doesn't support.
+   Replaced with `"$(mktemp -d)/<name>.<ext>"` at all six call sites.
 3. **`scripts/15-provision-claude-sandbox.sh:131` and
-   `scripts/16-provision-audited-sandbox.sh:162` use `sed
+   `scripts/16-provision-audited-sandbox.sh:162` used `sed
    's|https\?://||'`** — `\?` is a GNU regex extension; BSD `sed` doesn't
    expand it, so the pattern fails to strip the scheme and
    `LLM_HOST`/`AUDITOR_LLM_HOST` end up as the literal string `"https"`,
    breaking the rendered provider profile (`host: "https"`) and producing
    a confusing gateway-side error (see next finding) rather than a clear
-   one.
+   one. Replaced with the portable `sed -E 's|^https?://||; s|/.*||'`.
+
+The README's Troubleshooting table and its "Confirmed on macOS" callout
+near the top of the guide are both corrected to reflect this (the false
+"fixed in-repo as of 2026-10-11" claim is now dated 2026-10-20, with a
+note explaining the discrepancy).
 
 ### Real bug (not macOS-specific): `util/onboard` never substitutes `<mcp-gateway-host>`
 
@@ -360,10 +377,10 @@ sandbox won't come back from either kind of pod removal.
    `TODO.md`). Until then, `--gw` onboarding still needs either the
    manual `provider profile update` workaround above or building
    `onboard` from source directly.
-3. **Update the README's "Editing an already-imported profile" section**
-   to lead with "delete and re-provision" instead of "try `oc delete
-   pod` first", given 0.1.3's `restart_policy: never` default means a
-   deleted pod no longer comes back on its own.
+3. ~~Update the README's "Editing an already-imported profile" section~~ —
+   **done.** Now leads with "delete and re-provision", with a direct
+   explanation of why `oc delete pod` alone doesn't recover a
+   `restart_policy: never` sandbox on 0.1.3+.
 4. Scenes 4b/4c/4d, 5a/5b, 6, and Scene 7 (audit trail) were **not**
    re-run in this pass — Scene 1 and 4a were chosen as the minimum
    representative set (baseline multi-hop chaining + the core
@@ -374,9 +391,9 @@ sandbox won't come back from either kind of pod removal.
    4b–4d/5a/5b/6/Scene 7) — explicitly skipped for this round**, per
    `AGENTS.md` §4 (asked, user chose to skip rather than run them). Not
    tested on 0.1.4.
-6. Only once the above (particularly items 1–2) are resolved or
-   consciously deferred: bump `OPENSHELL_CHART_VERSION` in
-   `demos/keycloak-oidc/.env.example` and every doc that echoes it as the
-   guide's target version, and merge `v0.1.4-upgrade` back into `main`.
-   **Deliberately not done yet** — same cutover-last discipline as the
-   0.1.2 doc.
+6. ~~Bump `OPENSHELL_CHART_VERSION` in `demos/keycloak-oidc/.env.example`
+   and every doc that echoes it as the guide's target version~~ —
+   **done**, following live verification of the main recipe. Items 1–2
+   above are consciously deferred, not blockers to this cutover. Merging
+   `v0.1.4-upgrade` back into `main` is still a separate step, not done
+   here.

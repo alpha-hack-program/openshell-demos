@@ -159,14 +159,14 @@ fi
 # ---------------------------------------------------------------------------
 # <llm-host>/<llm-port> substitution — see the profile's own comment on
 # why this can't stay hardcoded to api.deepseek.com:443.
-AUDITOR_LLM_HOST_PORT=$(echo "$AUDITOR_BASE_URL_VALUE" | sed 's|https\?://||;s|/.*||')
+AUDITOR_LLM_HOST_PORT=$(echo "$AUDITOR_BASE_URL_VALUE" | sed -E 's|^https?://||; s|/.*||')
 AUDITOR_LLM_HOST="${AUDITOR_LLM_HOST_PORT%%:*}"
 if [[ "$AUDITOR_LLM_HOST_PORT" == *:* ]]; then
   AUDITOR_LLM_PORT="${AUDITOR_LLM_HOST_PORT##*:}"
 else
   AUDITOR_LLM_PORT=443
 fi
-AUDITOR_PROFILE_TMPFILE=$(mktemp --suffix=.yaml)
+AUDITOR_PROFILE_TMPFILE="$(mktemp -d)/auditor-profile.yaml"
 sed -e "s/<llm-host>/${AUDITOR_LLM_HOST}/" -e "s/<llm-port>/${AUDITOR_LLM_PORT}/" -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" \
   "providers/session-auditor-${AUDITOR_PROVIDER_STYLE}-profile.yaml" > "$AUDITOR_PROFILE_TMPFILE"
 openshell provider profile import \

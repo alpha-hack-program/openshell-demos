@@ -171,7 +171,7 @@ echo "Codex LLM endpoint: ${CODEX_LLM_HOST}:${CODEX_LLM_PORT} (model ${CODEX_MOD
 # endpoint carries an <openshell-namespace> placeholder, because a sandbox
 # cannot resolve a bare Service name (see providers/byo-claude-profile.yaml
 # and scripts/lib-otel-env.sh for the same constraint on the Claude side).
-CODEX_PROFILE_TMPFILE=$(mktemp --suffix=.yaml)
+CODEX_PROFILE_TMPFILE="$(mktemp -d)/codex-profile.yaml"
 sed -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" \
   -e "s/<llm-host>/${CODEX_LLM_HOST}/" -e "s/<llm-port>/${CODEX_LLM_PORT}/" \
   providers/byo-codex-profile.yaml > "$CODEX_PROFILE_TMPFILE"
@@ -270,7 +270,7 @@ fi
 # Passing --policy (and --upload) at creation time avoids the race
 # entirely — `sandbox create --policy ... --upload ...` returns normally,
 # no backgrounding/sleep tricks needed.
-POLICY_TMPFILE=$(mktemp --suffix=.yaml)
+POLICY_TMPFILE="$(mktemp -d)/policy.yaml"
 POLICY_TEMPLATE_ARGS=(
   --set openshellNamespace="${OPENSHELL_NAMESPACE}"
   --set llmHost="${CODEX_LLM_HOST}"

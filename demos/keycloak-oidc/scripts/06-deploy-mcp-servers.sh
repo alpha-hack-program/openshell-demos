@@ -113,7 +113,12 @@ helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
   --namespace "$OPENSHELL_NAMESPACE" \
   "${HELM_SET_ARGS[@]}"
 
-mapfile -t SERVERS < <(
+# Portable `mapfile -t` equivalent — `mapfile`/`readarray` are bash 4+
+# builtins, absent from macOS's system bash (3.2).
+SERVERS=()
+while IFS= read -r line; do
+  SERVERS+=("$line")
+done < <(
   helm template mcp-servers "$DEMO_DIR/mcp-servers" \
     "${HELM_SET_ARGS[@]}" \
     --show-only templates/serviceaccount.yaml \

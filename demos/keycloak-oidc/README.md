@@ -258,8 +258,8 @@ notes when driving this headlessly:
   already includes `open`, but on Linux it is `xdg-open` that actually
   fires — on macOS it is `open`, so that stub is the one that matters.
 - **Several of this demo's scripts assumed GNU userland** (`mapfile`,
-  `mktemp --suffix=`, `sed 's|https\?://||'`). Those are fixed in-repo as
-  of this run; see [Troubleshooting](#d-troubleshooting) if you are on an
+  `mktemp --suffix=`, `sed 's|https\?://||'`). Fixed in-repo as of
+  2026-10-20; see [Troubleshooting](#d-troubleshooting) if you are on an
   older checkout.
 
 See
@@ -417,7 +417,7 @@ banker membership in a workspace that already has one.
 | Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the shared MCP Gateway chart (see [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)) creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
-This guide is written against **OpenShell chart/CLI version `0.1.2`** —
+This guide is written against **OpenShell chart/CLI version `0.1.4`** —
 set as `OPENSHELL_CHART_VERSION` in your `.env` (see
 [Set up your `.env` file](#set-up-your-env-file)). The rest of this document
 refers back to that variable rather than repeating the version number.
@@ -437,7 +437,7 @@ entirely optional, and specific to macOS on Intel (x86_64).
 On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
 
 ```bash
-OPENSHELL_VERSION="0.1.2"   # match OPENSHELL_CHART_VERSION in .env
+OPENSHELL_VERSION="0.1.4"   # match OPENSHELL_CHART_VERSION in .env
 sudo dnf install -y \
   "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
 openshell --version
@@ -454,9 +454,9 @@ openshell --version
 Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
 https://github.com/NVIDIA/OpenShell/releases.
 
-> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.1.2`) but the
-> Helm chart version does **not** (`0.1.2`). `OPENSHELL_CHART_VERSION` in
-> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.1.2`.
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.1.4`) but the
+> Helm chart version does **not** (`0.1.4`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.1.4`.
 
 Bash completions (optional):
 
@@ -717,12 +717,12 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-`.env.example` pins `OPENSHELL_CHART_VERSION=0.1.2` — the version this
+`.env.example` pins `OPENSHELL_CHART_VERSION=0.1.4` — the version this
 guide is written against (see [Prerequisites](#prerequisites)). To check for
 a newer one, see the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
-tag uses a `v` prefix (e.g. `v0.1.2`) but the chart version does **not**
-(e.g. `0.1.2`) — or query it directly:
+tag uses a `v` prefix (e.g. `v0.1.4`) but the chart version does **not**
+(e.g. `0.1.4`) — or query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
@@ -739,7 +739,7 @@ come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
-| `OPENSHELL_CHART_VERSION` | `0.1.2` | OpenShell Helm chart/CLI version — no `v` prefix |
+| `OPENSHELL_CHART_VERSION` | `0.1.4` | OpenShell Helm chart/CLI version — no `v` prefix |
 | `CLUSTER_APPS_DOMAIN` | `apps.mycluster.example.com` | Your cluster's apps domain |
 | `OPENSHELL_NAMESPACE` | `keycloak-oidc-demo` | OpenShift namespace for this demo's gateway. Must **not** start with `openshell-` — the Route FQDN is derived as `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a redundant prefix can push it over the 64-byte X.509 CommonName limit when using `LETSENCRYPT_CLUSTER_ISSUER` (see AGENTS.md) |
 | `CERT_MANAGER` | `false` | Set `true` to use cert-manager for TLS (requires the Operator) |
@@ -1009,15 +1009,16 @@ This step installs the OpenShell gateway with OIDC and a passthrough Route
 in a single Helm install (2a), then extracts the mTLS client certificates
 and registers the gateway endpoint with the `openshell` CLI (2b).
 
-> **Another OpenShell installation on the same cluster is fine on 0.1.2.**
+> **Another OpenShell installation on the same cluster is fine on 0.1.2+.**
 > The chart suffixes its cluster-scoped resources with the namespace —
 > `openshell-node-reader-<namespace>` for both the ClusterRole and the
 > ClusterRoleBinding — so two releases in different namespaces don't
-> collide. Confirmed live (2026-10-11): installing this demo into
+> collide. Confirmed live (2026-10-11, 0.1.2): installing this demo into
 > `keycloak-oidc-demo` on a cluster already running an unrelated OpenShell
 > release in another namespace succeeded, leaving
 > `openshell-node-reader-keycloak-oidc-demo` and
-> `openshell-node-reader-<other-ns>` side by side.
+> `openshell-node-reader-<other-ns>` side by side. Reconfirmed on 0.1.4
+> (2026-10-20) against the same kind of coexisting unrelated release.
 >
 > On **0.0.106** these resources were named plain `openshell-node-reader`,
 > and a second install did fail on the conflict. If you're on that version,
@@ -1316,10 +1317,10 @@ Log in as `openshell-admin` / `openshell-admin` (the account with the
 `openshell-admin` realm role — see the credentials note in
 [step 1a](#1a-render-the-realm-json)).
 
-#### 2d. Enable Providers v2 — no longer needed on 0.1.2
+#### 2d. Enable Providers v2 — no longer needed on 0.1.2+
 
 **Skip this step on the version this guide targets.** Providers v2 is
-always on in 0.1.2 and the toggle no longer exists; the command below is
+always on since 0.1.2 and the toggle no longer exists; the command below is
 kept only so readers upgrading from 0.0.106 recognise what replaced it.
 Running it now fails outright:
 
@@ -1332,8 +1333,9 @@ Error:   × unknown setting key 'providers_v2_enabled'. Allowed keys:
 
 That error is harmless — nothing else in this guide depends on the
 setting, and [step 3](#3-onboard-a-banker)'s `provider profile import` /
-`provider create` work without it (confirmed live, 2026-10-11). Just move
-on to [Verify the gateway](#verify-the-gateway).
+`provider create` work without it (confirmed live on 0.1.2, 2026-10-11,
+and reconfirmed unchanged on 0.1.4, 2026-10-20). Just move on to
+[Verify the gateway](#verify-the-gateway).
 
 <details>
 <summary>The old 0.0.106 command, for reference</summary>
@@ -1459,11 +1461,11 @@ workspace for another.
 
 #### Step 3.1a — Self-service alternative: `onboarding-web`
 
-> **⚠ Currently broken against OpenShell 0.1.2 — use
+> **⚠ Currently broken against OpenShell 0.1.2+ — use
 > [Step 3.1b](#step-31b--onboard-the-banker-with-the-onboard-tool)
 > instead.** The published images
 > (`quay.io/atarazana/onboarding-web:0.1.0` and `:0.1.1`) bake in
-> `openshell 0.0.106`, whose protobuf wire format the 0.1.2 gateway
+> `openshell 0.0.106`, whose protobuf wire format the 0.1.2+ gateway
 > rejects. Every banker login reaches Keycloak successfully and then dies
 > at the app's first backend call:
 >
@@ -1474,10 +1476,14 @@ workspace for another.
 > ListProvidersRequest.workspace_scope: buffer underflow"
 > ```
 >
-> Confirmed live for all three bankers (2026-10-11). The fix is to rebuild
-> and publish the image at 0.1.2 —
-> `util/onboarding-web/Containerfile`'s `ARG OPENSHELL_VERSION` is already
-> bumped, but no matching tag has been pushed yet — then set
+> Confirmed live for all three bankers against a 0.1.2 gateway (2026-10-11)
+> — **not re-tested against 0.1.4** (2026-10-20 upgrade pass skipped it per
+> this section's own recommendation to use the `onboard` tool instead; see
+> [`docs/openshell-0.1.4-upgrade.md`](../../docs/openshell-0.1.4-upgrade.md)).
+> The root cause (a stale baked-in 0.0.106 CLI against a newer gateway) is
+> not expected to have improved. The fix is still to rebuild and publish
+> the image — `util/onboarding-web/Containerfile`'s `ARG OPENSHELL_VERSION`
+> is now `0.1.4`, but no matching tag has been pushed yet — then set
 > `image.tag` in `onboarding-web/values.yaml` to match. Tracked in
 > [`TODO.md`](../../TODO.md). The "Verified end to end against a live
 > cluster" note at the end of this section predates the 0.1.2 upgrade and
@@ -1681,6 +1687,35 @@ again.
 > -a; source .env; set +a`). Running it unmodified against this demo's `.env`
 > produces a correctly-substituted profile with real endpoint hosts, not
 > literal placeholder text.
+
+> **⚠ `--gw`-provisioned sandboxes need one more substitution the current
+> pinned `onboard` release doesn't do.** The profile also carries a third
+> placeholder, `<mcp-gateway-host>` (used only by `--gw` mode — see
+> [step 5](#provision-every-banker)). `util/onboard/src/main.rs` now
+> accepts `--mcp-gateway-host`/`MCP_GATEWAY_HOST` to substitute it (fixed
+> 2026-10-20, see
+> [`docs/openshell-0.1.4-upgrade.md`](../../docs/openshell-0.1.4-upgrade.md)),
+> but no `onboard-v*` release carries that fix yet — tracked in
+> [`TODO.md`](../../TODO.md). Until a new release ships, either build
+> `onboard` from source (`cd util/onboard && cargo build --release`, then
+> add `--mcp-gateway-host "mcp.${CLUSTER_APPS_DOMAIN}"` to the command
+> above) or patch each banker's already-imported profile after onboarding:
+>
+> ```bash
+> MCP_GATEWAY_HOST="mcp.${CLUSTER_APPS_DOMAIN}"
+> openshell provider profile export user-scoped-api --workspace "$USER_ID" -o yaml \
+>   > /tmp/user-scoped-api-profile.yaml
+> sed -i "s|<mcp-gateway-host>|${MCP_GATEWAY_HOST}|" /tmp/user-scoped-api-profile.yaml
+> openshell provider profile update user-scoped-api \
+>   -f /tmp/user-scoped-api-profile.yaml --workspace "$USER_ID"
+> ```
+>
+> Leaving `<mcp-gateway-host>` unsubstituted doesn't fail loudly here —
+> `onboard` completes "successfully" — but every `--gw` sandbox's MCP
+> calls then fail with `{"error":"credential_endpoint_mismatch"}`, which
+> inside Claude Code surfaces as the agent silently falling back to
+> built-in tools instead of a clear "MCP unreachable" error. If you only
+> need direct (non-`--gw`) access, this doesn't apply — skip it.
 
 > **Workspace targeting.** `onboard` defaults `--workspace` to the user ID
 > (`-u alice` → workspace `alice`), matching
@@ -2046,14 +2081,16 @@ openshell provider profile export byo-claude --workspace "${USER_ID}" -o yaml > 
 openshell provider profile update byo-claude -f /tmp/byo-claude-profile.yaml --workspace "${USER_ID}"
 ```
 
-A sandbox that's already `Ready` also needs its pod (not just the Sandbox
-resource) recreated to pick up the change — confirmed live that a plain
-policy/profile update alone doesn't reach an already-running sandbox
-process: `oc -n "$OPENSHELL_NAMESPACE" delete pod "${USER_ID}--claude-${USER_ID}"`
-(or, more reliably if that alone doesn't clear it — confirmed needed at
-least once — delete and re-provision the sandbox outright: `openshell
-sandbox delete "claude-${USER_ID}" --workspace "${USER_ID}"` then re-run
-[`scripts/15-provision-claude-sandbox.sh`](scripts/15-provision-claude-sandbox.sh)).
+A sandbox that's already `Ready` also needs recreating to pick up the
+change — a plain policy/profile update alone doesn't reach an
+already-running sandbox process. **On 0.1.3+, don't bother with
+`oc delete pod` first**: confirmed live (2026-10-20) that with the default
+`restart_policy: never` (new in 0.1.3), deleting a `claude-<id>` pod does
+not get a replacement — the Sandbox resource goes to a permanent
+`Error`/`PodFailed` phase instead of self-healing. Go straight to delete
+and re-provision the sandbox outright: `openshell sandbox delete
+"claude-${USER_ID}" --workspace "${USER_ID}"` then re-run
+[`scripts/15-provision-claude-sandbox.sh`](scripts/15-provision-claude-sandbox.sh).
 
 **2. The MCP config, with a placeholder token, baked into the sandbox at
 creation.** Every scene needs to hand `claude --mcp-config` a JSON blob
@@ -2115,7 +2152,7 @@ policy-less `sandbox create` reliably loses. Passing `--policy` (and
 repeatedly, `sandbox create --policy ... --upload ...` returns normally in
 ordinary image-pull time and reaches `Ready` immediately, no
 backgrounding/sleep tricks needed. Use `--detach` here, not a trailing
-`-- true`: OpenShell 0.1.2 rejects `--upload` combined with a trailing
+`-- true`: OpenShell 0.1.2+ rejects `--upload` combined with a trailing
 `[COMMAND]` outright — `--detach` starts the sandbox's main process
 without attaching, which is what `-- true` was standing in for on 0.0.106:
 
@@ -4102,15 +4139,20 @@ trust as end-to-end verification.
 ### D. Troubleshooting
 
 **Running this guide from macOS.** The scripts were written against GNU
-userland; macOS ships BSD tools and bash 3.2. All four problems below are
-fixed in-repo as of 2026-10-11 — this list is for recognising the symptoms
-on an older checkout, or when writing new scripts here:
+userland; macOS ships BSD tools and bash 3.2. This table previously
+claimed the first three problems below were "fixed in-repo as of
+2026-10-11" — they weren't: the 2026-10-20 (0.1.4) upgrade pass found all
+three still present in `scripts/06`/`14`/`15`/`16` and fixed them for
+real at that point (see
+[`docs/openshell-0.1.4-upgrade.md`](../../docs/openshell-0.1.4-upgrade.md)).
+This list is now for recognising the symptoms on an older checkout, or
+when writing new scripts here:
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `06-deploy-mcp-servers.sh: line 116: mapfile: command not found` — *after* the Helm install already succeeded | `mapfile`/`readarray` are bash 4+ builtins; macOS `/bin/bash` is 3.2 | Replaced with a `while IFS= read -r` loop |
 | `mktemp: illegal option -- -` | `mktemp --suffix=.yaml` is GNU-only | `"$(mktemp -d)/name.yaml"` instead |
-| Provider profile import fails with `invalid type: Option value, expected u32`, and the rendered profile shows `host: "https"` with an empty `port:` | `sed 's\|https\\?://\|\|'` — `\?` is a GNU BRE extension that BSD `sed` treats literally, so the scheme is never stripped and `https:` is parsed as host+port | `sed -E 's\|^https?://\|\|; s\|/.*\|\|'`, which is portable |
+| Provider profile import fails with a type-mismatch error (worded differently across gateway versions — e.g. `invalid type: Option value, expected u32` or `type mismatch: expected unsigned integer, found null`), and the rendered profile shows `host: "https"` with an empty/missing `port:` | `sed 's\|https\\?://\|\|'` — `\?` is a GNU BRE extension that BSD `sed` treats literally, so the scheme is never stripped and `https:` is parsed as host+port | `sed -E 's\|^https?://\|\|; s\|/.*\|\|'`, which is portable |
 | No `timeout`/`gtimeout` when scripting a stalled agent turn | Not part of base macOS | `brew install coreutils`, or background the process and poll with `kill -0` |
 
 Unrelated to userland, two more macOS notes: the `openshell` CLI opens the

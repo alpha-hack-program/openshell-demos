@@ -128,7 +128,7 @@ IFS=',' read -ra SERVERS <<< "$SERVER_NAMES"
 # http://<svc>.<ns>.svc.cluster.local:<port> in-cluster endpoint (bypassing
 # an external Route's self-signed-cert forward-proxy path entirely, see
 # that section of the README) needs its real, non-443 port here.
-LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed 's|https\?://||;s|/.*||')
+LLM_HOST_PORT=$(echo "$ANTHROPIC_BASE_URL" | sed -E 's|^https?://||; s|/.*||')
 LLM_HOST="${LLM_HOST_PORT%%:*}"
 if [[ "$LLM_HOST_PORT" == *:* ]]; then
   LLM_PORT="${LLM_HOST_PORT##*:}"
@@ -152,7 +152,7 @@ cd "$DEMO_DIR"
 # sandbox; base URL/model are non-secret config, passed via --env at exec
 # time instead (OpenShell only injects credentials, not config values).
 # ---------------------------------------------------------------------------
-TMPFILE=$(mktemp --suffix=.yaml)
+TMPFILE="$(mktemp -d)/byo-claude-profile.yaml"
 sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" providers/byo-claude-profile.yaml > "$TMPFILE"
 # `|| true` only tolerates "already exists" on first run — confirmed live
 # that `import` against an already-imported profile ID is a hard error, not
@@ -178,7 +178,7 @@ openshell provider create --name byo-claude --type byo-claude \
 # once the sandbox exists — so this is still a placeholder when it's
 # uploaded at creation time; step 4 substitutes it after.
 # ---------------------------------------------------------------------------
-MCP_CONFIG=$(mktemp --suffix=.json)
+MCP_CONFIG="$(mktemp -d)/mcp-servers.json"
 if [ "$GW" = true ]; then
   printf '{"mcpServers":{"gateway":{"type":"http","url":"%s/mcp","headers":{"Authorization":"Bearer __USER_ACCESS_TOKEN__"}}}}' \
     "$MCP_GATEWAY_URL" > "$MCP_CONFIG"
@@ -219,7 +219,7 @@ fi
 # (same call, no backgrounding/sleep tricks needed) returns normally in
 # ~35s (ordinary image-pull time) and reaches Ready immediately.
 # ---------------------------------------------------------------------------
-POLICY_TMPFILE=$(mktemp --suffix=.yaml)
+POLICY_TMPFILE="$(mktemp -d)/policy.yaml"
 POLICY_TEMPLATE_ARGS=(
   --set openshellNamespace="${OPENSHELL_NAMESPACE}"
   --set llmHost="${LLM_HOST}"
