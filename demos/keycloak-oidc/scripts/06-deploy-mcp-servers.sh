@@ -113,11 +113,12 @@ helm upgrade --install mcp-servers "$DEMO_DIR/mcp-servers" \
   --namespace "$OPENSHELL_NAMESPACE" \
   "${HELM_SET_ARGS[@]}"
 
-# Portable `mapfile -t` equivalent — `mapfile`/`readarray` are bash 4+
-# builtins, absent from macOS's system bash (3.2).
+# Portable equivalent of `mapfile -t SERVERS` — macOS ships bash 3.2, which
+# has no mapfile/readarray builtin, and the script aborts with
+# "mapfile: command not found" after the helm install has already succeeded.
 SERVERS=()
 while IFS= read -r line; do
-  SERVERS+=("$line")
+  [ -n "$line" ] && SERVERS+=("$line")
 done < <(
   helm template mcp-servers "$DEMO_DIR/mcp-servers" \
     "${HELM_SET_ARGS[@]}" \

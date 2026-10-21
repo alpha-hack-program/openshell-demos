@@ -40,7 +40,7 @@ if [[ -n "$USERNAME" ]]; then
     exit 1
   fi
 
-  echo "Token obtained:" && echo "${TOKEN}" && echo "Expires in $(echo "$TOKEN_RESPONSE" | jq -r .expires_in)s)"
+  echo "Token obtained:" && echo "${TOKEN}" && echo "Expires in $(echo "$TOKEN_RESPONSE" | jq -r .expires_in)s"
 fi
 
 [[ -n "$USERNAME" ]] && echo "Authenticated as: ${USERNAME}"

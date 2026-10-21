@@ -56,7 +56,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_FILE="${OUT_FILE:-$SCRIPT_DIR/../dashboards/maas-usage-fixed.json}"
 mkdir -p "$(dirname "$OUT_FILE")"
 
-SRC_JSON=$(mktemp --suffix=.json)
+SRC_JSON="$(mktemp -d)/dashboard.json"
 DST_JSON="$OUT_FILE"
 trap 'rm -f "$SRC_JSON"' EXIT
 oc get persesdashboard "$SRC_NAME" -n "$SRC_NS" -o json > "$SRC_JSON"

@@ -79,13 +79,30 @@ source .env
 
 USER_ID="alice"
 
+# `mktemp --suffix=` is GNU-only — on macOS create the file inside a temp
+# directory instead: TMPFILE="$(mktemp -d)/profile.yaml"
 TMPFILE=$(mktemp --suffix=.yaml)
 sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
     -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
+    -e "s|<mcp-gateway-host>|${MCP_GATEWAY_PUBLIC_HOST}|" \
     providers/user-refresh-profile.yaml > "$TMPFILE"
+grep -q '<' "$TMPFILE" && echo "WARNING: unsubstituted placeholder left in $TMPFILE"
 openshell provider profile import -f "$TMPFILE" --workspace "${USER_ID}"
 rm -f "$TMPFILE"
 ```
+
+> **Three placeholders, not two.** `providers/user-refresh-profile.yaml`
+> also contains `<mcp-gateway-host>` — the MCP Gateway's public host, which
+> the credential-injection allowlist needs whenever a sandbox is
+> provisioned with `--gw` (the default in
+> [step 5](../README.md#provision-every-banker)). **Nothing substitutes it
+> for you**: the `onboard` binary only handles `<keycloak-host>` and
+> `<openshell-namespace>`, and earlier revisions of this doc only `sed`-ed
+> those two. Leaving it literal means the proxy refuses to inject
+> `USER_ACCESS_TOKEN` for gateway traffic and every gateway-routed MCP call
+> comes back `{"error":"credential_endpoint_mismatch"}` — with no error at
+> import time to warn you, which is what the `grep` above catches.
+> `MCP_GATEWAY_PUBLIC_HOST` comes from this demo's `.env`.
 
 Then create a provider for the user and configure automatic token refresh —
 note `--workspace "${USER_ID}"` on every command, targeting the workspace

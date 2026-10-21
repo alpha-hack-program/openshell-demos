@@ -62,7 +62,7 @@ KC_USER_ID=$(curl -sk -H "Authorization: Bearer ${KEYCLOAK_ADMIN_TOKEN}" \
 openshell workspace create --name "${WORKSPACE}" 2>/dev/null || true
 openshell workspace member add --workspace "${WORKSPACE}" --subject "${KC_USER_ID}" --role user 2>/dev/null || true
 
-TMPFILE=$(mktemp --suffix=.yaml)
+TMPFILE="$(mktemp -d)/profile.yaml"
 sed -e "s|<keycloak-host>|${KEYCLOAK_HOST}|" \
     -e "s|<openshell-namespace>|${OPENSHELL_NAMESPACE}|" \
     "$HERE/../providers/user-refresh-profile.yaml" > "$TMPFILE"

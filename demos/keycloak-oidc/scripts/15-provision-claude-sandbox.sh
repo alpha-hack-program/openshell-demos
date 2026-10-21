@@ -75,10 +75,18 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --gw) GW=true; shift ;;
+    -h|--help)
+      echo "Usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]"
+      exit 0
+      ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
 done
-set -- "${POSITIONAL[@]}"
+# "${POSITIONAL[@]+...}" (not bare "${POSITIONAL[@]}") avoids "unbound
+# variable" under `set -u` when POSITIONAL is empty on bash 3.2 (macOS's
+# default) — confirmed live: running this script with zero args crashed
+# with an unrelated unbound-variable error instead of the usage message.
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 USER_ID="${1:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
 SERVER_NAMES="${2:?usage: $0 [--gw] <user-id> <server-name>[,<server-name>...]}"
@@ -152,6 +160,8 @@ cd "$DEMO_DIR"
 # sandbox; base URL/model are non-secret config, passed via --env at exec
 # time instead (OpenShell only injects credentials, not config values).
 # ---------------------------------------------------------------------------
+# `mktemp --suffix=` is GNU-only; macOS's mktemp rejects it. Naming the file
+# inside a fresh temp dir is portable and keeps the required extension.
 TMPFILE="$(mktemp -d)/byo-claude-profile.yaml"
 sed -e "s/<llm-host>/${LLM_HOST}/" -e "s/<llm-port>/${LLM_PORT}/" -e "s/<openshell-namespace>/${OPENSHELL_NAMESPACE}/g" providers/byo-claude-profile.yaml > "$TMPFILE"
 # `|| true` only tolerates "already exists" on first run — confirmed live

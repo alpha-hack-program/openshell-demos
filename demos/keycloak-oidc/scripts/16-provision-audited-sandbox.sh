@@ -66,10 +66,18 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --gw) GW=true; shift ;;
+    -h|--help)
+      echo "Usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]"
+      exit 0
+      ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
 done
-set -- "${POSITIONAL[@]}"
+# "${POSITIONAL[@]+...}" (not bare "${POSITIONAL[@]}") avoids "unbound
+# variable" under `set -u` when POSITIONAL is empty on bash 3.2 (macOS's
+# default) — confirmed live: running this script with zero args crashed
+# with an unrelated unbound-variable error instead of the usage message.
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 USER_ID="${1:?usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]}"
 AGENT="${2:?usage: $0 [--gw] <user-id> <claude|codex> <server-name>[,<server-name>...]}"

@@ -22,6 +22,16 @@ ARG BASE_TAG=9.6
 # OPENSHELL_CHART_VERSION in demos/keycloak-oidc/.env. Confirmed against
 # https://github.com/NVIDIA/OpenShell/releases/tags/v0.1.4 — the musl
 # tarball asset really is named openshell-x86_64-unknown-linux-musl.tar.gz.
+#
+# This is NOT cosmetic: the CLI baked in here talks protobuf to the
+# gateway, and a mismatch is a hard failure, not a degraded mode. Confirmed
+# live (2026-10-11) that an image built at 0.0.106 against a 0.1.2 gateway
+# made every onboarding-web login fail at the first backend call with
+#   failed to decode Protobuf message:
+#   ListProvidersRequest.workspace_scope: buffer underflow
+# surfaced to the user as "Could not look up your OpenShell workspace".
+# Bump this in lockstep with OPENSHELL_CHART_VERSION and publish a matching
+# image tag, or step 3.1a of demos/keycloak-oidc/README.md cannot work.
 ARG OPENSHELL_VERSION=0.1.4
 
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder

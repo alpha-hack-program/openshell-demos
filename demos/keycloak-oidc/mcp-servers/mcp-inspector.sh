@@ -58,6 +58,8 @@ if [[ -n "$USERNAME" ]]; then
 
   echo "  Token obtained (${#TOKEN} chars, expires in $(echo "$TOKEN_RESPONSE" | jq -r .expires_in)s)"
   HEADER_ARGS=(--header "Authorization: Bearer ${TOKEN}")
+  echo "TOKEN:"
+  echo "${TOKEN}"
 fi
 
 echo "Opening MCP Inspector (${MODE}) → ${MCP_GATEWAY_URL}"

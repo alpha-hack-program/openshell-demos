@@ -98,18 +98,23 @@ mcp_request() {
     --env "MCP_URL=${mcp_url}" \
     --env "BODY=${body}" \
     -- bash -c 'curl -s -o /tmp/mcp_resp -w "%{http_code}" \
+      --connect-timeout 10 --max-time 60 \
       -X POST \
       -H "Authorization: Bearer $USER_ACCESS_TOKEN" \
       -H "Content-Type: application/json" \
       -H "Accept: application/json, text/event-stream" \
       -d "$BODY" \
-      "$MCP_URL"' 2>/dev/null
+      "$MCP_URL"' 2>/dev/null || true
+  # `|| true`: curl exits non-zero on connect-timeout/max-time, and under
+  # `set -e` that aborted the whole run on the first unreachable server
+  # instead of recording it as a FAIL and checking the remaining pairs.
+  # Emits an empty status, which compares unequal to the expected code.
 }
 
 mcp_request_body() {
   local sandbox="$1" workspace="$2"
   openshell sandbox exec -n "$sandbox" --workspace "$workspace" \
-    -- cat /tmp/mcp_resp 2>/dev/null
+    -- cat /tmp/mcp_resp 2>/dev/null || true
 }
 
 PASS=0
