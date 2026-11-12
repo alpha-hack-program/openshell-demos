@@ -11,7 +11,14 @@
 # layer carries the chmod fix OpenShell 0.1.2 needs to seed a sandbox's
 # workspace on OpenShift at all (see ../claude-sandbox/Containerfile and
 # docs/openshell-0.1.2-upgrade.md). Build/push that image first.
-FROM quay.io/atarazana/claude-sandbox:0.4.0
+#
+# Pinned to the -mlflow tag (not plain 0.4.0) so claude-audit also gets the
+# pip-installed mlflow client -- see ../claude-sandbox/Containerfile and
+# demos/keycloak-oidc/docs/mlflow-tracing.md. Installing mlflow alone isn't
+# enough here, though: see the managed-settings.json comment below for why
+# this image needs its own Stop-hook entry, not the dynamic
+# `mlflow autolog claude` registration the plain claude-sandbox uses.
+FROM quay.io/atarazana/claude-sandbox:0.4.0-mlflow
 
 # Copied here before build — see .gitignore in this directory.
 COPY --chmod=755 session-auditor /usr/local/bin/session-auditor

@@ -6,6 +6,10 @@
       {
         "matcher": "*",
         "hooks": [{ "type": "command", "command": "/usr/local/bin/session-auditor" }]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "mlflow autolog claude stop-hook" }]
       }
     ],
     "SessionStart": [

@@ -106,3 +106,58 @@ The RBAC grant in Step 3 is namespace-wide (every sandbox shares
 `openshell-sandbox`), not scoped to one banker's sandbox. If per-banker MLflow
 isolation ever matters, OpenShell would need a per-sandbox ServiceAccount
 before this chart could be scoped any tighter.
+
+## `claude-audit` needs a different Step 1/5 — baked, not dynamic
+
+`images/claude-audit/Containerfile` layers `session-auditor` on top of
+`claude-sandbox` and bakes `/etc/claude-code/managed-settings.json` with
+`"allowManagedHooksOnly": true` (see `util/session-auditor/README.md`) —
+**on purpose**, so the sandbox's own user can't disable the audit hooks.
+That lockdown has a side effect discovered while doing this: it also blocks
+any hook written to the sandbox's own `/sandbox/.claude/settings.json`,
+which is exactly where Step 5's `mlflow autolog claude` command registers
+its Stop-hook for the plain `claude-sandbox` image. Confirmed by reading the
+managed-settings precedence rules the session-auditor README already
+documents (not independently live-tested against MLflow specifically) —
+treat this as the same class of silent failure the session-auditor README
+warns about for its own hooks: sandbox stays `Ready`, agent answers
+normally, no trace ever shows up in MLflow, no error anywhere.
+
+So for `claude-audit`, the hook has to be baked into
+`managed-settings.json` itself, as a second entry in the `Stop` array
+alongside `session-auditor`'s:
+
+```json
+"Stop": [
+  { "matcher": "*", "hooks": [{ "type": "command", "command": "/usr/local/bin/session-auditor" }] },
+  { "matcher": "*", "hooks": [{ "type": "command", "command": "mlflow autolog claude stop-hook" }] }
+]
+```
+
+This only registers the hook — it still needs `MLFLOW_CLAUDE_TRACING_ENABLED=true`,
+`MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT_NAME`, `MLFLOW_TRACKING_AUTH`,
+`MLFLOW_WORKSPACE`, and `MLFLOW_TRACKING_INSECURE_TLS` present in the
+environment the hook's parent `claude` process runs in to do anything. Per
+`util/session-auditor/README.md`'s own documented pattern for
+`AUDITOR_LLM_BASE_URL`/`AUDITOR_ANTHROPIC_MODEL` ("child processes inherit
+them"), these should be passed the same way: `--env` flags on the
+`sandbox exec ... claude` call, same mechanism `scripts/lib-otel-env.sh`
+already uses for OTel — not written into `settings.json`'s `"env"` block
+(that's `/etc`, read-only, so it would have to be baked in anyway, coupling
+the image to one specific MLflow deployment). **Not yet live-verified** that
+a Stop-hook subprocess actually inherits exec-time `--env` the same way the
+main `claude` process's own tool calls do — confirm this when doing Step 6
+for an audited sandbox.
+
+Also done, build-side: `images/claude-audit/Containerfile`'s `FROM` now
+points at `quay.io/atarazana/claude-sandbox:0.4.0-mlflow` instead of the
+plain `:0.4.0` tag, so it inherits the pip-installed `mlflow` client with no
+extra `RUN` needed. Built and pushed
+`quay.io/atarazana/claude-audit:0.4.0-mlflow-0.1.5` (tag convention per
+`util/session-auditor/Makefile`: base image tag + crate version — unchanged
+crate version since nothing about the binary itself changed, only its base
+image). Built on carlos-kenshin inside a `clux/muslrust:stable` container
+(not directly on the host — it's an immutable Fedora Atomic system with no
+`cc` linker at all, confirmed live) using the pinned `session-auditor` 0.1.5
+source already in this repo, since GitHub auth was unavailable locally to
+pull the prebuilt release binary instead.
