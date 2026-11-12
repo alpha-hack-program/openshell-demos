@@ -28,7 +28,10 @@ Step 4 below).
   must be installed at **build** time (Step 1), not via a runtime `pip
   install`.
 - The base image ("Hummingbird OS") has no `dnf`/`microdnf` — no OS package
-  manager at all, just `python3` with `pip` already importable as a module.
+  manager at all. `python3` has the `ensurepip` module but pip itself isn't
+  bootstrapped (`python3 -m pip install` fails with "No module named pip"
+  until `python3 -m ensurepip --upgrade` runs first — confirmed on the build
+  host, carlos-kenshin).
 - RHOAI's MLflow is already deployed: CR `mlflow` in
   `redhat-ods-applications`, internal URL
   `https://mlflow.redhat-ods-applications.svc:8443/mlflow`, server version

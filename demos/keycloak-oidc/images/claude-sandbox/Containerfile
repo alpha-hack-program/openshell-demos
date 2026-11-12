@@ -53,6 +53,12 @@ RUN chmod -R a+rX /sandbox
 # (that's a one-time, per-sandbox step run after the sandbox exists, since
 # it writes into that sandbox's own /sandbox/.claude/settings.json -- see
 # docs/mlflow-tracing.md).
-RUN python3 -m pip install --no-cache-dir 'mlflow>=3.12,<3.13'
+#
+# `ensurepip` first: confirmed live on the build host that this image's
+# python3 has the ensurepip module (so `ensurepip --version` succeeds) but
+# pip itself isn't actually bootstrapped -- a bare `python3 -m pip install`
+# fails with "No module named pip".
+RUN python3 -m ensurepip --upgrade && \
+    python3 -m pip install --no-cache-dir 'mlflow>=3.12,<3.13'
 
 USER sandbox
