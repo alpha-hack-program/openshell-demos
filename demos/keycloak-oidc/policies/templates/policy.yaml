@@ -120,3 +120,17 @@ network_policies:
         enforcement: enforce
 {{- end }}
 {{- end }}
+{{- if .Values.mlflowTrackingHost }}
+  allow_mlflow:
+    name: allow_mlflow
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/node
+      - path: /usr/sbin/python3
+    endpoints:
+      - host: {{ .Values.mlflowTrackingHost | quote }}
+        port: {{ .Values.mlflowTrackingPort }}
+        protocol: rest
+        access: read-write
+        enforcement: enforce
+{{- end }}

@@ -19,11 +19,11 @@
 # root-cause writeup.
 #
 # Build and push:
-#   podman build -t quay.io/atarazana/claude-sandbox:0.4.0 \
+#   podman build -t quay.io/atarazana/claude-sandbox:0.4.0-mlflow \
 #     -t quay.io/atarazana/claude-sandbox:latest \
 #     -f demos/keycloak-oidc/images/claude-sandbox/Containerfile \
 #     demos/keycloak-oidc/images/claude-sandbox/
-#   podman push quay.io/atarazana/claude-sandbox:0.4.0
+#   podman push quay.io/atarazana/claude-sandbox:0.4.0-mlflow
 #   podman push quay.io/atarazana/claude-sandbox:latest
 #
 # Bump the FROM tag here when a newer upstream claude-sandbox release
@@ -32,4 +32,27 @@ FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0
 
 USER root
 RUN chmod -R a+rX /sandbox
+
+# MLflow tracing (optional, see docs/mlflow-tracing.md). The sandbox's
+# runtime network policy has no PyPI egress (confirmed live: DNS to
+# pypi.org times out from inside a running sandbox pod), so mlflow must be
+# installed at build time, not via a runtime `pip install`.
+#
+# Pinned to the 3.12.x line deliberately: this image's base OS
+# ("Hummingbird OS", confirmed via /etc/os-release) has no dnf/microdnf, so
+# there's no package manager to install OS-level deps with -- the 3.12
+# Python-hook path (`mlflow autolog claude`) only needs the pip package
+# itself, while MLflow 3.14+'s Claude Code plugin path needs the
+# TypeScript SDK, NODE_EXTRA_CA_CERTS wiring, and (per upstream docs) a
+# plugin built from source until the next release. The 3.12 hook path
+# works unmodified against a 3.14 MLflow *server* (confirmed: this cluster's
+# MLflow instance is already 3.14.0) -- client/server versions don't need
+# to match.
+#
+# This only installs the package; it does NOT run `mlflow autolog claude`
+# (that's a one-time, per-sandbox step run after the sandbox exists, since
+# it writes into that sandbox's own /sandbox/.claude/settings.json -- see
+# docs/mlflow-tracing.md).
+RUN python3 -m pip install --no-cache-dir 'mlflow>=3.12,<3.13'
+
 USER sandbox

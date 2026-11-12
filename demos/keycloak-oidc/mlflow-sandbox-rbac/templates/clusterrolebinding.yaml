@@ -1,0 +1,32 @@
+{{- if not .Values.openshellNamespace }}
+{{- fail "openshellNamespace is required, e.g. --set openshellNamespace=keycloak-oidc-demo" }}
+{{- end }}
+## Rendered by `helm template` from demos/keycloak-oidc/mlflow-sandbox-rbac
+## — do not hand-edit the output. Apply with:
+##   helm template mlflow-sandbox-rbac mlflow-sandbox-rbac \
+##     --set openshellNamespace=keycloak-oidc-demo | oc apply -f -
+##
+## A ClusterRoleBinding (not a namespaced RoleBinding), matching the
+## existing precedent for this exact ClusterRole:
+## trustyai-service-operator-evalhub-mlflow-access-binding grants
+## mlflow-operator-mlflow-integration the same way, cluster-wide, to
+## EvalHub's controller SA. MLflow's kubernetes-namespaced auth plugin
+## performs its own authorization check via the API server (not a
+## namespace-local check), so a ClusterRoleBinding is what that plugin
+## actually expects, even though the resulting access is still
+## effectively namespace-scoped once MLFLOW_WORKSPACE is auto-detected
+## from the subject's own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.openshellNamespace }}-mlflow-integration
+  labels:
+    app.kubernetes.io/part-of: openshell-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mlflow-operator-mlflow-integration
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccountName }}
+    namespace: {{ .Values.openshellNamespace }}
