@@ -20,7 +20,7 @@ ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
 ARG BASE_TAG=9.6
 # Must match a real published OpenShell release; keep in step with
 # OPENSHELL_CHART_VERSION in demos/keycloak-oidc/.env. Confirmed against
-# https://github.com/NVIDIA/OpenShell/releases/tags/v0.1.4 — the musl
+# https://github.com/NVIDIA/OpenShell/releases/tags/v0.1.8 — the musl
 # tarball asset really is named openshell-x86_64-unknown-linux-musl.tar.gz.
 #
 # This is NOT cosmetic: the CLI baked in here talks protobuf to the
@@ -32,7 +32,7 @@ ARG BASE_TAG=9.6
 # surfaced to the user as "Could not look up your OpenShell workspace".
 # Bump this in lockstep with OPENSHELL_CHART_VERSION and publish a matching
 # image tag, or step 3.1a of demos/keycloak-oidc/README.md cannot work.
-ARG OPENSHELL_VERSION=0.1.4
+ARG OPENSHELL_VERSION=0.1.8
 
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_TAG} AS builder
 
