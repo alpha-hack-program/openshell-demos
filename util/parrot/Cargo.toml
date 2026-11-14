@@ -14,8 +14,8 @@ license = "Apache-2.0"
 # these lines by hand — the Makefile target keeps both in sync and re-runs
 # `cargo update`.
 [workspace.dependencies]
-openshell-sdk = { git = "https://github.com/NVIDIA/OpenShell", tag = "v0.1.2" }
-openshell-bootstrap = { git = "https://github.com/NVIDIA/OpenShell", tag = "v0.1.2" }
+openshell-sdk = { git = "https://github.com/NVIDIA/OpenShell", tag = "v0.1.8" }
+openshell-bootstrap = { git = "https://github.com/NVIDIA/OpenShell", tag = "v0.1.8" }
 
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

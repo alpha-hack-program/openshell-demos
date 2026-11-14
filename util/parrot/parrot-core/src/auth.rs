@@ -56,6 +56,7 @@ impl Refresh for StoredOidcRefresher {
             expires_at: output.expires_at,
             issuer: bundle.issuer,
             client_id: bundle.client_id,
+            client_credentials: bundle.client_credentials,
         };
         // Best-effort: a failed write just means the next refresh redoes
         // the round trip, not a reason to fail this one.
