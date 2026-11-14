@@ -19,15 +19,21 @@
 # root-cause writeup.
 #
 # Build and push:
-#   podman build -t quay.io/atarazana/claude-sandbox:0.4.0-mlflow \
+#   podman build -t quay.io/atarazana/claude-sandbox:0.4.1 \
 #     -t quay.io/atarazana/claude-sandbox:latest \
 #     -f demos/keycloak-oidc/images/claude-sandbox/Containerfile \
 #     demos/keycloak-oidc/images/claude-sandbox/
-#   podman push quay.io/atarazana/claude-sandbox:0.4.0-mlflow
+#   podman push quay.io/atarazana/claude-sandbox:0.4.1
 #   podman push quay.io/atarazana/claude-sandbox:latest
 #
-# Bump the FROM tag here when a newer upstream claude-sandbox release
-# ships, and re-run the build/push above.
+# This image's own tag tracks two things, not just the upstream FROM
+# version: bump its last digit whenever *this* Containerfile's own layers
+# change content (e.g. 0.4.0 -> 0.4.1 added mlflow -- see below), and reset
+# to <upstream>.0 when the FROM line itself bumps to a newer upstream
+# release. Same "never silently reuse a tag" rule util/session-auditor's
+# own images follow, for the same reason: sandbox pods run
+# imagePullPolicy IfNotPresent, so reusing a tag after its content changed
+# leaves already-pulled nodes silently serving the old content forever.
 FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0
 
 USER root

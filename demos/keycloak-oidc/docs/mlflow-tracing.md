@@ -55,7 +55,13 @@ Step 4 below).
 1. **Bake MLflow into the image** — done:
    `images/claude-sandbox/Containerfile` now installs `mlflow>=3.12,<3.13`
    via `python3 -m pip install` as part of the build. Build and push per the
-   comment at the top of that file (new tag: `0.4.0-mlflow`).
+   comment at the top of that file (new tag: `0.4.1`). Deliberately *not*
+   `0.4.0-mlflow` — that was this doc's first attempt, reverted: mlflow is a
+   baseline feature of this image now, not a flagged variant alongside a
+   plain `0.4.0` you'd choose between, so it gets a normal version bump
+   instead of a feature-named tag (same convention `util/session-auditor`'s
+   own images already use — bump on content change, never encode what
+   changed into the tag itself).
 2. **Add an egress rule** — done: `policies/values.yaml` gained
    `mlflowTrackingHost` / `mlflowTrackingPort` (both optional, default port
    `8443`); `policies/templates/policy.yaml` renders an `allow_mlflow`
@@ -76,7 +82,7 @@ Step 4 below).
    policy are both creation-time-only (confirmed by existing comments in
    `scripts/15-provision-claude-sandbox.sh`), so an already-provisioned
    sandbox (e.g. `claude-charlie`) must be deleted and re-provisioned with
-   `CLAUDE_IMAGE` pointing at the new `-mlflow` tag, and with
+   `CLAUDE_IMAGE` pointing at the new `0.4.1` tag, and with
    `mlflowTrackingHost=mlflow.redhat-ods-applications.svc.cluster.local`
    threaded into the `helm template policies` call inside that script. This
    drops whatever's on the sandbox's current `/sandbox` PVC.
@@ -150,10 +156,10 @@ main `claude` process's own tool calls do — confirm this when doing Step 6
 for an audited sandbox.
 
 Also done, build-side: `images/claude-audit/Containerfile`'s `FROM` now
-points at `quay.io/atarazana/claude-sandbox:0.4.0-mlflow` instead of the
-plain `:0.4.0` tag, so it inherits the pip-installed `mlflow` client with no
-extra `RUN` needed. Built and pushed
-`quay.io/atarazana/claude-audit:0.4.0-mlflow-0.1.5` (tag convention per
+points at `quay.io/atarazana/claude-sandbox:0.4.1` (the mlflow-baseline
+revision) instead of `:0.4.0`, so it inherits the pip-installed `mlflow`
+client with no extra `RUN` needed. Built and pushed
+`quay.io/atarazana/claude-audit:0.4.1-0.1.5` (tag convention per
 `util/session-auditor/Makefile`: base image tag + crate version — unchanged
 crate version since nothing about the binary itself changed, only its base
 image). Built on carlos-kenshin inside a `clux/muslrust:stable` container
@@ -161,3 +167,8 @@ image). Built on carlos-kenshin inside a `clux/muslrust:stable` container
 `cc` linker at all, confirmed live) using the pinned `session-auditor` 0.1.5
 source already in this repo, since GitHub auth was unavailable locally to
 pull the prebuilt release binary instead.
+
+An earlier pass briefly tagged these `0.4.0-mlflow` /
+`0.4.0-mlflow-0.1.5` before settling on the scheme above — those two quay
+tags still exist (pushed, then superseded) and should be deleted from
+quay.io/atarazana to avoid confusion, but weren't as of this writing.

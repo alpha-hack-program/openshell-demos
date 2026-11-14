@@ -250,6 +250,18 @@ if [ "$GW" = true ]; then
 else
   POLICY_TEMPLATE_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
 fi
+# MLflow tracing (optional, see docs/mlflow-tracing.md) -- set
+# MLFLOW_TRACKING_HOST in .env to grant this sandbox egress to an MLflow
+# tracking server. Omitted entirely (not just left blank) when unset, since
+# the chart's own mlflowTrackingHost default ("") already renders no
+# allow_mlflow group -- an explicit empty --set would do the same thing,
+# this just avoids a pointless extra flag on every other sandbox's render.
+if [ -n "${MLFLOW_TRACKING_HOST:-}" ]; then
+  POLICY_TEMPLATE_ARGS+=(
+    --set "mlflowTrackingHost=${MLFLOW_TRACKING_HOST}"
+    --set "mlflowTrackingPort=${MLFLOW_TRACKING_PORT:-8443}"
+  )
+fi
 helm template "${SANDBOX_NAME}-policy" policies "${POLICY_TEMPLATE_ARGS[@]}" \
   > "${POLICY_TMPFILE}"
 
