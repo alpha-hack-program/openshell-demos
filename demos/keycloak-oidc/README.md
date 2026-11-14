@@ -2443,15 +2443,15 @@ streaming tool-call sequence live instead of only the final text. Each
 scene below has a collapsed "Equivalent via `parrot`" block right under
 its raw command.
 
-**Install (pick one, tag `parrot-v0.1.1`):**
+**Install (pick one, tag `parrot-v0.1.3`):**
 
 ```bash
 # Linux (x86_64)
-curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-linux-x86_64 -o parrot
+curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.3/parrot-linux-x86_64 -o parrot
 chmod +x parrot
 
 # macOS (Apple Silicon)
-curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.1/parrot-macos-aarch64 -o parrot
+curl -L https://github.com/alpha-hack-program/openshell-demos/releases/download/parrot-v0.1.3/parrot-macos-aarch64 -o parrot
 chmod +x parrot
 
 ./parrot --version
