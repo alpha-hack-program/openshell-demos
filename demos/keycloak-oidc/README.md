@@ -1461,36 +1461,26 @@ workspace for another.
 
 #### Step 3.1a — Self-service alternative: `onboarding-web`
 
-> **⚠ Currently broken against OpenShell 0.1.2+ — use
-> [Step 3.1b](#step-31b--onboard-the-banker-with-the-onboard-tool)
-> instead.** The published images
-> (`quay.io/atarazana/onboarding-web:0.1.0` and `:0.1.1`) bake in
-> `openshell 0.0.106`, whose protobuf wire format the 0.1.2+ gateway
-> rejects. Every banker login reaches Keycloak successfully and then dies
-> at the app's first backend call:
->
-> ```
-> Could not look up your OpenShell workspace ('alice'):
-> openshell provider list --workspace alice failed (exit exit status: 1):
-> Error: × code: 'Internal error', message: "failed to decode Protobuf message:
-> ListProvidersRequest.workspace_scope: buffer underflow"
-> ```
->
-> Confirmed live for all three bankers against a 0.1.2 gateway (2026-10-11)
-> — **not re-tested against 0.1.4** (2026-10-20 upgrade pass skipped it per
-> this section's own recommendation to use the `onboard` tool instead; see
-> [`docs/openshell-0.1.4-upgrade.md`](../../docs/openshell-0.1.4-upgrade.md)).
-> The root cause (a stale baked-in 0.0.106 CLI against a newer gateway) is
-> not expected to have improved. The fix is still to rebuild and publish
-> the image — `util/onboarding-web/Containerfile`'s `ARG OPENSHELL_VERSION`
-> is now `0.1.4`, but no matching tag has been pushed yet — then set
-> `image.tag` in `onboarding-web/values.yaml` to match. Tracked in
-> [`TODO.md`](../../TODO.md). The "Verified end to end against a live
-> cluster" note at the end of this section predates the 0.1.2 upgrade and
-> does not currently hold.
+> **Image/CLI version note:** the published image
+> (`quay.io/atarazana/onboarding-web`) bakes in a specific `openshell` CLI
+> release — see `util/onboarding-web/Containerfile`'s `ARG
+> OPENSHELL_VERSION` comment for why a stale baked-in CLI talking protobuf
+> to a newer gateway is a hard failure, not cosmetic (`buffer underflow`
+> decoding `ListProvidersRequest`, surfaced to the user as "Could not look
+> up your OpenShell workspace"). As of this guide's `0.1.8` cutover,
+> `:0.1.2` bakes in `openshell 0.1.8`, matching the gateway — confirmed via
+> `podman run --rm --entrypoint openshell <image> --version`, and the
+> redeployed pod reaches `Ready` with its route returning `HTTP 200`.
+> **Not independently re-verified this round:** an actual banker login
+> through Keycloak all the way to a working provider (the specific
+> failure mode this note used to document) — treat that path as
+> [VERIFY] until someone runs it live. If you hit the `buffer underflow`
+> error above, the image's baked-in CLI has drifted from the gateway
+> version again; rebuild and republish per the Containerfile's own
+> instructions, then update `image.tag` in `onboarding-web/values.yaml`
+> to match.
 
-**This is the default, recommended path** *(once the image above is
-rebuilt)*. Each banker visits a URL, logs
+**This is the default, recommended path.** Each banker visits a URL, logs
 in via Keycloak, and ends up with a working provider — with no admin
 running anything on their behalf at the moment they activate their own
 credential. If you'd rather an admin run one binary per banker from their

@@ -2,19 +2,15 @@
 
 ## Fix
 
-- [ ] **Rebuild + publish `onboarding-web` at OpenShell 0.1.4, then retry step 3.1a**.
-      The published images (`quay.io/atarazana/onboarding-web:0.1.0`, `:0.1.1`,
-      both Aug 2026) bake in `openshell 0.0.106`, which is protobuf-incompatible
-      with a 0.1.x gateway — confirmed live (2026-10-11) that a 0.0.106-baked
-      image against a 0.1.2 gateway fails every login at the first backend call
-      with `failed to decode Protobuf message:
-      ListProvidersRequest.workspace_scope: buffer underflow`, shown to the user
-      as "Could not look up your OpenShell workspace".
-      `util/onboarding-web/Containerfile`'s `ARG OPENSHELL_VERSION` is now
-      bumped to `0.1.4` — what remains is to build, push a `0.1.4` tag, bump
-      `demos/keycloak-oidc/onboarding-web/values.yaml` `image.tag`, redeploy, and
-      re-verify the self-service flow end to end. Until then, README step 3.1a is
-      broken and step 3.1b (`onboard`) is the working path.
+- [x] ~~Rebuild + publish `onboarding-web` at OpenShell 0.1.4, then retry step 3.1a~~ —
+      **done, now tracking 0.1.8 instead.** `quay.io/atarazana/onboarding-web:0.1.2`
+      bakes in `openshell 0.1.8` (confirmed via `podman run --entrypoint openshell
+      --version`), redeployed live during the v0.1.8 upgrade — pod `Ready`, route
+      returns `HTTP 200`. **Not independently re-verified:** an actual banker login
+      through Keycloak all the way to a working provider — do that before fully
+      trusting step 3.1a again. This version-lockstep requirement (baked CLI must
+      match the gateway or every login fails with a protobuf `buffer underflow`)
+      recurs on every future OpenShell bump — rebuild/republish/redeploy each time.
 - [ ] Publish a **macOS x86_64** `onboard` asset. The release only ships
       `onboard-linux-x86_64` and `onboard-macos-aarch64`, so step 3.1b's download
       block has no working binary on an Intel Mac. Building from source
