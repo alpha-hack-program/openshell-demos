@@ -328,7 +328,7 @@ run_turn() {
   local mlflow_args=()
   if [[ "$agent" == "claude" ]]; then
     otel_claude_env_args "$USER_ID" "$sandbox"
-    mlflow_args=("${MLFLOW_ENV_ARGS[@]}")
+    mlflow_args=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
   else
     otel_codex_env_args "$USER_ID" "$sandbox"
   fi
@@ -338,10 +338,17 @@ run_turn() {
   else
     echo "(close the parrot-gpui window once the turn finishes)"
   fi
+  # mlflow_args can be genuinely empty (Codex turns, or MLFLOW_TRACKING_HOST
+  # unset) -- "${mlflow_args[@]}" alone throws "unbound variable" under
+  # `set -u` on bash 3.2 (macOS's system bash) even though the array is
+  # explicitly declared, a long-fixed bug in later bash but still very much
+  # alive here. OTEL_ENV_ARGS/AUDITOR_ENV_ARGS never hit this since they're
+  # always populated with at least one --env flag. The "${arr[@]+...}"
+  # guard is the standard portable workaround.
   "$UI" --sandbox "$sandbox" --workspace "$USER_ID" --agent "$agent" \
     "${OTEL_ENV_ARGS[@]}" \
     "${AUDITOR_ENV_ARGS[@]}" \
-    "${mlflow_args[@]}" \
+    "${mlflow_args[@]+"${mlflow_args[@]}"}" \
     --prompt "$prompt"
 }
 
