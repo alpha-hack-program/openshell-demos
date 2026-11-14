@@ -19,11 +19,11 @@
 # root-cause writeup.
 #
 # Build and push:
-#   podman build -t quay.io/atarazana/claude-sandbox:0.4.1 \
+#   podman build -t quay.io/atarazana/claude-sandbox:0.4.2 \
 #     -t quay.io/atarazana/claude-sandbox:latest \
 #     -f demos/keycloak-oidc/images/claude-sandbox/Containerfile \
 #     demos/keycloak-oidc/images/claude-sandbox/
-#   podman push quay.io/atarazana/claude-sandbox:0.4.1
+#   podman push quay.io/atarazana/claude-sandbox:0.4.2
 #   podman push quay.io/atarazana/claude-sandbox:latest
 #
 # This image's own tag tracks two things, not just the upstream FROM
@@ -64,7 +64,16 @@ RUN chmod -R a+rX /sandbox
 # python3 has the ensurepip module (so `ensurepip --version` succeeds) but
 # pip itself isn't actually bootstrapped -- a bare `python3 -m pip install`
 # fails with "No module named pip".
+#
+# The `[kubernetes]` extra is load-bearing, not optional: without it,
+# MLFLOW_TRACKING_AUTH=kubernetes-namespaced fails at the first tracking
+# call with "ModuleNotFoundError: No module named 'kubernetes'" -- a plain
+# `pip install mlflow` does not pull this in. Confirmed live against a real
+# sandbox (aud-claude-bob) -- the Stop-hook's own fail-soft behavior
+# swallows this error silently, so the only symptom is "no trace in
+# MLflow," the exact silent-failure class docs/mlflow-tracing.md warns
+# about elsewhere.
 RUN python3 -m ensurepip --upgrade && \
-    python3 -m pip install --no-cache-dir 'mlflow>=3.12,<3.13'
+    python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12,<3.13'
 
 USER sandbox

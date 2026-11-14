@@ -12,15 +12,16 @@
 # workspace on OpenShift at all (see ../claude-sandbox/Containerfile and
 # docs/openshell-0.1.2-upgrade.md). Build/push that image first.
 #
-# 0.4.1, not 0.4.0: that's the revision of ../claude-sandbox that added a
-# pip-installed mlflow client -- see ../claude-sandbox/Containerfile and
-# demos/keycloak-oidc/docs/mlflow-tracing.md (no separate "-mlflow" tag --
-# mlflow is just part of what 0.4.1 means, same as this image has no
-# separate "-audit" tag for what it adds). Installing mlflow alone isn't
-# enough here, though: see the managed-settings.json comment below for why
-# this image needs its own Stop-hook entry, not the dynamic
-# `mlflow autolog claude` registration the plain claude-sandbox uses.
-FROM quay.io/atarazana/claude-sandbox:0.4.1
+# 0.4.2, not 0.4.0: that's the revision of ../claude-sandbox that added a
+# pip-installed mlflow[kubernetes] client -- see
+# ../claude-sandbox/Containerfile and demos/keycloak-oidc/docs/mlflow-tracing.md
+# (no separate "-mlflow" tag -- mlflow is just part of what 0.4.2 means,
+# same as this image has no separate "-audit" tag for what it adds).
+# Installing mlflow alone isn't enough here, though: see the
+# managed-settings.json comment below for why this image needs its own
+# Stop-hook entry, not the dynamic `mlflow autolog claude` registration the
+# plain claude-sandbox uses.
+FROM quay.io/atarazana/claude-sandbox:0.4.2
 
 # Copied here before build — see .gitignore in this directory.
 COPY --chmod=755 session-auditor /usr/local/bin/session-auditor
