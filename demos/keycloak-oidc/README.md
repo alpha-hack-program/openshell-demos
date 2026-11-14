@@ -4114,6 +4114,8 @@ trust as end-to-end verification.
 | `KEYCLOAK_CLIENT_ID_GATEWAY` | Confidential gateway client | Used for gateway-to-Keycloak communication |
 | `KEYCLOAK_CLIENT_SECRET` | Gateway client secret | Never commit a real value |
 | `KEYCLOAK_ADMIN_TOKEN` | `07-authorize-mcp-user.sh` | Short-lived; obtain via your own admin login |
+| `MLFLOW_TRACKING_HOST`/`_PORT` | `scripts/15-provision-claude-sandbox.sh`, `scripts/19` | Optional, see [MLflow tracing](docs/mlflow-tracing.md). Leave `MLFLOW_TRACKING_HOST` unset and nothing about MLflow is provisioned |
+| `MLFLOW_TRACKING_TOKEN` | Same as above | A manually-minted Kubernetes ServiceAccount bearer token, **not** a long-lived secret you set once — see the token note below |
 
 ### C. Secrets and security notes
 
@@ -4135,6 +4137,26 @@ trust as end-to-end verification.
   background). Once this demo's values are applied, real OIDC auth is enforced
   (`allowUnauthenticatedUsers: false`), but the transport is still plaintext
   — evaluation-only, never expose to a public network.
+- **MLflow tracing's `MLFLOW_TRACKING_TOKEN` is a bound, time-limited
+  Kubernetes ServiceAccount token, not a credential you set once and
+  forget.** It's minted with
+  `oc create token openshell-sandbox -n "$OPENSHELL_NAMESPACE" --duration=8760h`
+  (365 days here) and authenticates against RHOAI's MLflow the same way an
+  in-pod token would (a `TokenReview` against the Kubernetes API) — `mlflow
+  -sandbox-rbac`'s `ClusterRoleBinding` is what makes that succeed
+  regardless of how the token was minted. It **will** expire; there is no
+  OAuth-style refresh_token for it, and `openshell provider refresh
+  configure --strategy` has no option that fits a raw Kubernetes
+  ServiceAccount token (only `oauth2-refresh-token`,
+  `oauth2-client-credentials`, `google-service-account-jwt`, and
+  `aws-sts-assume-role` exist). Until a new value is minted and pushed to
+  every banker's `mlflow` provider (`openshell provider update mlflow
+  --workspace <id> --credential "MLFLOW_TRACKING_TOKEN=<new>" --wait`),
+  expiry surfaces as a generic `401 UNAUTHENTICATED: Authentication with
+  the Kubernetes API failed` from MLflow, not an obviously credential-
+  related error. See [MLflow tracing](docs/mlflow-tracing.md#minting-and-refreshing-the-token)
+  for the full renewal procedure and the options considered for automating
+  it (none built in this repo yet).
 
 ### D. Troubleshooting
 
