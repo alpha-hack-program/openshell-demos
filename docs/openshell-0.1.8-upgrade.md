@@ -8,7 +8,7 @@ install: `keycloak-oidc-demo`'s `openshell` Helm release had been running
 `claude-*`/`aud-claude-*`/`aud-codex-*` sandboxes, one created the same
 day). Per the user's explicit decision, all pre-existing sandboxes were
 deleted and re-provisioned fresh after the Helm bump rather than preserved
-— see "Sandbox survival decision" below. Branch: `v0.1.8-upgrade`,
+— see "Sandbox survival decision" below. Branch: `v0.1.8`,
 branched from `main` (not from the still-in-progress
 `mlflow-tracing-claude-sandbox` branch, which this work was deliberately
 isolated from via a separate git worktree).
@@ -402,5 +402,5 @@ asserting either way.
 5. **`token-exchange-profile.yaml`'s missing `auth_style`** — a draft file,
    not live-imported anywhere, but worth adding explicit placement before
    it's ever used, now that v0.1.8 requires it.
-6. Merging `v0.1.8-upgrade` back into `main` is a separate step, not done
+6. Merging `v0.1.8` back into `main` is a separate step, not done
    here.
