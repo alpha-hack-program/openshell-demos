@@ -1,0 +1,24 @@
+# Rendered with `helm template <release-name> mlflow-sandbox-rbac --set ...`,
+# never `helm install` — there is no in-cluster release, this chart only
+# produces a ClusterRoleBinding manifest for `oc apply -f -`.
+#
+#   helm template mlflow-sandbox-rbac mlflow-sandbox-rbac \
+#     --set openshellNamespace=keycloak-oidc-demo | oc apply -f -
+#
+# Confirmed live against sandbox341: the mlflow-operator-mlflow-integration
+# ClusterRole already exists (created by RHOAI's MLflow operator) — this
+# chart only adds the binding, not the role itself.
+
+# Namespace whose sandboxes need MLflow access. Also becomes the MLflow
+# workspace name: MLFLOW_TRACKING_AUTH=kubernetes-namespaced authenticates
+# via the pod's own SA token and auto-detects the workspace from the
+# token's namespace, so this is the only namespace value this chart needs.
+openshellNamespace: ""
+
+# ServiceAccount every sandbox pod in openshellNamespace runs as. OpenShell
+# 0.1.4 shares one SA across every sandbox in a namespace — confirmed live:
+# alice's, bob's, and charlie's sandboxes all run as openshell-sandbox — so
+# this grant is namespace-wide, not scoped to one banker's sandbox. If that
+# turns out to be too broad, OpenShell would need a per-sandbox SA before
+# this chart could be scoped any tighter.
+serviceAccountName: openshell-sandbox

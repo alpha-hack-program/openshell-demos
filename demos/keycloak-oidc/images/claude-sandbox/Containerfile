@@ -19,17 +19,61 @@
 # root-cause writeup.
 #
 # Build and push:
-#   podman build -t quay.io/atarazana/claude-sandbox:0.4.0 \
+#   podman build -t quay.io/atarazana/claude-sandbox:0.4.2 \
 #     -t quay.io/atarazana/claude-sandbox:latest \
 #     -f demos/keycloak-oidc/images/claude-sandbox/Containerfile \
 #     demos/keycloak-oidc/images/claude-sandbox/
-#   podman push quay.io/atarazana/claude-sandbox:0.4.0
+#   podman push quay.io/atarazana/claude-sandbox:0.4.2
 #   podman push quay.io/atarazana/claude-sandbox:latest
 #
-# Bump the FROM tag here when a newer upstream claude-sandbox release
-# ships, and re-run the build/push above.
+# This image's own tag tracks two things, not just the upstream FROM
+# version: bump its last digit whenever *this* Containerfile's own layers
+# change content (e.g. 0.4.0 -> 0.4.1 added mlflow -- see below), and reset
+# to <upstream>.0 when the FROM line itself bumps to a newer upstream
+# release. Same "never silently reuse a tag" rule util/session-auditor's
+# own images follow, for the same reason: sandbox pods run
+# imagePullPolicy IfNotPresent, so reusing a tag after its content changed
+# leaves already-pulled nodes silently serving the old content forever.
 FROM quay.io/aipcc/agentic-ci/claude-sandbox:0.4.0
 
 USER root
 RUN chmod -R a+rX /sandbox
+
+# MLflow tracing (optional, see docs/mlflow-tracing.md). The sandbox's
+# runtime network policy has no PyPI egress (confirmed live: DNS to
+# pypi.org times out from inside a running sandbox pod), so mlflow must be
+# installed at build time, not via a runtime `pip install`.
+#
+# Pinned to the 3.12.x line deliberately: this image's base OS
+# ("Hummingbird OS", confirmed via /etc/os-release) has no dnf/microdnf, so
+# there's no package manager to install OS-level deps with -- the 3.12
+# Python-hook path (`mlflow autolog claude`) only needs the pip package
+# itself, while MLflow 3.14+'s Claude Code plugin path needs the
+# TypeScript SDK, NODE_EXTRA_CA_CERTS wiring, and (per upstream docs) a
+# plugin built from source until the next release. The 3.12 hook path
+# works unmodified against a 3.14 MLflow *server* (confirmed: this cluster's
+# MLflow instance is already 3.14.0) -- client/server versions don't need
+# to match.
+#
+# This only installs the package; it does NOT run `mlflow autolog claude`
+# (that's a one-time, per-sandbox step run after the sandbox exists, since
+# it writes into that sandbox's own /sandbox/.claude/settings.json -- see
+# docs/mlflow-tracing.md).
+#
+# `ensurepip` first: confirmed live on the build host that this image's
+# python3 has the ensurepip module (so `ensurepip --version` succeeds) but
+# pip itself isn't actually bootstrapped -- a bare `python3 -m pip install`
+# fails with "No module named pip".
+#
+# The `[kubernetes]` extra is load-bearing, not optional: without it,
+# MLFLOW_TRACKING_AUTH=kubernetes-namespaced fails at the first tracking
+# call with "ModuleNotFoundError: No module named 'kubernetes'" -- a plain
+# `pip install mlflow` does not pull this in. Confirmed live against a real
+# sandbox (aud-claude-bob) -- the Stop-hook's own fail-soft behavior
+# swallows this error silently, so the only symptom is "no trace in
+# MLflow," the exact silent-failure class docs/mlflow-tracing.md warns
+# about elsewhere.
+RUN python3 -m ensurepip --upgrade && \
+    python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12,<3.13'
+
 USER sandbox

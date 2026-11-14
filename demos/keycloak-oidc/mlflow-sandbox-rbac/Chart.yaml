@@ -1,0 +1,10 @@
+apiVersion: v2
+name: mlflow-sandbox-rbac
+description: >-
+  ClusterRoleBinding granting an OpenShell namespace's sandbox pods the
+  mlflow-operator-mlflow-integration ClusterRole, so Claude Code's
+  MLflow Stop-hook can authenticate via MLFLOW_TRACKING_AUTH=kubernetes-namespaced.
+  Rendered locally with `helm template` — never installed to a cluster,
+  same convention as ../policies.
+type: application
+version: 0.1.0
