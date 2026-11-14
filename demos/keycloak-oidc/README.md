@@ -417,7 +417,7 @@ banker membership in a workspace that already has one.
 | Gateway API / `GatewayClass` support on the cluster | **Optional**, same condition as above — the shared MCP Gateway chart (see [step 4a](#4a-deploy-the-mcp-gateway-cluster-wide-once)) creates the `GatewayClass` this demo uses, on top of OpenShift's built-in Gateway API controller |
 | Red Hat OpenShift AI (RHOAI) operator, with KServe/ModelServing enabled | Needed for the `mcp-servers` chart's embeddings `InferenceService` (vLLM CPU serving `jinaai/jina-embeddings-v3`), shared by `mcp-market-news` and `mcp-kyc-compliance` for semantic search — see `demos/keycloak-oidc/mcp-servers/templates/embeddings.yaml`. Enabling and configuring a `DataScienceCluster`/hardware profile is cluster-specific and out of scope for this doc — see [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai). The `hardwareProfile` value in `mcp-servers/values.yaml` (`default-profile`) is cluster-specific — it was confirmed against one real cluster's RHOAI install, but yours may expose a different name; check `oc get hardwareprofiles -n redhat-ods-applications` before deploying. |
 
-This guide is written against **OpenShell chart/CLI version `0.1.4`** —
+This guide is written against **OpenShell chart/CLI version `0.1.8`** —
 set as `OPENSHELL_CHART_VERSION` in your `.env` (see
 [Set up your `.env` file](#set-up-your-env-file)). The rest of this document
 refers back to that variable rather than repeating the version number.
@@ -437,7 +437,7 @@ entirely optional, and specific to macOS on Intel (x86_64).
 On **Fedora/RHEL** x86_64, install the RPM directly from the GitHub release:
 
 ```bash
-OPENSHELL_VERSION="0.1.4"   # match OPENSHELL_CHART_VERSION in .env
+OPENSHELL_VERSION="0.1.8"   # match OPENSHELL_CHART_VERSION in .env
 sudo dnf install -y \
   "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${OPENSHELL_VERSION}-1.fc44.x86_64.rpm"
 openshell --version
@@ -454,9 +454,9 @@ openshell --version
 Other assets (musl tarball, aarch64 Linux, `.deb`, `.snap`) are listed at
 https://github.com/NVIDIA/OpenShell/releases.
 
-> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.1.4`) but the
-> Helm chart version does **not** (`0.1.4`). `OPENSHELL_CHART_VERSION` in
-> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.1.4`.
+> **Note:** the GitHub release *tag* uses a `v` prefix (`v0.1.8`) but the
+> Helm chart version does **not** (`0.1.8`). `OPENSHELL_CHART_VERSION` in
+> `.env` must be set without the `v` — e.g. `OPENSHELL_CHART_VERSION=0.1.8`.
 
 Bash completions (optional):
 
@@ -717,12 +717,12 @@ CLUSTER_APPS_DOMAIN=$(oc get ingresses.config.openshift.io cluster -o jsonpath='
 echo "CLUSTER_APPS_DOMAIN=${CLUSTER_APPS_DOMAIN}"
 ```
 
-`.env.example` pins `OPENSHELL_CHART_VERSION=0.1.4` — the version this
+`.env.example` pins `OPENSHELL_CHART_VERSION=0.1.8` — the version this
 guide is written against (see [Prerequisites](#prerequisites)). To check for
 a newer one, see the
 [OpenShell releases page](https://github.com/NVIDIA/OpenShell/releases) — the
-tag uses a `v` prefix (e.g. `v0.1.4`) but the chart version does **not**
-(e.g. `0.1.4`) — or query it directly:
+tag uses a `v` prefix (e.g. `v0.1.8`) but the chart version does **not**
+(e.g. `0.1.8`) — or query it directly:
 
 ```bash
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart | grep ^version
@@ -739,7 +739,7 @@ come back and complete your `.env` then.
 
 | Variable | Example | Notes |
 |---|---|---|
-| `OPENSHELL_CHART_VERSION` | `0.1.4` | OpenShell Helm chart/CLI version — no `v` prefix |
+| `OPENSHELL_CHART_VERSION` | `0.1.8` | OpenShell Helm chart/CLI version — no `v` prefix |
 | `CLUSTER_APPS_DOMAIN` | `apps.mycluster.example.com` | Your cluster's apps domain |
 | `OPENSHELL_NAMESPACE` | `keycloak-oidc-demo` | OpenShift namespace for this demo's gateway. Must **not** start with `openshell-` — the Route FQDN is derived as `openshell-${OPENSHELL_NAMESPACE}.${CLUSTER_APPS_DOMAIN}`, and a redundant prefix can push it over the 64-byte X.509 CommonName limit when using `LETSENCRYPT_CLUSTER_ISSUER` (see AGENTS.md) |
 | `CERT_MANAGER` | `false` | Set `true` to use cert-manager for TLS (requires the Operator) |
