@@ -74,7 +74,10 @@ set -euo pipefail
 # aud-codex-<user> sandboxes (Scene 7) instead of the regular ones. The
 # AUDITOR_LLM_BASE_URL/AUDITOR_ANTHROPIC_MODEL env vars are threaded
 # through either way (harmless no-op against a non-audited image, which
-# has no session-auditor Stop hook to read them).
+# has no session-auditor Stop hook to read them). Same for the five
+# MLflow tracing vars (see lib-mlflow-env.sh and docs/mlflow-tracing.md) —
+# threaded through on every Claude turn, harmless no-op when
+# MLFLOW_TRACKING_HOST is unset in .env.
 #
 # --legacy-gw-sandbox (bare flag, default off) targets the separately
 # named <agent>-<user>-gw sandbox instead of the regular <agent>-<user>
@@ -271,6 +274,13 @@ esac
 source "$SCRIPT_DIR/lib-auditor-env.sh"
 auditor_env_args
 
+# MLflow tracing env vars (harmless empty array when MLFLOW_TRACKING_HOST
+# is unset) — see docs/mlflow-tracing.md and lib-mlflow-env.sh's own header
+# for why these travel via --env rather than a baked config file.
+# shellcheck source=lib-mlflow-env.sh
+source "$SCRIPT_DIR/lib-mlflow-env.sh"
+mlflow_env_args
+
 # Always this banker's own identity, regardless of what your shell had
 # exported before — see the header note above for why this is deliberate,
 # not just a convenience default.
@@ -313,8 +323,12 @@ command -v "$UI" >/dev/null 2>&1 || {
 run_turn() {
   local agent="$1" sandbox="$2" prompt="$3" label="$4"
   echo "=== ${agent} / ${sandbox} — ${label} ==="
+  # MLflow tracing is Claude-only (no Codex autolog integration exists in
+  # this repo) — see lib-mlflow-env.sh.
+  local mlflow_args=()
   if [[ "$agent" == "claude" ]]; then
     otel_claude_env_args "$USER_ID" "$sandbox"
+    mlflow_args=("${MLFLOW_ENV_ARGS[@]}")
   else
     otel_codex_env_args "$USER_ID" "$sandbox"
   fi
@@ -327,6 +341,7 @@ run_turn() {
   "$UI" --sandbox "$sandbox" --workspace "$USER_ID" --agent "$agent" \
     "${OTEL_ENV_ARGS[@]}" \
     "${AUDITOR_ENV_ARGS[@]}" \
+    "${mlflow_args[@]}" \
     --prompt "$prompt"
 }
 

@@ -179,6 +179,34 @@ openshell provider create --name byo-claude --type byo-claude \
   --workspace "${USER_ID}" || true
 
 # ---------------------------------------------------------------------------
+# Step 1b (optional): MLflow tracing provider, when MLFLOW_TRACKING_HOST is
+# set in .env — see docs/mlflow-tracing.md. Mirrors Step 1 above exactly,
+# including the "profile import is not an update" caveat. One provider per
+# workspace, like byo-claude; the underlying RBAC grant
+# (mlflow-sandbox-rbac) is namespace-wide, so every banker's provider can
+# safely share the same MLFLOW_TRACKING_TOKEN value.
+#
+# MLFLOW_TRACKING_TOKEN is a manually-minted Kubernetes ServiceAccount
+# token for openshell-sandbox, not an OAuth credential — see
+# docs/mlflow-tracing.md's "Minting and refreshing the token" section for
+# how to mint one and why there is no `provider refresh configure
+# --strategy` that fits it (the CLI only offers oauth2-refresh-token,
+# oauth2-client-credentials, google-service-account-jwt, and
+# aws-sts-assume-role; none of those apply to a raw bearer SA token).
+# ---------------------------------------------------------------------------
+if [ -n "${MLFLOW_TRACKING_HOST:-}" ]; then
+  : "${MLFLOW_TRACKING_TOKEN:?set MLFLOW_TRACKING_TOKEN in .env (see docs/mlflow-tracing.md)}"
+  MLFLOW_TMPFILE="$(mktemp -d)/mlflow-profile.yaml"
+  sed -e "s/<mlflow-host>/${MLFLOW_TRACKING_HOST}/" -e "s/<mlflow-port>/${MLFLOW_TRACKING_PORT:-8443}/" providers/mlflow-profile.yaml > "$MLFLOW_TMPFILE"
+  openshell provider profile import -f "$MLFLOW_TMPFILE" --workspace "${USER_ID}" || true
+  rm -f "$MLFLOW_TMPFILE"
+
+  openshell provider create --name mlflow --type mlflow \
+    --credential "MLFLOW_TRACKING_TOKEN=${MLFLOW_TRACKING_TOKEN}" \
+    --workspace "${USER_ID}" || true
+fi
+
+# ---------------------------------------------------------------------------
 # Step 2: build /sandbox/.claude/mcp-servers.json locally (one entry per
 # server, keyed by its short name with the "mcp-" prefix stripped — Claude's
 # tool names come out as mcp__<key>__<tool>, e.g.
@@ -274,6 +302,7 @@ SANDBOX_CREATE_ARGS=(
   --workspace "${USER_ID}"
 )
 [ -z "$CLAUDE_IMAGE" ] || SANDBOX_CREATE_ARGS+=(--from "$CLAUDE_IMAGE")
+[ -z "${MLFLOW_TRACKING_HOST:-}" ] || SANDBOX_CREATE_ARGS+=(--provider mlflow)
 
 # Note: if $SANDBOX_NAME already exists, this is a no-op — the --policy and
 # --upload'd mcp-servers.json only take effect at creation time. Re-running
@@ -292,6 +321,30 @@ rm -f "$POLICY_TMPFILE" "$MCP_CONFIG"
 # provider is a harmless no-op, so these are safe to run unconditionally.
 openshell sandbox provider attach "$SANDBOX_NAME" byo-claude --workspace "${USER_ID}" || true
 openshell sandbox provider attach "$SANDBOX_NAME" "user-${USER_ID}" --workspace "${USER_ID}" || true
+[ -z "${MLFLOW_TRACKING_HOST:-}" ] || \
+  openshell sandbox provider attach "$SANDBOX_NAME" mlflow --workspace "${USER_ID}" || true
+
+# One-time MLflow Claude-tracing hook registration (idempotent — re-running
+# just rewrites the same settings.json entries). The `-d` argument is the
+# directory mlflow autolog ITSELF appends ".claude/settings.json" to — it
+# must be the sandbox's home (/sandbox), not /sandbox/.claude; passing the
+# latter silently writes to the never-read /sandbox/.claude/.claude/
+# settings.json instead, with no error, and the hook simply never fires.
+# Confirmed live this was exactly why no trace ever reached MLflow on a
+# previous attempt — see docs/mlflow-tracing.md.
+#
+# Harmless no-op against an audited sandbox (image: claude-audit):
+# /etc/claude-code/managed-settings.json's allowManagedHooksOnly means
+# Claude Code ignores any Stop hook found in the project-level
+# settings.json this writes, in favor of the one already baked into the
+# image at build time — see docs/mlflow-tracing.md's "claude-audit needs a
+# different Step 1/5" section.
+if [ -n "${MLFLOW_TRACKING_HOST:-}" ]; then
+  openshell sandbox exec -n "$SANDBOX_NAME" --workspace "${USER_ID}" -- \
+    mlflow autolog claude -d /sandbox \
+      -u "https://${MLFLOW_TRACKING_HOST}:${MLFLOW_TRACKING_PORT:-8443}/mlflow" \
+      -n claude-code-traces || true
+fi
 
 # ---------------------------------------------------------------------------
 # Step 4: substitute the real $USER_ACCESS_TOKEN into the uploaded file.

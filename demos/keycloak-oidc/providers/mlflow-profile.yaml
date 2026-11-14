@@ -1,0 +1,37 @@
+id: mlflow
+display_name: MLflow tracing (RHOAI)
+description: "Bearer-token credential and network grant for Claude Code's MLflow Stop-hook to reach RHOAI's MLflow tracking server. Not MLFLOW_TRACKING_AUTH=kubernetes-namespaced -- OpenShell sandbox pods don't mount a Kubernetes service-account token at all (confirmed live, /var/run/secrets/kubernetes.io/serviceaccount/ doesn't exist in the pod), so that auth plugin can never succeed here. Use a manually-issued token for the same openshell-sandbox SA the mlflow-sandbox-rbac ClusterRoleBinding already grants mlflow-operator-mlflow-integration to -- see demos/keycloak-oidc/docs/mlflow-tracing.md."
+category: inference
+inference_capable: false
+
+credentials:
+  # Same auth_style/header_name as byo-claude-profile.yaml's api_key --
+  # Bearer, lowercase "authorization" header, matching the proxy's own
+  # matching convention. The token value is a Kubernetes ServiceAccount
+  # token for openshell-sandbox (see docs/mlflow-tracing.md for how to
+  # mint one) -- MLflow's server validates it the same way it would
+  # validate one auto-discovered in-pod, since the RBAC grant is on the SA,
+  # not on how the pod obtained its own token.
+  - name: tracking_token
+    description: Kubernetes ServiceAccount bearer token for openshell-sandbox, injected as MLFLOW_TRACKING_TOKEN
+    env_vars: [MLFLOW_TRACKING_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+
+endpoints:
+  - host: "<mlflow-host>"
+    port: <mlflow-port>
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+
+binaries:
+  # mlflow's Python client (the 3.12 Stop-hook path) opens this connection
+  # itself via `requests` -- no curl subprocess involved, unlike
+  # session-auditor. /usr/sbin/python3 is the symlink `which python3`
+  # resolves to in this image; included alongside its real target in case
+  # binary-identity matching needs the resolved path instead.
+  - /usr/sbin/python3
+  - /usr/bin/python3.14
+  - /usr/local/bin/claude
