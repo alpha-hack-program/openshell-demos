@@ -55,6 +55,18 @@
 //! client-side — don't put per-call token usage on spans here. The
 //! trace-level `mlflow.trace.tokenUsage` (set via `StartTraceV3`'s
 //! `trace_metadata`, a separate code path) is unaffected.
+//!
+//! **A fifth landmine**: Claude and Codex/DeepSeek report token usage
+//! with fundamentally different accounting conventions, confirmed by
+//! comparing real traces side by side in the MLflow UI. Claude's
+//! `input_tokens`/`total_tokens` already exclude cache-read tokens
+//! (reported separately as `cache_read_input_tokens`); Codex/DeepSeek's
+//! raw `input_tokens` *includes* the cached portion, making its
+//! `total_tokens` wildly inflated relative to Claude's for an otherwise
+//! equivalent turn (one real example: 38,102 raw input tokens, of which
+//! 37,504 were cache hits — only 598 were actually new). `token_usage_from`
+//! subtracts the cached portion so both agents' `mlflow.trace.tokenUsage`
+//! mean the same thing — see its own doc comment for the full story.
 
 use crate::{flatten_codex_text_field, log};
 use serde_json::{Value, json};
@@ -171,6 +183,17 @@ struct TokenUsage {
     cache_read_input_tokens: u64,
     cache_creation_input_tokens: u64,
     reasoning_output_tokens: u64,
+}
+
+impl TokenUsage {
+    fn add(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.total_tokens += other.total_tokens;
+        self.cache_read_input_tokens += other.cache_read_input_tokens;
+        self.cache_creation_input_tokens += other.cache_creation_input_tokens;
+        self.reasoning_output_tokens += other.reasoning_output_tokens;
+    }
 }
 
 struct CodexTrace {
@@ -368,8 +391,22 @@ fn parse_codex_trace(content: &str) -> Option<CodexTrace> {
         }
 
         if v.get("type").and_then(|t| t.as_str()) == Some("token_usage_record") {
-            if let Some(usage) = payload.get("thread_token_usage") {
-                token_usage = Some(token_usage_from(usage));
+            // Sums each step's own (non-cumulative) `usage` across the
+            // *current turn only* — deliberately not `thread_token_usage`
+            // (Codex's own running total since the session began), which
+            // would keep growing across a multi-turn resumed conversation
+            // and isn't comparable to Claude's per-turn reporting.
+            // Confirmed live, comparing real traces side by side with
+            // Claude's: Claude's `total_tokens` already excludes
+            // cache-read tokens (reported as a separate field), while
+            // Codex/DeepSeek's `input_tokens` *includes* them — a second,
+            // independent reason the two aren't directly comparable
+            // numbers, unrelated to this cumulative-vs-per-turn fix.
+            if let Some(usage) = payload.get("usage") {
+                let step_usage = token_usage_from(usage);
+                token_usage
+                    .get_or_insert_with(TokenUsage::default)
+                    .add(&step_usage);
             }
             // Finalizes the current model-inference segment, see `LlmCall`'s
             // doc comment. Only skipped if the step produced neither a tool
@@ -440,15 +477,37 @@ fn field_u64(v: &Value, key: &str) -> u64 {
     v.get(key).and_then(|n| n.as_u64()).unwrap_or(0)
 }
 
-/// Shared by `thread_token_usage` (cumulative, trace-level) and
-/// `token_usage_record.payload.usage` (per-step, `LlmCall`-level) — both
-/// objects use the same field names, confirmed live.
+/// Parses a `token_usage_record` usage object (`payload.usage`, this
+/// step's own non-cumulative count — deliberately not `payload.
+/// thread_token_usage`, Codex's own running total since the session
+/// began, see the call site in `parse_codex_trace`) into a `TokenUsage`,
+/// normalized to Claude's own accounting convention.
+///
+/// Confirmed live, comparing real traces side by side in the MLflow UI:
+/// Claude's `input_tokens`/`total_tokens` already *exclude* cache-read
+/// tokens (reported separately in `cache_read_input_tokens`), but
+/// Codex/DeepSeek's raw `input_tokens` *includes* them — e.g. a real
+/// turn showed `input_tokens: 38102` of which `cached_input_tokens:
+/// 37504` was cache, i.e. only 598 tokens were genuinely new, yet the
+/// raw numbers made the two look ~100x apart at a glance. Without this,
+/// a user comparing a Codex trace next to a Claude one for the same
+/// prompt sees wildly non-comparable "Total" numbers that mean two
+/// different things. Subtracting the confirmed-overlapping
+/// `cached_input_tokens` here makes `input_tokens`/`total_tokens` mean
+/// the same thing — "tokens newly processed this step" — for both
+/// agents' traces. (`cache_write_input_tokens` is left alone: unlike
+/// `cached_input_tokens`, there's no live confirmation it's a subset of
+/// `input_tokens` rather than additive, and it has been `0` in every
+/// real transcript seen so far, so there's nothing to get wrong either
+/// way yet.)
 fn token_usage_from(v: &Value) -> TokenUsage {
+    let raw_input = field_u64(v, "input_tokens");
+    let cache_read = field_u64(v, "cached_input_tokens");
     TokenUsage {
-        input_tokens: field_u64(v, "input_tokens"),
+        input_tokens: raw_input.saturating_sub(cache_read),
         output_tokens: field_u64(v, "output_tokens"),
-        total_tokens: field_u64(v, "total_tokens"),
-        cache_read_input_tokens: field_u64(v, "cached_input_tokens"),
+        total_tokens: raw_input.saturating_sub(cache_read) + field_u64(v, "output_tokens"),
+        cache_read_input_tokens: cache_read,
         cache_creation_input_tokens: field_u64(v, "cache_write_input_tokens"),
         reasoning_output_tokens: field_u64(v, "reasoning_output_tokens"),
     }
@@ -997,7 +1056,7 @@ mod tests {
 {"timestamp": "2026-11-14T17:46:06.409Z", "type": "response_item", "payload": {"type": "function_call", "name": "mcp_portfolio_get_positions", "arguments": "{\"client_id\": \"cli-004\"}", "call_id": "call_00_zPpG8uK6eI3sI2Y7BNXz4559"}}
 {"timestamp": "2026-11-14T17:46:06.448Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_00_zPpG8uK6eI3sI2Y7BNXz4559", "output": [{"type": "input_text", "text": "Wall time: 0.0331 seconds\nOutput:"}, {"type": "input_text", "text": "tool call error: client_id no encontrado"}]}}
 {"timestamp": "2026-11-14T17:46:08.697Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "The backend rejected the lookup."}]}}
-{"timestamp": "2026-11-14T17:46:08.729Z", "type": "token_usage_record", "payload": {"thread_token_usage": {"input_tokens": 25316, "cached_input_tokens": 24960, "cache_write_input_tokens": 0, "output_tokens": 524, "reasoning_output_tokens": 350, "total_tokens": 25840}}}
+{"timestamp": "2026-11-14T17:46:08.729Z", "type": "token_usage_record", "payload": {"usage": {"input_tokens": 25316, "cached_input_tokens": 24960, "cache_write_input_tokens": 0, "output_tokens": 524, "reasoning_output_tokens": 350, "total_tokens": 25840}, "thread_token_usage": {"input_tokens": 25316, "cached_input_tokens": 24960, "cache_write_input_tokens": 0, "output_tokens": 524, "reasoning_output_tokens": 350, "total_tokens": 25840}}}
 {"timestamp": "2026-11-14T17:46:08.737Z", "type": "event_msg", "payload": {"type": "task_complete"}}
 "#;
 
@@ -1024,8 +1083,12 @@ mod tests {
         assert!(trace.start_time_unix_nano < trace.end_time_unix_nano);
 
         let usage = trace.token_usage.expect("token usage should be present");
-        assert_eq!(usage.input_tokens, 25316);
+        // input_tokens is normalized to exclude the cached portion (raw
+        // 25316 - cached 24960 = 356), matching Claude's own accounting
+        // convention — see `token_usage_from`'s doc comment.
+        assert_eq!(usage.input_tokens, 356);
         assert_eq!(usage.cache_read_input_tokens, 24960);
+        assert_eq!(usage.total_tokens, 356 + 524); // input + output, cache excluded
         assert_eq!(usage.reasoning_output_tokens, 350);
     }
 
@@ -1127,10 +1190,12 @@ mod tests {
             "expected turn 2's own short duration, got {duration_nanos}ns (looks like it included turn 1)"
         );
 
-        // Trace-level token usage is still the latest cumulative total
-        // (both turns' tokens), which is correct — that's the session's
-        // real running total, unrelated to the turn-scoping bug.
-        assert_eq!(trace.token_usage.unwrap().total_tokens, 255);
+        // Trace-level token usage is this turn's own cost only (75, its
+        // one step's `usage`) — not the cumulative 255 `thread_token_usage`
+        // would show, which would keep growing across turns and isn't
+        // comparable to Claude's per-turn reporting (see `token_usage_from`
+        // and its call site for why).
+        assert_eq!(trace.token_usage.unwrap().total_tokens, 75);
     }
 
     #[test]
@@ -1168,11 +1233,17 @@ mod tests {
             Some("No positions found.")
         );
 
-        // Trace-level usage uses the cumulative `thread_token_usage` from
-        // the *last* record — per-step `usage` isn't tracked at all
-        // (deliberately not surfaced on spans, see the module doc comment's
-        // fourth landmine).
-        assert_eq!(trace.token_usage.unwrap().total_tokens, 330);
+        // Trace-level usage is the sum of both steps' own normalized
+        // `usage` — step 1: 100 input (0 cached) + 10 output = 110; step 2:
+        // 200 input - 50 cached = 150 new + 20 output = 170. Sum: 280, not
+        // 330 (which would double-count step 2's 50 cached tokens as if
+        // they were new, or come from `thread_token_usage`, which would
+        // also happen to read 330 here only because there's no earlier
+        // turn in this transcript to inflate it — see the dedicated
+        // resumed-session test for where that distinction actually
+        // matters). Per-step usage isn't surfaced on spans themselves
+        // (deliberately — see the module doc comment's fourth landmine).
+        assert_eq!(trace.token_usage.unwrap().total_tokens, 280);
     }
 
     #[test]
