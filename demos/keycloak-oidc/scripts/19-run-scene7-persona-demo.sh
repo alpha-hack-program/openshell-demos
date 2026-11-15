@@ -74,9 +74,10 @@ set -euo pipefail
 # aud-codex-<user> sandboxes (Scene 7) instead of the regular ones. The
 # AUDITOR_LLM_BASE_URL/AUDITOR_ANTHROPIC_MODEL env vars are threaded
 # through either way (harmless no-op against a non-audited image, which
-# has no session-auditor Stop hook to read them). Same for the five
-# MLflow tracing vars (see lib-mlflow-env.sh and docs/mlflow-tracing.md) —
-# threaded through on every Claude turn, harmless no-op when
+# has no session-auditor Stop hook to read them). Same for the MLflow
+# tracing vars (see lib-mlflow-env.sh, docs/mlflow-tracing.md, and
+# util/session-auditor/README.md's "MLflow tracing (Codex only)" section)
+# — threaded through on every turn, both agents, harmless no-op when
 # MLFLOW_TRACKING_HOST is unset in .env.
 #
 # --legacy-gw-sandbox (bare flag, default off) targets the separately
@@ -323,12 +324,12 @@ command -v "$UI" >/dev/null 2>&1 || {
 run_turn() {
   local agent="$1" sandbox="$2" prompt="$3" label="$4"
   echo "=== ${agent} / ${sandbox} — ${label} ==="
-  # MLflow tracing is Claude-only (no Codex autolog integration exists in
-  # this repo) — see lib-mlflow-env.sh.
-  local mlflow_args=()
+  # MLflow tracing is agent-agnostic (Claude's Python autolog hook and
+  # Codex's own in-process session-auditor trace push both read a subset
+  # of the same vars and ignore the rest) — see lib-mlflow-env.sh.
+  local mlflow_args=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
   if [[ "$agent" == "claude" ]]; then
     otel_claude_env_args "$USER_ID" "$sandbox"
-    mlflow_args=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
   else
     otel_codex_env_args "$USER_ID" "$sandbox"
   fi

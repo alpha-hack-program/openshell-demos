@@ -29,7 +29,7 @@ set -eo pipefail
 #     -> one-shot prompt against aud-codex-bob, with session-auditor's env
 #   e.g. ./parrot.sh --ui --aud alice -- "Summarize today's meetings"
 #     -> one-shot via parrot-gpui against aud-claude-alice, with MLflow
-#        tracing env vars threaded through (claude only, harmless no-op
+#        tracing env vars threaded through (both agents; harmless no-op
 #        when MLFLOW_TRACKING_HOST is unset in .env)
 #
 # --agent claude|codex (default claude) picks which sandbox/CLI to drive.
@@ -132,16 +132,14 @@ fi
 source "$SCRIPT_DIR/lib-auditor-env.sh"
 auditor_env_args
 
-# MLflow tracing is Claude-only (no Codex autolog integration exists in
-# this repo) -- harmless empty array otherwise, or when
-# MLFLOW_TRACKING_HOST is unset in .env. See lib-mlflow-env.sh.
-MLFLOW_ARGS=()
-if [[ "$AGENT" == "claude" ]]; then
-  # shellcheck source=lib-mlflow-env.sh
-  source "$SCRIPT_DIR/lib-mlflow-env.sh"
-  mlflow_env_args
-  MLFLOW_ARGS=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
-fi
+# MLflow tracing -- agent-agnostic (Claude's Python autolog hook and
+# Codex's own in-process session-auditor trace push both read a subset of
+# the same vars and ignore the rest, see lib-mlflow-env.sh) -- harmless
+# empty array when MLFLOW_TRACKING_HOST is unset in .env.
+# shellcheck source=lib-mlflow-env.sh
+source "$SCRIPT_DIR/lib-mlflow-env.sh"
+mlflow_env_args
+MLFLOW_ARGS=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
 
 if [[ "$UI" == "parrot" ]]; then
   echo "(press any key, e.g. q, to close the parrot dashboard once the turn finishes)"

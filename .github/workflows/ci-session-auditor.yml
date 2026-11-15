@@ -30,6 +30,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
+      # Needed since mlflow.rs added a `ring`-backed TLS dependency
+      # (reqwest/rustls) — every other dependency in this crate is pure
+      # Rust and cross-compiled to musl with no C toolchain at all.
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
       # musl, not the native target — this is the artifact actually
       # deployed into sandboxes (see util/session-auditor/README.md)
       - run: cargo build --release --target x86_64-unknown-linux-musl

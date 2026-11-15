@@ -35,3 +35,8 @@ binaries:
   - /usr/sbin/python3
   - /usr/bin/python3.14
   - /usr/local/bin/claude
+  # session-auditor's own Codex MLflow trace push (util/session-auditor/src/mlflow.rs)
+  # opens this connection itself in-process via reqwest -- no python3/node
+  # subprocess involved for Codex, unlike Claude's path above. Added
+  # alongside the Claude-era entries above, not instead of them.
+  - /usr/local/bin/session-auditor

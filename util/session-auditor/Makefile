@@ -45,6 +45,15 @@ release: ## Release build (native target — NOT the deployable artifact, see mu
 
 # Sandbox base images ship an older glibc than most dev machines (confirmed:
 # Fedora 44's glibc 2.41 is too new); musl static-links around that entirely.
+#
+# Since the mlflow.rs tracing feature added a `ring`-backed TLS dependency
+# (reqwest/rustls), this now needs a real C toolchain targeting musl to
+# cross-compile — on Linux, `musl-tools` (`apt install musl-tools`, gives
+# `musl-gcc`); on macOS, a musl cross-compiler such as
+# `brew install FiloSottile/musl-cross/musl-cross`, with
+# `CC_x86_64_unknown_linux_musl`/`CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER`
+# pointed at it, or just build on a Linux x86_64 host instead. Every other
+# dependency in this crate is pure Rust and never needed this.
 musl: ## Build a static musl binary — the artifact actually deployed into sandboxes
 	cargo build --release --target $(MUSL_TARGET)
 

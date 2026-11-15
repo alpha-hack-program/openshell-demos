@@ -127,6 +127,12 @@ network_policies:
       - path: /usr/local/bin/claude
       - path: /usr/bin/node
       - path: /usr/sbin/python3
+      # Codex's own MLflow trace push (session-auditor, see
+      # util/session-auditor/src/mlflow.rs) opens this connection itself
+      # in-process via reqwest -- unlike the three Claude-path entries
+      # above, there's no `codex` binary here, since codex itself never
+      # makes this call.
+      - path: /usr/local/bin/session-auditor
     endpoints:
       - host: {{ .Values.mlflowTrackingHost | quote }}
         port: {{ .Values.mlflowTrackingPort }}

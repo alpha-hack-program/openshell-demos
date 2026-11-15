@@ -1,6 +1,6 @@
 [package]
 name = "session-auditor"
-version = "0.1.5"
+version = "0.1.10"
 edition = "2024"
 
 [[bin]]
@@ -11,3 +11,16 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Codex -> MLflow trace push (see src/mlflow.rs) — the one place this
+# binary makes an HTTP call in-process rather than shelling out to curl,
+# per the detached-worker model already used for the classification call.
+# rustls, not native-tls/openssl: avoids needing OpenSSL to cross-compile
+# for the musl target. Confirmed live (`cargo tree`) that reqwest
+# 0.12.28's `rustls-tls` feature resolves to the `ring` crypto provider,
+# not rustls' newer default `aws-lc-rs` -- worth re-checking on a reqwest
+# upgrade, since aws-lc-rs needs CMake and is historically much harder to
+# cross-compile to musl, while ring only needs a plain C
+# compiler/assembler (musl-tools on Linux CI; see Makefile/README for the
+# new local build prerequisite this introduces).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt"] }

@@ -67,7 +67,7 @@ concrete ways this code handles explicitly:
 | Managed hook config file | `/etc/claude-code/managed-settings.json` (JSON) | `/etc/codex/requirements.toml` (TOML) |
 | Non-overridable lock keys | `allowManagedHooksOnly: true`, `disableAllHooks: false` | `allow_managed_hooks_only = true`, `[features] hooks = true` |
 | Transcript path | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` | `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl` |
-| Transcript schema | nested — `{"type":"user"\|"assistant","message":{"content":[...]}}` | flat — `{"type":"event_msg","payload":{"type":"user_message"\|"agent_message","message":"..."}}` for text, `{"type":"response_item","payload":{"type":"function_call"\|"function_call_output",...}}` for tool calls |
+| Transcript schema | nested — `{"type":"user"\|"assistant","message":{"content":[...]}}` | `{"type":"response_item","payload":{"type":"message","role":"user"\|"assistant"\|"developer","content":[{"type":"input_text"\|"output_text","text":"..."}]}}` for text, `{"type":"response_item","payload":{"type":"function_call"\|"function_call_output",...}}` for tool calls (re-confirmed live 2026-11-14, codex-cli 0.153.4 — codex-cli 0.146.0's original flat `event_msg`/`user_message`/`agent_message` shape, noted here previously, no longer appears at all) |
 
 The binary auto-detects which parser to use from the `transcript_path`
 string it receives on stdin (`.codex/sessions/` vs `.claude/projects/`) —
@@ -104,7 +104,15 @@ use the explicit tag shown there instead.
 ### From source
 
 Requires Rust 2024 edition (1.85+) and the `x86_64-unknown-linux-musl`
-target (`rustup target add x86_64-unknown-linux-musl`).
+target (`rustup target add x86_64-unknown-linux-musl`), **plus, as of the
+Codex MLflow tracing feature (`src/mlflow.rs`), a C toolchain targeting
+musl** — `reqwest`/`rustls` pulls in the `ring` crypto backend, which needs
+one to cross-compile, unlike every other dependency in this crate. On
+Linux: `apt install musl-tools` (gives `musl-gcc`, picked up automatically).
+On macOS: a musl cross-compiler such as
+`brew install FiloSottile/musl-cross/musl-cross`, with
+`CC_x86_64_unknown_linux_musl`/`CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER`
+pointed at it — or simpler, build on a Linux x86_64 host instead.
 
 ```bash
 cd util/session-auditor
@@ -311,6 +319,37 @@ endpoint classified a real Claude Code transcript successfully, alongside
 the default `anthropic` style against a real Anthropic-compatible
 endpoint — same binary, same image, different `--env` at `sandbox exec`
 time.
+
+## MLflow tracing (Codex only)
+
+A third, independent thing `Stop` does, unrelated to classification: for
+Codex sandboxes, it parses the finished transcript (`src/mlflow.rs`) and
+pushes a real MLflow trace (prompt, response, tool calls, token usage,
+timing, status) to RHOAI's MLflow — giving Codex sandboxes the same
+observability Claude Code already has via the separate Python
+`mlflow autolog claude` Stop-hook (see
+[`demos/keycloak-oidc/docs/mlflow-tracing.md`](../../demos/keycloak-oidc/docs/mlflow-tracing.md),
+which that doc's own scope is Claude-only and untouched by this). No
+Python, no Node, no OpenTelemetry collector, no protobuf — `reqwest`
+in-process, against the two MLflow REST calls this actually requires (see
+`src/mlflow.rs`'s own doc comment for the full, live-verified wire
+protocol, which is not what MLflow's own docs would suggest).
+
+A no-op unless `MLFLOW_CODEX_TRACING_ENABLED=true` is set — Claude
+sandboxes never set it, and a Codex sandbox without MLflow configured is
+completely unaffected (same fail-soft convention as the rest of this
+binary). Configuration, same `--env`-at-exec-time pattern as the auditor's
+own classification vars (see
+[`demos/keycloak-oidc/scripts/lib-mlflow-env.sh`](../../demos/keycloak-oidc/scripts/lib-mlflow-env.sh)):
+
+| Env var | Default | Description |
+|---|---|---|
+| `MLFLOW_CODEX_TRACING_ENABLED` | *(unset — skip entirely)* | Must be `true` for any of this to run. |
+| `MLFLOW_TRACKING_URI` | *(none — required)* | e.g. `https://mlflow.../mlflow` — reused verbatim from Claude's own MLflow config. |
+| `MLFLOW_TRACKING_TOKEN` | *(none — required)* | Same Kubernetes ServiceAccount bearer token Claude's MLflow provider already injects. |
+| `MLFLOW_WORKSPACE` | *(none — required)* | `X-MLFLOW-WORKSPACE` header value — the OpenShell namespace. |
+| `MLFLOW_TRACKING_INSECURE_TLS` | `false` | Set `true` to skip TLS verification (needed here for the same supervisor-MITM reason Claude's MLflow client needs it — see `docs/mlflow-tracing.md`). |
+| `MLFLOW_CODEX_EXPERIMENT_NAME` | `codex-code-traces` | A dedicated experiment, separate from Claude's `claude-code-traces`. |
 
 ## Metrics pushed
 

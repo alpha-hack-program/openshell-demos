@@ -7,6 +7,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod mlflow;
+
 // Baked in at compile time from plain-text files in the repo, never a
 // runtime path/flag/env var — the whole point is that no `sandbox exec`
 // argument or `--env` override can redirect them. The prompt shouldn't be
@@ -300,16 +302,13 @@ fn detect_sandbox_identity() -> Option<(String, String)> {
         .then(|| (workspace.to_string(), sandbox.to_string()))
 }
 
-/// `Stop` handler: the only path that reads a transcript and calls an LLM.
+/// `Stop` handler: the only path that reads a transcript. Runs two
+/// independent, best-effort concerns off the same transcript read —
+/// compliance classification (LLM-backed, Claude or Codex) and, for Codex
+/// only, an MLflow trace push (see `mlflow.rs`) — neither gates or is
+/// gated by the other: a sandbox with no classification credential
+/// configured still gets its MLflow trace, and vice versa.
 fn handle_stop(args: &Args, session_id: &str, event: &Value) {
-    let Some(config) = Config::resolve(args) else {
-        log(&format!(
-            "missing required configuration for {:?} classification (matching API key/model not set), skipping this turn",
-            args.api_style
-        ));
-        return;
-    };
-
     let Some(transcript_path) = event.get("transcript_path").and_then(|v| v.as_str()) else {
         log("no transcript_path in hook event, nothing to classify");
         return;
@@ -321,6 +320,16 @@ fn handle_stop(args: &Args, session_id: &str, event: &Value) {
             log(&format!("could not read transcript {transcript_path}: {e}"));
             return;
         }
+    };
+
+    mlflow::maybe_push_codex_trace(&content, session_id);
+
+    let Some(config) = Config::resolve(args) else {
+        log(&format!(
+            "missing required configuration for {:?} classification (matching API key/model not set), skipping this turn",
+            args.api_style
+        ));
+        return;
     };
 
     let transcript = extract_transcript(transcript_path, &content);
@@ -448,13 +457,21 @@ fn extract_transcript_claude(content: &str) -> String {
     out
 }
 
-/// Codex's JSONL transcript format — confirmed live (2026-08-31,
-/// codex-cli 0.146.0). Structurally different from Claude Code's: plain
-/// messages are flat `event_msg` lines (`payload.type`:
-/// `user_message`/`agent_message`, `payload.message` a plain string), and
-/// tool calls are separate top-level `response_item` lines
-/// (`payload.type`: `function_call`/`function_call_output`), not nested
-/// inside a message's content array.
+/// Codex's JSONL transcript format. Originally confirmed live (2026-08-31,
+/// codex-cli 0.146.0) as flat `event_msg` lines (`payload.type`:
+/// `user_message`/`agent_message`, `payload.message` a plain string) for
+/// plain messages. **That shape is now stale**: re-confirmed live
+/// (2026-11-14, codex-cli 0.153.4, aud-codex-bob) that plain messages are
+/// now top-level `response_item` lines with `payload.type: "message"`, a
+/// `payload.role` (`user`/`assistant`/`developer`), and a
+/// `payload.content: [{"type": "input_text"|"output_text", "text": ...}]`
+/// array — much closer to Claude Code's own nested shape than to the old
+/// flat one. `developer`-role messages are the (huge) AGENTS.md injection,
+/// not real conversation — skipped, same spirit as Claude's own
+/// attachment/queue-operation skip below. Tool calls are unaffected by
+/// this change: they were always separate top-level `response_item` lines
+/// (`payload.type`: `function_call`/`function_call_output`), and this
+/// function never filtered on the top-level `type` field to begin with.
 fn extract_transcript_codex(content: &str) -> String {
     let mut out = String::new();
     for line in content.lines() {
@@ -465,17 +482,21 @@ fn extract_transcript_codex(content: &str) -> String {
             continue;
         };
         match payload.get("type").and_then(|t| t.as_str()) {
-            Some("user_message") => {
-                if let Some(msg) = payload.get("message").and_then(|m| m.as_str()) {
-                    out.push_str("USER: ");
-                    out.push_str(msg);
-                    out.push('\n');
-                }
-            }
-            Some("agent_message") => {
-                if let Some(msg) = payload.get("message").and_then(|m| m.as_str()) {
-                    out.push_str("ASSISTANT: ");
-                    out.push_str(msg);
+            Some("message") => {
+                let role = match payload.get("role").and_then(|r| r.as_str()) {
+                    Some("user") => "USER",
+                    Some("assistant") => "ASSISTANT",
+                    _ => continue,
+                };
+                let piece = payload
+                    .get("content")
+                    .map(flatten_codex_text_field)
+                    .unwrap_or_default();
+                let piece = piece.trim();
+                if !piece.is_empty() {
+                    out.push_str(role);
+                    out.push_str(": ");
+                    out.push_str(piece);
                     out.push('\n');
                 }
             }
@@ -488,13 +509,61 @@ fn extract_transcript_codex(content: &str) -> String {
                 out.push_str(&format!("[tool_call: {name} input={arguments}]\n"));
             }
             Some("function_call_output") => {
-                let output = payload.get("output").and_then(|o| o.as_str()).unwrap_or("");
-                out.push_str(&format!("[tool_result: {output}]\n"));
+                // `output` was a plain string under codex-cli 0.146.0; as of
+                // 0.153.4 (re-confirmed live, aud-codex-bob, 2026-11-14) it's
+                // an array of `{"type": "input_text", "text": ...}` items,
+                // the same shape `message.content` now uses — handled by the
+                // same helper.
+                let output = payload
+                    .get("output")
+                    .map(flatten_codex_text_field)
+                    .unwrap_or_default();
+                out.push_str(&format!("[tool_result: {}]\n", output.trim()));
             }
             _ => {}
         }
     }
     out
+}
+
+/// Flattens Codex's `[{"type": "input_text"|"output_text", "text": ...}, ...]`
+/// shape (used by both `message.content` and `function_call_output.output`
+/// on codex-cli 0.153.4+) into plain text, falling back to a bare string
+/// for the older codex-cli 0.146.0 shape. Also used by `mlflow.rs`'s
+/// structured transcript parser, so both consumers stay in sync with
+/// whichever shape codex-cli actually emits.
+fn flatten_codex_text_field(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Array(items) => {
+            let mut out = String::new();
+            for item in items {
+                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                    if is_codex_wall_time_preamble(text) {
+                        continue;
+                    }
+                    out.push_str(text);
+                    out.push('\n');
+                }
+            }
+            out
+        }
+        _ => String::new(),
+    }
+}
+
+/// codex-cli prepends a synthetic `"Wall time: <N> seconds\nOutput:"` line
+/// as its own, separate `content` item ahead of a tool's real output —
+/// confirmed live (aud-codex-bob, 2026-11-14): `function_call_output`'s
+/// `output` array is `[{"type": "input_text", "text": "Wall time: 0.0331
+/// seconds\nOutput:"}, {"type": "input_text", "text": "<real output>"}]`.
+/// Left in, it leaked into both the classification transcript and MLflow
+/// span text (e.g. "Wall time: 0.0439 seconds Output: {...}" instead of
+/// just the real JSON) — confirmed live, the hard way, comparing a Codex
+/// trace's rendered spans side by side with Claude's in the MLflow UI.
+fn is_codex_wall_time_preamble(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with("Wall time:") && t.ends_with("Output:")
 }
 
 fn flatten_content(content: &Value, out: &mut String) {

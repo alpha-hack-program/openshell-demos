@@ -190,6 +190,36 @@ openshell provider create --name byo-codex --type byo-codex \
   --workspace "${USER_ID}" || true
 
 # ---------------------------------------------------------------------------
+# Step 2b (optional): MLflow tracing provider, when MLFLOW_TRACKING_HOST is
+# set in .env — mirrors 15-provision-claude-sandbox.sh's own Step 1b
+# exactly, including the "profile import is not an update" caveat. One
+# provider per workspace, like byo-codex; the underlying RBAC grant
+# (mlflow-sandbox-rbac) is namespace-wide, so every banker's provider can
+# safely share the same MLFLOW_TRACKING_TOKEN value. Only the audited
+# codex-audit image actually has a binary that uses this
+# (session-auditor's own Codex MLflow trace push — see
+# util/session-auditor/README.md's "MLflow tracing (Codex only)" section);
+# attaching it to a plain codex-<user-id> sandbox too (rather than only
+# aud-codex-<user-id>) is a harmless unused grant, same as the plain
+# claude-sandbox gets an mlflow provider it only uses via a different,
+# dynamically-registered hook. There's no Codex equivalent of 15's
+# one-time `mlflow autolog claude -d ...` hook registration step — Codex's
+# hook is the baked-in session-auditor binary, already registered at
+# image-build time in codex-audit's requirements.toml.
+# ---------------------------------------------------------------------------
+if [ -n "${MLFLOW_TRACKING_HOST:-}" ]; then
+  : "${MLFLOW_TRACKING_TOKEN:?set MLFLOW_TRACKING_TOKEN in .env (see docs/mlflow-tracing.md)}"
+  MLFLOW_TMPFILE="$(mktemp -d)/mlflow-profile.yaml"
+  sed -e "s/<mlflow-host>/${MLFLOW_TRACKING_HOST}/" -e "s/<mlflow-port>/${MLFLOW_TRACKING_PORT:-8443}/" providers/mlflow-profile.yaml > "$MLFLOW_TMPFILE"
+  openshell provider profile import -f "$MLFLOW_TMPFILE" --workspace "${USER_ID}" || true
+  rm -f "$MLFLOW_TMPFILE"
+
+  openshell provider create --name mlflow --type mlflow \
+    --credential "MLFLOW_TRACKING_TOKEN=${MLFLOW_TRACKING_TOKEN}" \
+    --workspace "${USER_ID}" || true
+fi
+
+# ---------------------------------------------------------------------------
 # Step 3: create the sandbox with /sandbox/.codex/config.toml baked in at
 # creation time (model provider + one [mcp_servers.<name>] table per
 # server), then apply the codex-recipe policy chart with all of them on
@@ -299,6 +329,16 @@ if [ "$GW" = true ]; then
 else
   POLICY_TEMPLATE_ARGS+=(--set "mcpServers={${SERVER_NAMES}}")
 fi
+# MLflow tracing (optional, see Step 2b above) -- set MLFLOW_TRACKING_HOST
+# in .env to grant this sandbox egress to an MLflow tracking server.
+# Omitted entirely (not just left blank) when unset, mirroring
+# 15-provision-claude-sandbox.sh's own convention for the same variable.
+if [ -n "${MLFLOW_TRACKING_HOST:-}" ]; then
+  POLICY_TEMPLATE_ARGS+=(
+    --set "mlflowTrackingHost=${MLFLOW_TRACKING_HOST}"
+    --set "mlflowTrackingPort=${MLFLOW_TRACKING_PORT:-8443}"
+  )
+fi
 helm template "${SANDBOX_NAME}-policy" policies "${POLICY_TEMPLATE_ARGS[@]}" \
   > "${POLICY_TMPFILE}"
 
@@ -307,14 +347,18 @@ helm template "${SANDBOX_NAME}-policy" policies "${POLICY_TEMPLATE_ARGS[@]}" \
 # a changed server list against an already-provisioned sandbox won't
 # update it; delete the sandbox first if you need to change its MCP
 # servers or policy.
-openshell sandbox create --name "$SANDBOX_NAME" \
-  --provider byo-codex \
-  --provider "user-${USER_ID}" \
-  --from "${CODEX_IMAGE}" \
-  --policy "$POLICY_TMPFILE" \
-  --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml" \
-  --workspace "${USER_ID}" \
-  --detach || true
+SANDBOX_CREATE_ARGS=(
+  --name "$SANDBOX_NAME"
+  --provider byo-codex
+  --provider "user-${USER_ID}"
+  --from "${CODEX_IMAGE}"
+  --policy "$POLICY_TMPFILE"
+  --upload "${CODEX_CONFIG}:/sandbox/.codex/config.toml"
+  --workspace "${USER_ID}"
+)
+[ -z "${MLFLOW_TRACKING_HOST:-}" ] || SANDBOX_CREATE_ARGS+=(--provider mlflow)
+
+openshell sandbox create "${SANDBOX_CREATE_ARGS[@]}" --detach || true
 rm -f "${POLICY_TMPFILE}" "$CODEX_CONFIG"
 
 if [ "$GW" = true ]; then

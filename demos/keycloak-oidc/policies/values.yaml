@@ -41,14 +41,17 @@ mcpServers: []
 mcpGatewayHost: ""
 mcpGatewayPort: 8080
 
-# MLflow tracing (optional — see docs/mlflow-tracing.md). Leave empty to
-# omit the allow_mlflow group entirely, which is the same as never setting
-# MLFLOW_TRACKING_URI at exec time: tracing just doesn't happen, nothing
-# else is affected. Set to the in-cluster MLflow service hostname, e.g.
-# mlflow.redhat-ods-applications.svc.cluster.local, to let claude's
-# Stop-hook reach it; the hook runs as a child process of claude/node, so
-# the allow_mlflow group grants those same binaries (plus python3, since
-# the 3.12 Python-hook path's own tracing client is a python3 subprocess)
-# — not a new binary.
+# MLflow tracing (optional — see docs/mlflow-tracing.md and
+# util/session-auditor/README.md's "MLflow tracing (Codex only)" section).
+# Leave empty to omit the allow_mlflow group entirely, which is the same as
+# never setting MLFLOW_TRACKING_URI at exec time: tracing just doesn't
+# happen, nothing else is affected. Set to the in-cluster MLflow service
+# hostname, e.g. mlflow.redhat-ods-applications.svc.cluster.local, to let
+# claude's Stop-hook reach it; the hook runs as a child process of
+# claude/node, so the allow_mlflow group grants those same binaries (plus
+# python3, since the 3.12 Python-hook path's own tracing client is a
+# python3 subprocess). For Codex, session-auditor itself opens this
+# connection in-process (reqwest) — granted via its own binary entry, not
+# `codex`, since codex never makes this call itself.
 mlflowTrackingHost: ""
 mlflowTrackingPort: 8443
