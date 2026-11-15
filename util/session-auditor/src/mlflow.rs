@@ -179,6 +179,15 @@ struct CodexTrace {
     tool_calls: Vec<ToolCall>,
     llm_calls: Vec<LlmCall>,
     token_usage: Option<TokenUsage>,
+    /// Codex's own conversation identity (`session_meta.payload.session_id`
+    /// — confirmed live, aud-codex-bob, codex-cli 0.153.4), mapped to
+    /// `mlflow.trace.session` so the MLflow UI's "Session" column groups
+    /// Codex turns the same way it already does for Claude's (confirmed
+    /// live that Claude's traces carry this exact metadata key). Added
+    /// after live comparison showed Codex traces missing the column
+    /// entirely. `None` only if a transcript somehow lacks a `session_meta`
+    /// line — the trace still pushes, just without session grouping.
+    session_id: Option<String>,
     start_time_unix_nano: i128,
     end_time_unix_nano: i128,
     /// `"OK"` or `"ERROR"` — the only two `trace_info.state` values this
@@ -195,6 +204,42 @@ struct CodexTrace {
 /// the `flatten_codex_text_field` helper are shared, so both stay in sync
 /// with whatever shape codex-cli actually emits.
 fn parse_codex_trace(content: &str) -> Option<CodexTrace> {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // `session_meta` appears exactly once, at the very start of the file —
+    // confirmed live across multiple turns of a resumed conversation that
+    // it does *not* repeat per turn — so this scans the whole file,
+    // deliberately unscoped by the turn boundary found below.
+    let session_id = lines.iter().find_map(|line| {
+        let v: Value = serde_json::from_str(line).ok()?;
+        (v.get("type").and_then(|t| t.as_str()) == Some("session_meta"))
+            .then(|| v.pointer("/payload/session_id").and_then(|s| s.as_str()))
+            .flatten()
+            .map(|s| s.to_string())
+    });
+
+    // Scope everything else to the CURRENT turn only. Confirmed live
+    // (aud-codex-bob, 2026-11-15, a resumed 2-turn session): codex-cli
+    // appends every turn of a `--resume`d conversation to the *same*
+    // rollout file, each bounded by its own `event_msg`/`task_started` ...
+    // `task_complete` pair. The Stop hook fires once per turn but always
+    // reads the whole (growing) file — without this, the second trace in a
+    // resumed conversation showed the *first* turn's prompt (scanning the
+    // whole file for the first real user message) with the *union* of
+    // every turn's tool calls, and an `execution_duration` covering the
+    // cumulative time since the session began rather than just that turn.
+    let turn_start = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, line)| {
+            let v: Value = serde_json::from_str(line).ok()?;
+            (v.get("type").and_then(|t| t.as_str()) == Some("event_msg")
+                && v.pointer("/payload/type").and_then(|t| t.as_str()) == Some("task_started"))
+            .then_some(i)
+        })
+        .unwrap_or(0);
+
     let mut prompt: Option<String> = None;
     let mut response: Option<String> = None;
     let mut pending_calls: HashMap<String, (String, String, i128)> = HashMap::new();
@@ -213,7 +258,7 @@ fn parse_codex_trace(content: &str) -> Option<CodexTrace> {
     let mut segment_tool_calls: Vec<ToolCallDecision> = Vec::new();
     let mut segment_message: Option<String> = None;
 
-    for line in content.lines() {
+    for line in &lines[turn_start..] {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
@@ -259,16 +304,20 @@ fn parse_codex_trace(content: &str) -> Option<CodexTrace> {
                     // .content_item_kinds`, which tags the synthetic one
                     // `["agents_md.instructions",
                     // "environments.environment_context"]` and the real
-                    // one `["user.text"]`. Without this check, the "first
-                    // user message wins" heuristic below picks up the
-                    // giant AGENTS.md dump as the trace's "prompt" instead
-                    // of the actual question — confirmed live, the hard
-                    // way (a real trace landed with exactly that bug
-                    // before this check was added).
+                    // one `["user.text"]`. Without this check, picking up
+                    // the giant AGENTS.md dump as the trace's "prompt"
+                    // instead of the actual question — confirmed live, the
+                    // hard way (a real trace landed with exactly that bug).
+                    //
+                    // Always overwrites (last one wins), mirroring
+                    // `response` below — within the current turn's scoped
+                    // slice (see `turn_start` above) there's normally just
+                    // one real user message, but "last" is the right
+                    // choice if that ever isn't true, the same way the
+                    // user's actual latest question is what matters, not
+                    // whichever came first.
                     Some("user") if !is_synthetic_context_message(payload) => {
-                        if prompt.is_none() {
-                            prompt = Some(text.to_string());
-                        }
+                        prompt = Some(text.to_string());
                     }
                     Some("assistant") => {
                         segment_message = Some(text.to_string());
@@ -364,6 +413,7 @@ fn parse_codex_trace(content: &str) -> Option<CodexTrace> {
         tool_calls,
         llm_calls,
         token_usage,
+        session_id,
         start_time_unix_nano,
         end_time_unix_nano,
         status: if has_response { "OK" } else { "ERROR" },
@@ -694,16 +744,24 @@ async fn start_trace(
 fn trace_metadata(trace: &CodexTrace) -> Value {
     let mut metadata = serde_json::Map::new();
     metadata.insert("mlflow.trace_schema.version".to_string(), json!("3"));
-    metadata.insert(
-        "mlflow.traceInputs".to_string(),
-        json!(json!({ "prompt": trace.prompt }).to_string()),
-    );
-    metadata.insert(
-        "mlflow.traceOutputs".to_string(),
-        json!(json!({ "status": trace.status, "response": trace.response }).to_string()),
-    );
+    // Plain strings, not JSON-wrapped like `{"prompt": ...}` — confirmed
+    // live, the hard way: a JSON-wrapped value here makes the MLflow UI's
+    // trace-list "Request"/"Response" columns show the raw JSON text
+    // verbatim (`{"prompt":"..."}"`) instead of the extracted
+    // prompt/response string the way Claude's traces display it. `status`
+    // used to be bundled into traceOutputs too, but that was always
+    // redundant with `trace_info.state` — dropped along with the wrapper.
+    metadata.insert("mlflow.traceInputs".to_string(), json!(trace.prompt));
+    metadata.insert("mlflow.traceOutputs".to_string(), json!(trace.response));
     metadata.insert("mlflow.source.name".to_string(), json!("session-auditor"));
     metadata.insert("mlflow.source.type".to_string(), json!("LOCAL"));
+    if let Some(session_id) = &trace.session_id {
+        // Same metadata key Claude's own traces carry (confirmed live,
+        // `traces/search` against `claude-code-traces`) — lets the MLflow
+        // UI's "Session" column group Codex turns the same way it already
+        // groups Claude's.
+        metadata.insert("mlflow.trace.session".to_string(), json!(session_id));
+    }
     if let Some(usage) = &trace.token_usage {
         metadata.insert(
             "mlflow.trace.tokenUsage".to_string(),
@@ -742,8 +800,17 @@ async fn export_spans(
         "AGENT",
         trace.start_time_unix_nano,
         trace.end_time_unix_nano,
-        &json!({ "prompt": trace.prompt }),
-        &json!({ "status": trace.status, "response": trace.response }),
+        // Plain text, not JSON-wrapped like the TOOL/LLM spans below —
+        // confirmed live, the hard way: a JSON-wrapped root span (and
+        // trace-level `mlflow.traceInputs`/`traceOutputs`, see
+        // `trace_metadata` below) makes the MLflow UI's trace-list
+        // "Request"/"Response" columns show the raw
+        // `{"prompt": "..."}" text verbatim instead of the extracted
+        // prompt/response string the way Claude's traces display it. A
+        // dedicated probe confirmed plain strings here produce a clean
+        // `request_preview`/`response_preview`; JSON-wrapped ones don't.
+        &trace.prompt,
+        &trace.response,
         trace.status,
         &[],
     )];
@@ -765,8 +832,8 @@ async fn export_spans(
             "TOOL",
             tc.start_time_unix_nano,
             tc.end_time_unix_nano,
-            &json!({ "arguments": arguments }),
-            &json!({ "output": output }),
+            &json!({ "arguments": arguments }).to_string(),
+            &json!({ "output": output }).to_string(),
             "OK",
             &[],
         ));
@@ -808,8 +875,8 @@ async fn export_spans(
             // Codex's transcript never exposes the raw request sent to the
             // model (unlike Claude Code's SDK-level autolog) — there's no
             // honest "messages" list to put here.
-            &json!({}),
-            &Value::Object(outputs),
+            "{}",
+            &Value::Object(outputs).to_string(),
             "OK",
             // Deliberately NOT a `mlflow.chat.tokenUsage` attribute here
             // (or any attribute whose JSON value contains recognizable
@@ -875,8 +942,18 @@ fn otlp_span(
     span_type: &str,
     start_time_unix_nano: i128,
     end_time_unix_nano: i128,
-    inputs: &Value,
-    outputs: &Value,
+    // Pre-formatted text, not a `Value` the function JSON-encodes itself —
+    // callers decide whether that's a bare string (the root span's
+    // prompt/response, so the MLflow UI's list-view preview shows clean
+    // text) or pre-serialized JSON (TOOL/LLM spans, so the UI's
+    // drill-down view renders a syntax-highlighted tree). Passing a
+    // `Value` here and always calling `.to_string()` on it (the original
+    // design) double-JSON-encoded plain strings into `"\"like
+    // this\""`, confirmed live as the cause of the root span (and
+    // `mlflow.traceInputs`/`traceOutputs`, see `trace_metadata`) showing
+    // raw JSON instead of plain text in the UI.
+    inputs: &str,
+    outputs: &str,
     status: &str,
     extra_attributes: &[(&str, String)],
 ) -> Value {
@@ -887,8 +964,8 @@ fn otlp_span(
     };
     let mut attributes = vec![
         json!({ "key": "mlflow.spanType", "value": { "stringValue": json!(span_type).to_string() } }),
-        json!({ "key": "mlflow.spanInputs", "value": { "stringValue": inputs.to_string() } }),
-        json!({ "key": "mlflow.spanOutputs", "value": { "stringValue": outputs.to_string() } }),
+        json!({ "key": "mlflow.spanInputs", "value": { "stringValue": inputs } }),
+        json!({ "key": "mlflow.spanOutputs", "value": { "stringValue": outputs } }),
     ];
     for (key, value) in extra_attributes {
         attributes.push(json!({ "key": key, "value": { "stringValue": value } }));
@@ -913,7 +990,8 @@ mod tests {
     // Lines mirror the real shape re-confirmed live against a running
     // aud-codex-bob sandbox (codex-cli 0.153.4, 2026-11-14) — see the
     // doc comment on `extract_transcript_codex` in main.rs.
-    const SAMPLE_TRANSCRIPT: &str = r#"{"timestamp": "2026-11-14T17:46:03.476Z", "type": "event_msg", "payload": {"type": "task_started"}}
+    const SAMPLE_TRANSCRIPT: &str = r#"{"timestamp": "2026-11-14T17:46:03.400Z", "type": "session_meta", "payload": {"session_id": "01a1db2a-9527-7c53-b5be-38a5babc4508"}}
+{"timestamp": "2026-11-14T17:46:03.476Z", "type": "event_msg", "payload": {"type": "task_started"}}
 {"timestamp": "2026-11-14T17:46:03.532Z", "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "huge AGENTS.md dump that should be skipped"}]}}
 {"timestamp": "2026-11-14T17:46:03.557Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "What positions does client cli-004 have?"}]}}
 {"timestamp": "2026-11-14T17:46:06.409Z", "type": "response_item", "payload": {"type": "function_call", "name": "mcp_portfolio_get_positions", "arguments": "{\"client_id\": \"cli-004\"}", "call_id": "call_00_zPpG8uK6eI3sI2Y7BNXz4559"}}
@@ -929,6 +1007,10 @@ mod tests {
         assert_eq!(trace.prompt, "What positions does client cli-004 have?");
         assert_eq!(trace.response, "The backend rejected the lookup.");
         assert_eq!(trace.status, "OK");
+        assert_eq!(
+            trace.session_id.as_deref(),
+            Some("01a1db2a-9527-7c53-b5be-38a5babc4508")
+        );
         assert_eq!(trace.tool_calls.len(), 1);
         let tc = &trace.tool_calls[0];
         assert_eq!(tc.name, "mcp_portfolio_get_positions");
@@ -988,6 +1070,67 @@ mod tests {
         assert_eq!(trace.prompt, "What is 9 plus 9?");
         assert_eq!(trace.response, "18");
         assert_eq!(trace.status, "OK");
+    }
+
+    #[test]
+    fn second_turn_of_a_resumed_session_only_sees_its_own_turn() {
+        // Regression test for a real, live-confirmed bug (aud-codex-bob,
+        // 2026-11-15): codex-cli appends every turn of a `--resume`d
+        // conversation to the *same* rollout file (confirmed: two full
+        // `task_started`...`task_complete` cycles in one real transcript).
+        // The Stop hook fires once per turn but always reads the whole,
+        // growing file. Before turn-scoping existed, turn 2's trace showed
+        // turn 1's prompt ("Any meetings today?" instead of the real "And
+        // tomorrow?") and would have unioned both turns' tool calls.
+        // Structure mirrors the real transcript exactly, trimmed to the
+        // fields that matter: session_meta + turn 1 (with a tool call)
+        // only up through its own task_complete, then a second
+        // task_started...task_complete cycle with a different question and
+        // no tool call.
+        let content = r#"{"timestamp": "2026-11-15T10:09:50.000Z", "type": "session_meta", "payload": {"session_id": "01a1deaf-4574-71f3-8f5c-7b7354ec4c87"}}
+{"timestamp": "2026-11-15T10:09:50.100Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-11-15T10:09:50.200Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Any meetings today?"}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]}}}
+{"timestamp": "2026-11-15T10:09:50.300Z", "type": "response_item", "payload": {"type": "function_call", "name": "mcp_crm_calendar_get_upcoming_meetings", "arguments": "{}", "call_id": "call_1"}}
+{"timestamp": "2026-11-15T10:09:50.400Z", "type": "token_usage_record", "payload": {"usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}, "thread_token_usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}}}
+{"timestamp": "2026-11-15T10:09:50.500Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_1", "output": [{"type": "input_text", "text": "mtg-001, mtg-002"}]}}
+{"timestamp": "2026-11-15T10:09:50.600Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Yes, one meeting today and one tomorrow."}]}}
+{"timestamp": "2026-11-15T10:09:50.700Z", "type": "token_usage_record", "payload": {"usage": {"input_tokens": 50, "output_tokens": 20, "total_tokens": 70, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}, "thread_token_usage": {"input_tokens": 150, "output_tokens": 30, "total_tokens": 180, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}}}
+{"timestamp": "2026-11-15T10:09:50.800Z", "type": "event_msg", "payload": {"type": "task_complete"}}
+{"timestamp": "2026-11-15T10:10:40.000Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-11-15T10:10:40.100Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "And tomorrow?"}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]}}}
+{"timestamp": "2026-11-15T10:10:40.200Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Yes, one meeting tomorrow at 10:00 UTC."}]}}
+{"timestamp": "2026-11-15T10:10:40.300Z", "type": "token_usage_record", "payload": {"usage": {"input_tokens": 60, "output_tokens": 15, "total_tokens": 75, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}, "thread_token_usage": {"input_tokens": 210, "output_tokens": 45, "total_tokens": 255, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_output_tokens": 0}}}
+{"timestamp": "2026-11-15T10:10:40.400Z", "type": "event_msg", "payload": {"type": "task_complete"}}
+"#;
+        let trace = parse_codex_trace(content).expect("should parse");
+
+        // The real bug: this must be turn 2's own question, not turn 1's.
+        assert_eq!(trace.prompt, "And tomorrow?");
+        assert_eq!(trace.response, "Yes, one meeting tomorrow at 10:00 UTC.");
+
+        // session_id still resolves even though session_meta sits well
+        // before the turn-2 boundary.
+        assert_eq!(
+            trace.session_id.as_deref(),
+            Some("01a1deaf-4574-71f3-8f5c-7b7354ec4c87")
+        );
+
+        // Turn 1's tool call must not leak into turn 2's trace.
+        assert!(trace.tool_calls.is_empty());
+        assert_eq!(trace.llm_calls.len(), 1);
+
+        // execution_duration must reflect only turn 2's ~0.4s window, not
+        // the ~50s elapsed since the session (and turn 1) began.
+        let duration_nanos = trace.end_time_unix_nano - trace.start_time_unix_nano;
+        assert!(
+            duration_nanos < 1_000_000_000,
+            "expected turn 2's own short duration, got {duration_nanos}ns (looks like it included turn 1)"
+        );
+
+        // Trace-level token usage is still the latest cumulative total
+        // (both turns' tokens), which is correct — that's the session's
+        // real running total, unrelated to the turn-scoping bug.
+        assert_eq!(trace.token_usage.unwrap().total_tokens, 255);
     }
 
     #[test]
