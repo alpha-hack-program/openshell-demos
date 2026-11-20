@@ -14,9 +14,9 @@ credentials:
 
 # Deliberately AUDITOR_-prefixed, not ANTHROPIC_API_KEY/BASE_URL/MODEL —
 # confirmed live that attaching this provider alongside a Claude Code LLM
-# provider (e.g. deepseek-claude) to the same sandbox fails with "credential
+# provider (e.g. byo-claude) to the same sandbox fails with "credential
 # env key 'ANTHROPIC_API_KEY' is provided by both provider 'session-auditor'
-# and provider 'deepseek-claude'; use provider-specific env names" if both
+# and provider 'byo-claude'; use provider-specific env names" if both
 # declare the same credential env var. Distinct names also mean the
 # classification call can legitimately use a different backend/model than
 # the agent's own conversation, which the shared-name version accidentally
@@ -24,7 +24,7 @@ credentials:
 #
 # NOTE: config values do not currently auto-inject as environment
 # variables on this OpenShell version — confirmed live, cross-checked
-# against this demo's own pre-existing deepseek-claude provider, which
+# against this demo's own pre-existing byo-claude provider, which
 # shows the identical behavior despite declaring config the same way.
 # Kept here for self-documentation only; base_url/model must still be
 # passed via `--env` when starting the agent (see

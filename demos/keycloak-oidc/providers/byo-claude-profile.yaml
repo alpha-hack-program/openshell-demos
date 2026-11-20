@@ -11,10 +11,13 @@ credentials:
   # the two env vars is set: ANTHROPIC_API_KEY -> `x-api-key`,
   # ANTHROPIC_AUTH_TOKEN -> `Authorization: Bearer`.
   #
-  # An OpenShift MaaS / AI-Gateway endpoint rejects `x-api-key` outright
-  # (401) and requires Bearer. Anthropic-compatible vendor endpoints such
-  # as DeepSeek's /anthropic accept either, so Bearer works against both --
-  # verified live against each. `header_name` must stay lowercase
+  # Required because MaaS rejects `x-api-key` outright (401) and only
+  # accepts Bearer — this is the demo's current default path (see
+  # maas/README.md's deepseek-flash-anthropic model). Other
+  # Anthropic-compatible endpoints (DeepSeek's own /anthropic, a
+  # self-hosted LiteLLM proxy, etc.) may accept either, so Bearer works
+  # against both -- verified live against each of MaaS and a
+  # DeepSeek-direct endpoint. `header_name` must stay lowercase
   # `authorization` to match the proxy's own matching, same as
   # user-refresh-profile.yaml.
   #

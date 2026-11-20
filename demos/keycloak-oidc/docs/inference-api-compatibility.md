@@ -125,6 +125,19 @@ OpenAI Responses API. It has its own MCP client (not rmcp).
 Any Anthropic Messages API-compatible endpoint works (e.g. DeepSeek's
 `/anthropic` route, a LiteLLM proxy). No vLLM involved.
 
+**OpenShift MaaS (current demo default) — [VERIFY], not yet tested
+live.** MaaS publishes `deepseek-flash-anthropic`, an `ExternalModel` +
+`MaaSModelRef` pair translating to DeepSeek's `/anthropic/v1/messages`
+upstream, client-facing at `<maas-host>/v1/messages` (see
+`maas/README.md`). Unverified as of 2026-11: the exact `ANTHROPIC_BASE_URL`
+shape expected by Claude Code's Anthropic SDK (bare host vs. explicit
+`/v1`), and whether MCP tool calls work end-to-end through this path the
+way they're confirmed to against DeepSeek direct (see
+`docs/evalhub-redteam.md` Annex G). Historical note: the DeepSeek-direct
+row above and Annex G's validated findings were tested before this demo
+added MaaS as the default — DeepSeek-direct remains a working alternative
+(bypassing MaaS's per-user accounting).
+
 ### Claude Code + on-cluster llm-d
 
 vLLM 0.18.0 (RHOAI 3.4.x) already supports the Messages API, so Claude

@@ -69,6 +69,13 @@ Garak's OpenAI-compatible API expectations to the CLI-based agent.
 > API has no such restriction either way and is validated end-to-end
 > against DeepSeek, including MCP tool use (see
 > [Annex G — Validated findings log](#g-validated-findings-log)).
+>
+> **Since this validation, the demo's default Claude Code backend has
+> changed to OpenShift MaaS's `deepseek-flash-anthropic` model — see
+> [Annex C](#c-resolved-design-decisions) and `maas/README.md`. That path
+> is [VERIFY], not yet re-tested live; DeepSeek direct (as validated
+> above) still works as an alternative, at the cost of bypassing MaaS's
+> per-user accounting.**
 
 ### Architecture
 
@@ -392,6 +399,11 @@ fully (including MCP tool use) against this demo's DeepSeek BYO backend.
 The Codex variant below only supports model-only probes here (see why in
 that variant's intro).
 
+**Note:** the demo's default `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` now
+point at MaaS's `deepseek-flash-anthropic` model by default (see
+`.env.example`); the validation above was against DeepSeek direct, which
+remains a working alternative. The MaaS path itself is **[VERIFY]**.
+
 ```bash
 source .env
 USER_ID="alice"
@@ -713,7 +725,7 @@ full reference.
 | Question | Decision | Rationale |
 |---|---|---|
 | Proxy name / location | `agent-proxy` at `util/agent-proxy/` (repo root) | Reusable across demos, consistent with `util/onboard/` |
-| Agent selection | Claude Code (primary), Codex (optional) | Both supported via `AGENT_COMMAND` env var; separate Containerfile per agent. Codex + MCP requires an on-cluster vLLM ≥0.25.0 for a guarantee; against the demo's default DeepSeek backend, support is model-dependent — model-only-probes-only as of 2026-08-18, but MCP tool calls worked against `deepseek-v4-flash` as of 2026-09-08 (see [Annex G](#g-validated-findings-log)). Claude Code works fully (incl. MCP) against DeepSeek regardless. |
+| Agent selection | Claude Code (primary), Codex (optional) | Both supported via `AGENT_COMMAND` env var; separate Containerfile per agent. Codex + MCP requires an on-cluster vLLM ≥0.25.0 for a guarantee; against the demo's default DeepSeek backend, support is model-dependent — model-only-probes-only as of 2026-08-18, but MCP tool calls worked against `deepseek-v4-flash` as of 2026-09-08 (see [Annex G](#g-validated-findings-log)). Claude Code's default backend is now OpenShift MaaS's `deepseek-flash-anthropic` model (see `maas/README.md`); this specific path is **[VERIFY]**, not yet tested live. Claude Code was originally confirmed to work fully (incl. MCP) against DeepSeek direct, which remains a supported alternative (see [Annex G](#g-validated-findings-log)). |
 | Sandbox naming (this demo section) | `garak-codex-<user>` / `garak-claude-<user>` | Distinguishes agent type in the sandbox name (e.g. `garak-codex-alice`, `garak-claude-alice`) — avoids ambiguity with the main demo's `demo-<user>` sandboxes and with each other. |
 | EvalHub MCP server | Not needed | Evaluations driven from RHOAI UI / CLI, not from inside sandboxes |
 | BYOF adapter | Not needed | agent-proxy already exposes an OpenAI-compatible endpoint; EvalHub's built-in `garak` provider accepts any `model.url` pointing to an OpenAI `/v1` endpoint. The `garak-kfp` risk assessment pipeline (Ch. 4) also accepts arbitrary URLs. **Confirmed from RHOAI 3.4 docs.** |

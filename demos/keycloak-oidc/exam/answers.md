@@ -168,7 +168,7 @@ Starting from a deployed gateway + Keycloak with OIDC enabled:
 
 - **Codex** requires the **OpenAI Responses API** format (`wire_api = "responses"`) with namespace tools. It uses `inference.local` as the privacy router, which speaks the OpenAI API format. It requires vLLM >= 0.25.0 (older versions reject `namespace` tools with HTTP 400).
 
-- **Claude Code** requires the **Anthropic Messages API** format — it cannot use OpenAI-formatted endpoints. This means it **cannot** use `inference.local` (which is OpenAI-format only). Claude Code needs an Anthropic-compatible endpoint, such as DeepSeek's `/anthropic` endpoint or a LiteLLM proxy that translates to Anthropic format.
+- **Claude Code** requires the **Anthropic Messages API** format — it cannot use OpenAI-formatted endpoints. This means it **cannot** use `inference.local` (which is OpenAI-format only). Claude Code needs an Anthropic-compatible endpoint, such as an OpenShift MaaS-published Messages-API model (e.g. `deepseek-flash-anthropic`, this demo's current default), DeepSeek's own `/anthropic` endpoint directly, or a LiteLLM proxy that translates to Anthropic format.
 
 Non-secret config for Claude Code (base URL, model) is passed via `--env`, not provider `--config` — OpenShell only injects **credentials** as env vars.
 

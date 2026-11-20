@@ -63,11 +63,15 @@ anything else in the demo.
   (`openclaw/openclaw#56679`) — the chart instead renders
   `models.providers.anthropic.{apiKey,baseUrl}` directly into
   `openclaw.json` (see `openclaw/templates/secret-openclaw-config.yaml`),
-  which is documented as the reliable override path and works with the
-  demo's existing BYO-LLM DeepSeek endpoint
-  (`ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` in `.env`) —
-  leave `ANTHROPIC_BASE_URL` unset to use a real Anthropic key against the
-  real API instead.
+  which is documented as the reliable override path. This was confirmed
+  with a BYO-LLM-shaped `ANTHROPIC_BASE_URL` value (at the time, DeepSeek's
+  `https://api.deepseek.com/anthropic`); the finding is about OpenClaw's
+  own config-templating, not about any particular backend, so it should
+  carry over unchanged to this demo's current default
+  (`ANTHROPIC_BASE_URL=https://maas.apps.<cluster-domain>` [VERIFY] — see
+  `.env.example`), but that has not been separately re-confirmed against
+  MaaS specifically. Leave `ANTHROPIC_BASE_URL` unset to use a real
+  Anthropic key against the real API instead.
 
 ## 1. Build and push the custom image
 

@@ -786,6 +786,12 @@ rotates the whole attachment and regenerates the
 misleading `403 … credential placeholder in the request body`, and the
 only fix at that point is re-provisioning the sandbox.
 
+[`scripts/rotate-llm-keys.sh`](scripts/rotate-llm-keys.sh) automates
+this loop across every banker for `byo-claude`, `byo-codex`, and `mlflow`,
+reading whatever's currently in `.env` (including the per-banker
+`ANTHROPIC_API_KEY_<USER>`/`CODEX_API_KEY_<USER>` overrides above) —
+`--dry-run` first is recommended.
+
 **Where the keys come from.** On a cluster using Red Hat OpenShift AI's
 Models-as-a-Service, each banker gets their own MaaS key against a shared
 subscription — that is what makes MaaS attribute requests per user. The
@@ -1971,20 +1977,36 @@ banker](#provision-every-banker) for just the command.
 
 > **Requires an Anthropic Messages API endpoint.** Claude Code uses the
 > Anthropic Messages API format, not OpenAI. This only works if your LLM
-> provider exposes an Anthropic-compatible endpoint (e.g. DeepSeek's
-> `https://api.deepseek.com/anthropic`, a LiteLLM proxy configured with an
-> `/anthropic` route, or vLLM's own Python frontend, v0.18.0+ — see
-> [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md)
-> for the full matrix; a plain OpenAI-only endpoint won't work, but vLLM on
-> its own is not automatically excluded). See the Codex recipe in
-> [step 6 — Alternative agents](#codex--byo-llm--mcp-tool) for an
+> provider exposes an Anthropic-compatible endpoint. See the Codex recipe
+> in [step 6 — Alternative agents](#codex--byo-llm--mcp-tool) for an
 > OpenAI-Responses-API-based alternative.
 >
-> **DeepSeek note:** the Anthropic-compatible endpoint uses a different
-> base URL (`https://api.deepseek.com/anthropic`) than the OpenAI endpoint
-> (`https://api.deepseek.com`). Both use model name `deepseek-v4-flash`
-> (or `deepseek-v4-pro`) and the same API key. See `.env.example` for the
-> correct values.
+> **Default: OpenShift MaaS, via `deepseek-flash-anthropic`.** MaaS
+> publishes a Messages-API-compatible model for exactly this path — see
+> [`maas/README.md`](maas/README.md) for the `ExternalModel` +
+> `MaaSModelRef` manifests. Set `ANTHROPIC_BASE_URL=https://maas.apps.<cluster-domain>`
+> and `ANTHROPIC_MODEL=deepseek-flash-anthropic`. **[VERIFY]** — this
+> specific path (base URL shape, model name, and whether it works
+> end-to-end including MCP tool calls) has not yet been tested live. In
+> particular, whether `ANTHROPIC_BASE_URL` needs a trailing `/v1`: MaaS
+> serves this model's client-facing path at `/v1/messages`, but Claude
+> Code's Anthropic SDK normally takes a *bare* host (e.g.
+> `https://api.anthropic.com`) and appends `/v1/messages` itself, so the
+> bare-host form above is the best guess, not a confirmed value — if it
+> 404s/400s, try appending `/v1` instead. **[VERIFY]** both forms against
+> a live cluster before relying on this.
+>
+> **Alternative: DeepSeek direct.** Bypassing MaaS (and its per-user
+> accounting) still works: set `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic`
+> and `ANTHROPIC_MODEL=deepseek-v4-flash` (or `deepseek-v4-pro`), the same
+> API key as DeepSeek's OpenAI-style endpoint. This is the path this demo
+> originally validated live end-to-end — see
+> [`docs/evalhub-redteam.md` Annex G](docs/evalhub-redteam.md#g-validated-findings-log)
+> and [`docs/inference-api-compatibility.md`](../../docs/inference-api-compatibility.md).
+> A LiteLLM proxy or vLLM's own Python frontend (v0.18.0+) also work; see
+> `docs/inference-api-compatibility.md` for the full matrix (a plain
+> OpenAI-only endpoint won't work, but vLLM on its own is not automatically
+> excluded).
 >
 > **Prefer an in-cluster endpoint's internal Service over an external
 > Route, if you have the choice.** Confirmed live (2026-09-16): an
