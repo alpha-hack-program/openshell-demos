@@ -17,3 +17,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 tonic = { workspace = true }
 prost-types = { workspace = true }
+oauth2 = { workspace = true }
+url = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest = { workspace = true }

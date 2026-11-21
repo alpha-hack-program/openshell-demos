@@ -29,6 +29,19 @@ tonic = "0.14"
 prost-types = "0.14"
 clap = { version = "4", features = ["derive", "env"] }
 tauri = { version = "2" }
+# Matches the version openshell-sdk already pins transitively (see its own
+# oidc.rs), so this doesn't add a second copy to the dependency graph.
+oauth2 = "5"
+url = "2"
+# Matches the version the keycloak-oidc demo's own MCP servers
+# (mcp/mcp-*/Cargo.toml) pin, for the same reason.
+rmcp = { version = "1.8", default-features = false }
+# Pinned to whatever rmcp's transport-streamable-http-client-reqwest
+# feature itself depends on (confirmed via Cargo.lock) -- reqwest 0.12
+# (the version openshell-sdk pulls in) and 0.13 are different major
+# versions Cargo won't unify, and StreamableHttpClient is only implemented
+# for rmcp's own reqwest::Client type.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [workspace.dependencies.tauri-build]
 version = "2"

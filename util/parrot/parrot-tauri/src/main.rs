@@ -20,6 +20,8 @@
 //! Claude Code/Codex JSONL classification in JavaScript.
 
 mod cli;
+mod mcp;
+mod meeting_brief;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,8 +29,9 @@ use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use parrot_core::{
-    detect_passthrough_environment, Agent, AgentEvent, LogEntry, ParrotClient, RunStatus,
-    SandboxPhase, SessionState, StreamSource, StreamedExecOptions, ThemeMode, TurnOptions,
+    detect_passthrough_environment, Agent, AgentEvent, LogEntry, McpAuthConfig, ParrotClient,
+    RunStatus, SandboxPhase, SessionState, StreamSource, StreamedExecOptions, ThemeMode,
+    TurnOptions,
 };
 use tauri::ipc::Channel;
 use tauri::State;
@@ -36,6 +39,7 @@ use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
 
 use cli::Cli;
+use mcp::McpState;
 
 fn agent_str(agent: Agent) -> &'static str {
     match agent {
@@ -100,6 +104,7 @@ struct AppState {
 #[derive(serde::Serialize)]
 struct Greeting {
     identity_greeting: String,
+    display_name: Option<String>,
     gateway_name: String,
     gateway_endpoint: String,
     sandbox: String,
@@ -109,12 +114,18 @@ struct Greeting {
     theme: String,
     no_splash: bool,
     prompt: Option<String>,
+    /// Whether `--mcp-gateway-url`/`--keycloak-host` were both given — the
+    /// webview uses this to decide whether to show the toolbar's "Connect"
+    /// affordance at all, versus a launch that only ever wanted the chat
+    /// pane.
+    mcp_available: bool,
 }
 
 #[tauri::command]
-fn greeting(state: State<'_, AppState>) -> Greeting {
+fn greeting(state: State<'_, AppState>, mcp_state: State<'_, McpState>) -> Greeting {
     Greeting {
         identity_greeting: state.identity_greeting.clone(),
+        display_name: state.client.identity.display_name.clone(),
         gateway_name: state.client.gateway.name.clone(),
         gateway_endpoint: state.client.gateway.endpoint.clone(),
         sandbox: state.sandbox.clone(),
@@ -124,6 +135,7 @@ fn greeting(state: State<'_, AppState>) -> Greeting {
         theme: theme_str(state.theme).to_string(),
         no_splash: state.no_splash,
         prompt: state.prompt.clone(),
+        mcp_available: mcp_state.configured(),
     }
 }
 
@@ -321,9 +333,26 @@ fn main() {
         turn_running: Arc::new(AtomicBool::new(false)),
     };
 
+    let auth_config = cli.keycloak_host.as_ref().map(|host| McpAuthConfig {
+        issuer: format!("https://{host}/realms/{}", cli.keycloak_realm),
+        client_id: cli.keycloak_client_id.clone(),
+        scopes: vec!["openid".to_string(), "profile".to_string()],
+        insecure: cli.mcp_insecure,
+    });
+    let mcp_state = McpState::new(cli.mcp_gateway_url.clone(), auth_config, cli.mcp_servers);
+
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![greeting, submit_turn])
+        .manage(mcp_state)
+        .invoke_handler(tauri::generate_handler![
+            greeting,
+            submit_turn,
+            mcp::mcp_login,
+            mcp::mcp_list_tools,
+            mcp::mcp_call_tool,
+            mcp::mcp_today,
+            meeting_brief::mcp_meeting_brief
+        ])
         .run(tauri::generate_context!())
         .expect("error while running parrot-tauri");
 }

@@ -38,6 +38,14 @@ pub enum ParrotError {
     #[error("gateway bootstrap error: {0}")]
     Bootstrap(String),
 
+    /// Errors from [`crate::mcp_gateway`]: Keycloak login (Authorization
+    /// Code + PKCE) and MCP Gateway session/tool-call failures. Kept
+    /// distinct from `Bootstrap` since these come from an entirely
+    /// separate identity/connection than `ParrotClient`'s own OpenShell
+    /// gateway auth.
+    #[error("MCP Gateway error: {0}")]
+    Mcp(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

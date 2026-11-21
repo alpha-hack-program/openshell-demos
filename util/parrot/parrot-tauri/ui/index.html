@@ -2,34 +2,162 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>parrot</title>
-<link rel="stylesheet" href="style.css">
+<title>Meridian Advisor Desk</title>
+<!-- The webview can cache these across app launches since the bundle
+     identifier (and therefore its WebKit storage) stays the same release
+     to release while the filenames never change -- bump the ?v= below
+     whenever style.css/app.js/schema-form.js change, so a rebuilt app
+     doesn't silently keep serving a prior run's cached copy. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
-<body class="theme-dark">
+<body class="theme-light">
   <div id="splash" class="splash">
-    <div class="splash-title">Meridian Inc.</div>
+    <div class="splash-title">Meridian Advisor Desk</div>
     <div id="splash-greeting" class="splash-greeting"></div>
     <div id="splash-gateway" class="splash-gateway"></div>
     <div id="splash-sandbox" class="splash-gateway"></div>
   </div>
 
   <div id="app" class="app hidden">
-    <header class="header">
-      <span id="header-sandbox"></span>
-      <span id="header-sandbox-phase" class="status"></span>
-      <span id="header-status" class="status status-running"></span>
+    <header class="app-header">
+      <div class="app-header-brand">
+        <div class="app-header-logo" aria-hidden="true">M</div>
+        <div>
+          <div class="app-header-title">Meridian</div>
+          <div class="app-header-subtitle">Advisor desk</div>
+        </div>
+      </div>
+      <label class="app-header-search" for="cmd">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+        <input id="cmd" type="text" placeholder="Ask about a client, a meeting or your book">
+        <kbd>&#8984;K</kbd>
+      </label>
+      <div class="app-header-right">
+        <span class="app-header-readonly">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+          <span id="header-readonly-text">SSO &middot; read-only</span>
+        </span>
+        <span class="app-header-illustrative">Illustrative data</span>
+        <div class="app-header-identity">
+          <div class="app-header-avatar" id="header-avatar">?</div>
+          <div>
+            <div class="app-header-identity-name" id="header-identity-name"></div>
+            <div class="app-header-identity-role">Private banker</div>
+          </div>
+        </div>
+      </div>
     </header>
 
-    <main id="log" class="log"></main>
+    <div class="layout">
+      <aside class="sidebar" aria-label="Today">
+        <div id="mcp-panel" class="mcp-panel">
+          <button id="mcp-connect-btn" class="mcp-connect-btn">Connect MCP Gateway</button>
+          <div id="mcp-status" class="mcp-status"></div>
+        </div>
 
-    <footer class="composer">
-      <span class="composer-prompt">&gt;</span>
-      <textarea id="composer-input" class="composer-input" rows="1"
-        placeholder="Type a prompt and press Enter…"></textarea>
-      <span id="composer-hint" class="composer-hint"></span>
-    </footer>
+        <div id="today-panel" class="hidden" style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="sidebar-section-title" id="today-date"></div>
+
+          <section id="next-meeting-card" class="card-dark hidden">
+            <div class="next-meeting-top">
+              <span class="next-meeting-eyebrow">Next meeting</span>
+              <span class="next-meeting-eta" id="next-meeting-eta"></span>
+            </div>
+            <div class="next-meeting-name" id="next-meeting-name"></div>
+            <div class="next-meeting-when" id="next-meeting-when"></div>
+            <div class="pill-row" id="next-meeting-pills"></div>
+            <button id="brief-open-btn" class="brief-open-btn">Generate brief</button>
+          </section>
+
+          <section class="card">
+            <div class="card-title-row">
+              <h2 class="card-title">Your book</h2>
+              <span class="mcp-status" id="book-count"></span>
+            </div>
+            <div id="book-clients"></div>
+          </section>
+
+          <section id="attention-card" class="card hidden">
+            <h2 class="card-title" style="margin-bottom: 10px;">Needs attention</h2>
+            <div id="attention-items"></div>
+          </section>
+
+          <section class="saved-briefs" style="padding: 0 4px;">
+            <h2 class="sidebar-section-title" style="margin-bottom: 8px;">Saved briefs</h2>
+            <a href="#">Elena Duarte &middot; Q3 review</a>
+            <a href="#">Book health &middot; October</a>
+          </section>
+        </div>
+
+        <button id="nav-chat" class="nav-item nav-item-active">Chat</button>
+        <details id="tools-disclosure" class="tools-disclosure hidden">
+          <summary>Tools</summary>
+          <div id="tool-groups" class="tool-groups"></div>
+        </details>
+      </aside>
+
+      <div class="main">
+        <header class="header">
+          <span id="header-sandbox"></span>
+          <span id="header-sandbox-phase" class="status"></span>
+          <span id="header-status" class="status status-running"></span>
+        </header>
+
+        <div class="main-content">
+          <section id="chat-view" class="view">
+            <main id="log" class="log">
+              <div id="log-empty-state" class="log-empty-state">
+                <div class="log-empty-headline">Ask about your clients</div>
+                <div id="suggestion-chips" class="suggestion-chips">
+                  <button class="suggestion-chip" data-prompt="Catch me up on my next meeting">Catch me up on my next meeting</button>
+                  <button class="suggestion-chip" data-prompt="How is my best client doing MTD?">How is my best client doing MTD?</button>
+                  <button class="suggestion-chip" data-prompt="Any compliance flags in my book?">Any compliance flags in my book?</button>
+                </div>
+              </div>
+              <div id="log-entries"></div>
+            </main>
+          </section>
+
+          <section id="playground-view" class="view hidden">
+            <header class="playground-header">
+              <h2 id="playground-tool-name"></h2>
+              <p id="playground-tool-description"></p>
+            </header>
+            <div id="playground-form" class="playground-form"></div>
+            <button id="playground-run-btn" class="playground-run-btn">Run</button>
+            <div id="playground-result" class="playground-result"></div>
+          </section>
+        </div>
+
+        <label class="composer" for="composer-input">
+          <textarea id="composer-input" class="composer-input" rows="1"
+            placeholder="Ask a follow-up"></textarea>
+          <span id="composer-hint" class="composer-hint"></span>
+          <button id="composer-send-btn" class="composer-send" type="button" aria-label="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg>
+          </button>
+        </label>
+      </div>
+
+      <aside class="evidence-panel" aria-label="Evidence">
+        <div class="evidence-panel-title">
+          <span>Evidence</span>
+          <span class="count" id="evidence-count"></span>
+        </div>
+        <div id="evidence-list" class="evidence-list"></div>
+
+        <section id="regulatory-card" class="card-dark regulatory-card hidden">
+          <div class="next-meeting-eyebrow">Regulatory basis</div>
+          <blockquote id="regulatory-text"></blockquote>
+          <div class="regulatory-source" id="regulatory-source"></div>
+        </section>
+      </aside>
+    </div>
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js?v=3"></script>
 </body>
 </html>

@@ -3,17 +3,19 @@
   "productName": "Parrot",
   "identifier": "com.openshell-demos.parrot",
   "build": {
-    "frontendDist": "ui"
+    "frontendDist": "ui",
+    "devUrl": "http://localhost:1430",
+    "beforeDevCommand": "python3 -m http.server 1430 --directory parrot-tauri/ui"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
         "title": "parrot",
-        "width": 1125,
-        "height": 800,
-        "minWidth": 900,
-        "minHeight": 600
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 640
       }
     ],
     "security": {

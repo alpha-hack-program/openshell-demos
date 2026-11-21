@@ -88,4 +88,58 @@ pub struct Cli {
     /// Skip the splash screen.
     #[arg(long)]
     pub no_splash: bool,
+
+    /// MCP Gateway endpoint for the tool playground (e.g.
+    /// `https://mcp.<cluster-apps-domain>/mcp` — see
+    /// `demos/keycloak-oidc/mcp-servers/README.md`'s "RHCL MCP Gateway
+    /// integration"). The left toolbar/playground stay unavailable (not a
+    /// startup failure — the chat pane doesn't need this) until this,
+    /// `--keycloak-host`, and a login are all in place.
+    #[arg(long = "mcp-gateway-url", env = "MCP_GATEWAY_URL")]
+    pub mcp_gateway_url: Option<String>,
+
+    /// Keycloak host for the MCP Gateway login (Authorization Code + PKCE
+    /// against this realm's `openshell-cli` client — same client
+    /// `openshell gateway login` itself uses). Matches the demo's own
+    /// `.env`'s `KEYCLOAK_HOST`.
+    #[arg(long = "keycloak-host", env = "KEYCLOAK_HOST")]
+    pub keycloak_host: Option<String>,
+
+    #[arg(
+        long = "keycloak-realm",
+        env = "KEYCLOAK_REALM",
+        default_value = "openshell"
+    )]
+    pub keycloak_realm: String,
+
+    #[arg(
+        long = "keycloak-client-id",
+        env = "KEYCLOAK_CLIENT_ID_CLI",
+        default_value = "openshell-cli"
+    )]
+    pub keycloak_client_id: String,
+
+    /// Skip TLS verification for the Keycloak login — self-signed dev
+    /// clusters only.
+    #[arg(long = "mcp-insecure")]
+    pub mcp_insecure: bool,
+
+    /// Known MCP server names registered with the gateway (hyphenated, as
+    /// in the Helm chart's `values.yaml`), used to group `tools/list`'s
+    /// flat, prefixed results back into a per-server toolbar — see
+    /// `parrot_core::mcp_client`'s doc comment for why this can't be
+    /// derived generically from the tool list alone. Defaults to the
+    /// keycloak-oidc demo's own five servers; override for a different
+    /// deployment.
+    #[arg(
+        long = "mcp-server",
+        default_values = [
+            "mcp-compatibility",
+            "mcp-portfolio",
+            "mcp-crm-calendar",
+            "mcp-market-news",
+            "mcp-kyc-compliance",
+        ]
+    )]
+    pub mcp_servers: Vec<String>,
 }
