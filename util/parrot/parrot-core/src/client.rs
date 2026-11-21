@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use openshell_sdk::{AuthConfig, ClientConfig, ListOptions, OpenShellClient};
+use openshell_sdk::{AuthConfig, ClientConfig, ListOptions, OpenShellClient, SandboxPhase};
 
 use crate::auth::resolve_auth;
 use crate::error::{ParrotError, Result};
@@ -75,6 +75,22 @@ impl ParrotClient {
                 many.iter().map(|w| w.name.clone()).collect(),
             )),
         }
+    }
+
+    /// Fetch sandbox `name`'s current phase (`Ready`, `Stopped`,
+    /// `Provisioning`, ...).
+    ///
+    /// Separate from [`crate::exec::ExecStream`]'s own `get_sandbox`
+    /// existence/membership check, which discards the result — this exists
+    /// so a frontend can report sandbox state up front (e.g. at startup,
+    /// before the user submits a first turn) instead of only ever finding
+    /// out indirectly when an exec fails.
+    pub async fn sandbox_phase(&self, name: &str, workspace: Option<&str>) -> Result<SandboxPhase> {
+        let sandbox = match workspace {
+            Some(workspace) => self.inner.workspace(workspace).get_sandbox(name).await?,
+            None => self.inner.get_sandbox(name).await?,
+        };
+        Ok(sandbox.phase)
     }
 }
 

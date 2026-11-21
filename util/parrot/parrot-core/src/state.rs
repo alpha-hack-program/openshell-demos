@@ -9,20 +9,26 @@ use crate::jsonl::{classify_line, extract_session_id, AgentEvent};
 
 /// One rendered log line, tagged with which stream it came from and its
 /// classification.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct LogEntry {
     pub source: StreamSource,
     pub event: AgentEvent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum StreamSource {
     Stdout,
     Stderr,
 }
 
 /// How the running exec has progressed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// `Serialize` here and on `LogEntry`/`StreamSource`/`AgentEvent` exists
+/// for `parrot-tauri`, which relays the whole `SessionState` to its webview
+/// as JSON instead of rendering with ratatui/gpui directly — see
+/// `AgentEvent`'s doc comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(tag = "type", content = "data")]
 pub enum RunStatus {
     #[default]
     Running,

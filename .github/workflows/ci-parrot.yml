@@ -31,16 +31,30 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          # Apple Silicon runners cross-compile to x86_64 fine (Xcode ships
+          # both SDKs) — this leg exists specifically to prove parrot-tauri
+          # (which only needs the system WKWebView, no Metal shaders) on
+          # Intel Macs, which parrot-gpui has never been built for in CI.
+          # [VERIFY]: not yet confirmed against an actual Intel Mac at
+          # runtime, only that it builds here.
+          - os: macos-latest
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux.
-      # macOS links only against system frameworks — Xcode, already on
-      # macos-latest runners, provides the Metal shader compiler gpui's
-      # build script shells out to.
+      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux;
+      # parrot-tauri needs webkit2gtk/appindicator/rsvg dev headers there
+      # too. macOS links only against system frameworks — Xcode, already on
+      # macos-latest runners, provides both the Metal shader compiler
+      # gpui's build script shells out to and the WKWebView parrot-tauri
+      # uses, for both architectures.
       - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
-      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui -p parrot-tauri

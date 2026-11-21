@@ -6,21 +6,26 @@ OPENSHELL_REPO := https://github.com/NVIDIA/OpenShell
 .PHONY: build build-release fmt fmt-check clippy test check ci clean bump-openshell-sdk \
         release-patch release-minor release-major
 
-# parrot-gpui is a real, functional frontend, but stays out of build/test
-# (unlike fmt/clippy, which don't link): linking it needs system X11 dev
-# headers (libxcb, libxkbcommon, libxkbcommon-x11) that aren't guaranteed
-# present in every dev environment. CI installs them explicitly and builds
-# it separately (see .github/workflows/ci-parrot.yml). `cargo check -p
-# parrot-gpui` still verifies it type-checks without those headers.
+# parrot-gpui and parrot-tauri are real, functional frontends, but stay out
+# of build/test (unlike fmt/clippy, which don't link): linking them needs
+# system dev headers (parrot-gpui: libxcb, libxkbcommon, libxkbcommon-x11;
+# parrot-tauri: webkit2gtk, libayatana-appindicator3, librsvg2 on Linux) that
+# aren't guaranteed present in every dev environment. CI installs them
+# explicitly and builds both separately (see
+# .github/workflows/ci-parrot.yml). `cargo check -p parrot-gpui -p
+# parrot-tauri` still verifies they type-check without those headers.
 build:
 	cargo build -p parrot-core -p parrot-tui
 
-# Release-profile binaries for both frontends (the `parrot` and
-# `parrot-gpui` bins). On Linux this needs libxcb/libxkbcommon(-x11) dev
-# headers installed to link parrot-gpui — see ci-parrot.yml for the exact
-# apt packages; on macOS no extra install is needed beyond Xcode.
+# Release-profile binaries for all three frontends (the `parrot`,
+# `parrot-gpui`, and `parrot-tauri` bins). On Linux this needs
+# libxcb/libxkbcommon(-x11) dev headers to link parrot-gpui and
+# webkit2gtk/libayatana-appindicator3/librsvg2 dev headers to link
+# parrot-tauri — see ci-parrot.yml for the exact apt packages; on macOS no
+# extra install is needed beyond Xcode (parrot-tauri links against the
+# system WKWebView).
 build-release:
-	cargo build --release -p parrot-tui -p parrot-gpui
+	cargo build --release -p parrot-tui -p parrot-gpui -p parrot-tauri
 
 fmt:
 	cargo fmt --all

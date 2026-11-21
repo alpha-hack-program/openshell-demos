@@ -27,23 +27,41 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: parrot-linux-x86_64
             gpui-artifact: parrot-gpui-linux-x86_64
+            tauri-artifact: parrot-tauri-linux-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: parrot-macos-aarch64
             gpui-artifact: parrot-gpui-macos-aarch64
+            tauri-artifact: parrot-tauri-macos-aarch64
+          # Intel-Mac leg: parrot-tauri's whole reason for existing (see
+          # util/parrot/parrot-tauri's doc comments) is gpui's x86_64-macOS
+          # support never having been exercised here. Cross-compiled from
+          # an Apple-Silicon runner, same as the aarch64 leg builds on it
+          # natively — Xcode ships both SDKs.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: parrot-macos-x86_64
+            gpui-artifact: parrot-gpui-macos-x86_64
+            tauri-artifact: parrot-tauri-macos-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux.
-      # macOS links only against system frameworks — Xcode, already on
-      # macos-latest runners, provides the Metal shader compiler gpui's
-      # build script shells out to.
+      # parrot-gpui (gpui) needs X11/xkb dev headers to link on Linux;
+      # parrot-tauri needs webkit2gtk/appindicator/rsvg dev headers there
+      # too. macOS links only against system frameworks — Xcode, already on
+      # macos-latest runners, provides both the Metal shader compiler
+      # gpui's build script shells out to and the WKWebView parrot-tauri
+      # uses, for both architectures.
       - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
-      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: cargo build --release --target ${{ matrix.target }} -p parrot-tui -p parrot-gpui -p parrot-tauri
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
@@ -52,6 +70,10 @@ jobs:
         with:
           name: ${{ matrix.gpui-artifact }}
           path: util/parrot/target/${{ matrix.target }}/release/parrot-gpui
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.tauri-artifact }}
+          path: util/parrot/target/${{ matrix.target }}/release/parrot-tauri
 
   release:
     needs: build
@@ -63,16 +85,25 @@ jobs:
         with:
           path: artifacts
       - run: |
-          mv artifacts/parrot-linux-x86_64/parrot parrot-linux-x86_64
-          mv artifacts/parrot-macos-aarch64/parrot parrot-macos-aarch64
-          mv artifacts/parrot-gpui-linux-x86_64/parrot-gpui parrot-gpui-linux-x86_64
-          mv artifacts/parrot-gpui-macos-aarch64/parrot-gpui parrot-gpui-macos-aarch64
-          chmod +x parrot-linux-x86_64 parrot-macos-aarch64 parrot-gpui-linux-x86_64 parrot-gpui-macos-aarch64
+          for name in \
+            parrot-linux-x86_64 parrot-macos-aarch64 parrot-macos-x86_64 \
+            parrot-gpui-linux-x86_64 parrot-gpui-macos-aarch64 parrot-gpui-macos-x86_64 \
+            parrot-tauri-linux-x86_64 parrot-tauri-macos-aarch64 parrot-tauri-macos-x86_64
+          do
+            bin=$(echo "$name" | sed -E 's/-(linux|macos)-(x86_64|aarch64)$//')
+            mv "artifacts/$name/$bin" "$name"
+            chmod +x "$name"
+          done
         working-directory: .
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             parrot-linux-x86_64
             parrot-macos-aarch64
+            parrot-macos-x86_64
             parrot-gpui-linux-x86_64
             parrot-gpui-macos-aarch64
+            parrot-gpui-macos-x86_64
+            parrot-tauri-linux-x86_64
+            parrot-tauri-macos-aarch64
+            parrot-tauri-macos-x86_64

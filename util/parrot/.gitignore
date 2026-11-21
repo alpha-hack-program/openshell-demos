@@ -1,1 +1,5 @@
 /target
+
+# Written by tauri-build on every build, from tauri.conf.json and the
+# plugins in Cargo.toml. Derived, not source.
+parrot-tauri/gen/schemas/

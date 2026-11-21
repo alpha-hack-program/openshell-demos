@@ -28,7 +28,7 @@ set -eo pipefail
 #   e.g. ./parrot.sh --agent codex --aud bob -- "What is 2+2?"
 #     -> one-shot prompt against aud-codex-bob, with session-auditor's env
 #   e.g. ./parrot.sh --ui --aud alice -- "Summarize today's meetings"
-#     -> one-shot via parrot-gpui against aud-claude-alice, with MLflow
+#     -> one-shot via parrot-tauri against aud-claude-alice, with MLflow
 #        tracing env vars threaded through (both agents; harmless no-op
 #        when MLFLOW_TRACKING_HOST is unset in .env)
 #
@@ -37,7 +37,7 @@ set -eo pipefail
 #   the plain <agent>-<user-id> sandbox -- must already be provisioned
 #   (scripts/16-/17-provision-*.sh for admin, or scripts/14-/15- for the
 #   plain variant).
-# --ui (bare flag, default off) uses parrot-gpui instead of parrot-tui.
+# --ui (bare flag, default off) uses parrot-tauri instead of parrot-tui.
 # Everything after a literal `--` is passed to parrot as --prompt; omit it
 # for an interactive multi-turn session instead of a one-shot run.
 
@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --ui)
-      UI="parrot-gpui"
+      UI="parrot-tauri"
       shift
       ;;
     --)
@@ -144,7 +144,7 @@ MLFLOW_ARGS=("${MLFLOW_ENV_ARGS[@]+"${MLFLOW_ENV_ARGS[@]}"}")
 if [[ "$UI" == "parrot" ]]; then
   echo "(press any key, e.g. q, to close the parrot dashboard once the turn finishes)"
 else
-  echo "(close the parrot-gpui window once the turn finishes)"
+  echo "(close the parrot-tauri window once the turn finishes)"
 fi
 
 PARROT_ARGS=(--sandbox "$SANDBOX_NAME" --workspace "$USER_ID" --agent "$AGENT")

@@ -1,0 +1,151 @@
+/* Palette values mirror parrot-core's parrot-core/src/theme.rs exactly
+   (Palette::dark()/Palette::light()) -- keep these two in sync by hand if
+   theme.rs ever changes, since this crate renders in a webview instead of
+   converting Rgb into ratatui's/gpui's own color types. */
+.theme-dark {
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --accent: #89b4fa;
+  --muted: #6c7086;
+  --error: #f38ba8;
+  --assistant-text: #cdd6f4;
+  --tool-call: #f9e2af;
+  --tool-result: #a6e3a1;
+  --result: #94e2d5;
+}
+
+.theme-light {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --accent: #1e66f5;
+  --muted: #8c8fa1;
+  --error: #d20253;
+  --assistant-text: #4c4f69;
+  --tool-call: #df8e1d;
+  --tool-result: #40a02b;
+  --result: #17928f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.splash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: default;
+}
+
+.splash-title {
+  font-size: 1.75rem;
+  color: var(--accent);
+}
+
+.splash-gateway {
+  color: var(--muted);
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--muted);
+  flex: 0 0 auto;
+}
+
+.status-running { color: var(--accent); }
+.status-completed { color: var(--tool-result); }
+.status-completed-error { color: var(--error); }
+.status-crashed { color: var(--error); }
+
+.log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-entry {
+  margin: 0.15rem 0;
+}
+
+.log-entry.user-prompt { color: var(--accent); }
+.log-entry.assistant-text { color: var(--assistant-text); }
+.log-entry.tool-call { color: var(--tool-call); }
+.log-entry.tool-result-ok { color: var(--tool-result); }
+.log-entry.tool-result-error { color: var(--error); }
+.log-entry.thinking { color: var(--muted); }
+.log-entry.result { color: var(--result); }
+.log-entry.error { color: var(--error); }
+.log-entry.info { color: var(--muted); }
+.log-entry.unknown { color: var(--muted); }
+
+.log-entry code {
+  color: var(--tool-call);
+  font-family: inherit;
+}
+
+.log-entry strong {
+  font-weight: 700;
+}
+
+.log-entry .header-run {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.composer {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--muted);
+  flex: 0 0 auto;
+}
+
+.composer-prompt {
+  color: var(--accent);
+}
+
+.composer-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--foreground);
+  font: inherit;
+  max-height: 40vh;
+}
+
+.composer-hint {
+  color: var(--muted);
+}

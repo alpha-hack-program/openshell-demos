@@ -31,5 +31,6 @@ pub use state::{LogEntry, RunStatus, SessionState, StreamSource};
 pub use theme::{Palette, Rgb, ThemeMode};
 
 // Re-export so frontends don't need a direct `openshell-sdk` dependency
-// for common types (e.g. constructing `StreamedExecOptions`/error matching).
-pub use openshell_sdk::SdkError;
+// for common types (e.g. constructing `StreamedExecOptions`/error matching,
+// or rendering `ParrotClient::sandbox_phase`'s result).
+pub use openshell_sdk::{SandboxPhase, SdkError};

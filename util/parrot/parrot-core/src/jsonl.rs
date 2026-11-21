@@ -6,7 +6,13 @@
 use serde_json::Value;
 
 /// A classified line from an agent's streaming JSON stdout.
-#[derive(Debug, Clone)]
+///
+/// `Serialize` (adjacently tagged, `{"type": ..., "data": ...}`) exists so
+/// `parrot-tauri` can relay these across the Tauri IPC boundary verbatim
+/// instead of re-deriving classification in JS; `parrot-tui`/`parrot-gpui`
+/// never serialize this, they just match on it in-process.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", content = "data")]
 pub enum AgentEvent {
     /// Not actually classified from agent stdout — synthesized locally by
     /// `SessionState::push_user_prompt` so the prompt that started a turn

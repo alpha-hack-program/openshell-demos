@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>parrot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <div id="splash" class="splash">
+    <div class="splash-title">Meridian Inc.</div>
+    <div id="splash-greeting" class="splash-greeting"></div>
+    <div id="splash-gateway" class="splash-gateway"></div>
+    <div id="splash-sandbox" class="splash-gateway"></div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <header class="header">
+      <span id="header-sandbox"></span>
+      <span id="header-sandbox-phase" class="status"></span>
+      <span id="header-status" class="status status-running"></span>
+    </header>
+
+    <main id="log" class="log"></main>
+
+    <footer class="composer">
+      <span class="composer-prompt">&gt;</span>
+      <textarea id="composer-input" class="composer-input" rows="1"
+        placeholder="Type a prompt and press Enter…"></textarea>
+      <span id="composer-hint" class="composer-hint"></span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
