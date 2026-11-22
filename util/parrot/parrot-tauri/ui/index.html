@@ -11,7 +11,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=JetBrains+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body class="theme-light">
   <div id="splash" class="splash">
@@ -49,7 +49,7 @@
       </div>
     </header>
 
-    <div class="layout">
+    <div id="chat-layout" class="layout">
       <aside class="sidebar" aria-label="Today">
         <div id="today-panel" class="hidden" style="display: flex; flex-direction: column; gap: 16px;">
           <div class="sidebar-section-title" id="today-date"></div>
@@ -83,18 +83,10 @@
             <div id="saved-briefs-list"></div>
           </section>
         </div>
-
-        <button id="nav-chat" class="nav-item nav-item-active">Chat</button>
-        <details id="tools-disclosure" class="tools-disclosure hidden">
-          <summary>Tools</summary>
-          <div id="tool-groups" class="tool-groups"></div>
-        </details>
       </aside>
 
       <div class="main">
         <header class="header">
-          <span id="header-sandbox"></span>
-          <span id="header-sandbox-phase" class="status"></span>
           <span id="header-status" class="status status-running"></span>
         </header>
 
@@ -111,16 +103,6 @@
               </div>
               <div id="log-entries"></div>
             </main>
-          </section>
-
-          <section id="playground-view" class="view hidden">
-            <header class="playground-header">
-              <h2 id="playground-tool-name"></h2>
-              <p id="playground-tool-description"></p>
-            </header>
-            <div id="playground-form" class="playground-form"></div>
-            <button id="playground-run-btn" class="playground-run-btn">Run</button>
-            <div id="playground-result" class="playground-result"></div>
           </section>
         </div>
 
@@ -149,6 +131,40 @@
       </aside>
     </div>
 
+    <!-- Tools: a separate full-width takeover of the same play area (not a
+         third pane alongside chat's sidebar/evidence panel) -- a left list
+         of every MCP server's tools, "Your book"-card styled, and a right
+         pane for the selected tool's form/result, or a blank prompt to
+         choose one. See showPlaygroundView/showPlaygroundLanding/
+         showChatView in app.js for how chat-layout/tools-layout toggle. -->
+    <div id="tools-layout" class="layout hidden">
+      <aside class="sidebar" aria-label="Tools">
+        <div class="sidebar-section-title">Tools</div>
+        <div id="tools-list" style="display: flex; flex-direction: column; gap: 16px;"></div>
+      </aside>
+
+      <div class="main">
+        <div class="main-content">
+          <div id="tools-empty-state" class="view">
+            <div class="log-empty-state">
+              <div class="log-empty-headline">Choose a tool</div>
+              <p class="field-hint">Pick a tool from the list on the left to run it.</p>
+            </div>
+          </div>
+
+          <section id="tools-active-panel" class="view hidden">
+            <header class="playground-header">
+              <h2 id="playground-tool-name"></h2>
+              <p id="playground-tool-description"></p>
+            </header>
+            <div id="playground-form" class="playground-form"></div>
+            <button id="playground-run-btn" class="playground-run-btn">Run</button>
+            <div id="playground-result" class="playground-result"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <div id="mcp-login-modal" class="modal-overlay hidden">
       <div class="modal-card">
         <h3 class="modal-title">Log in to the MCP Gateway</h3>
@@ -163,6 +179,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=7"></script>
+  <script type="module" src="app.js?v=12"></script>
 </body>
 </html>

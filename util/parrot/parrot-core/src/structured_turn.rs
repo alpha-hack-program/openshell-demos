@@ -50,6 +50,13 @@ pub struct StructuredTurnResult {
 /// (pure reasoning over whatever facts the prompt already contains);
 /// `Some(path)` lets it use the sandbox's configured MCP tools to go look
 /// things up itself.
+///
+/// `on_tool_call` fires synchronously with each tool's name the moment its
+/// `ToolCall` event is classified (before the call even completes) -- the
+/// caller's hook into live progress, since this function itself only
+/// returns once the whole turn is done. Pass a no-op (`|_| {}`) when
+/// progress isn't needed.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_structured_turn(
     client: &ParrotClient,
     sandbox: &str,
@@ -58,6 +65,7 @@ pub async fn run_structured_turn(
     mcp_config: Option<&str>,
     environment: HashMap<String, String>,
     prompt: &str,
+    mut on_tool_call: impl FnMut(&str),
 ) -> Result<StructuredTurnResult> {
     let turn_opts = TurnOptions {
         prompt,
@@ -95,7 +103,10 @@ pub async fn run_structured_turn(
             line = exec.stdout.next(), if !stdout_done => match line {
                 Some(line) => match classify_line(&line) {
                     AgentEvent::AssistantText(text) => last_text = Some(text),
-                    AgentEvent::ToolCall { name, .. } => pending_calls.push_back(name),
+                    AgentEvent::ToolCall { name, .. } => {
+                        on_tool_call(&name);
+                        pending_calls.push_back(name);
+                    }
                     AgentEvent::ToolResult { content, is_error } => {
                         let tool = pending_calls
                             .pop_front()

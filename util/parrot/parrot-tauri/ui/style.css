@@ -554,50 +554,18 @@ a {
   padding: 4px 0;
 }
 
-/* --- Nav (Chat / Tools) --- */
-
-.nav-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  color: var(--ink);
-  border: none;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font: inherit;
-  cursor: pointer;
+.tool-client-desc {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.nav-item:hover {
-  background: var(--alt-bg);
-}
-
-.nav-item-active {
+.tool-client.tool-client-active {
+  border-color: var(--accent);
   background: var(--badge-amber-bg);
-  color: var(--accent-ink);
-  font-weight: 500;
-}
-
-.tools-disclosure summary {
-  cursor: pointer;
-  color: var(--muted);
-  padding: 6px 8px;
-}
-
-.tool-groups {
-  padding-left: 4px;
-}
-
-.tool-groups summary {
-  cursor: pointer;
-  color: var(--muted);
-  padding: 4px 2px;
-}
-
-.tool-item {
-  padding-left: 1.2rem;
-  font-size: 0.9em;
 }
 
 /* --- Main column --- */
@@ -726,25 +694,70 @@ a {
   margin: 0.3rem 0;
   font-size: 0.85em;
   color: var(--muted);
+  /* Undoes `.log`'s inherited `white-space: pre-wrap` (see `.brief`'s own
+     identical fix) -- activityDisclosureHtml()'s template literal is
+     indented across multiple lines for readability in app.js, and under
+     inherited pre-wrap every one of those source-formatting newlines
+     rendered as a real blank line between the summary and the table. */
+  white-space: normal;
 }
 
 .turn-details summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
   list-style: none;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: var(--alt-bg);
+  padding: 4px 2px;
+  /* Fit-content, not 100%: this is a small label + chevron, not a
+     full-width bar -- `width: 100%` + `justify-content: space-between`
+     previously stretched the chevron all the way to the chat lane's far
+     edge, leaving a huge gap after the text instead of sitting right
+     next to it. */
   width: fit-content;
 }
 
 .turn-details summary::-webkit-details-marker { display: none; }
-.turn-details summary::before { content: "▸ "; }
-.turn-details[open] summary::before { content: "▾ "; }
+
+.turn-details-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.turn-details[open] .turn-details-chevron {
+  transform: rotate(90deg);
+}
 
 .turn-details-error summary { color: var(--badge-red-text); }
 
 .turn-details .log-entry {
   margin: 0.2rem 0 0.2rem 14px;
+}
+
+/* A single rounded-corner table of rows (one per tool call/narration line),
+   as wide as the central chat lane -- replaces a stack of separate
+   bubbles, one per activity. */
+.tool-call-table {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--card-bg);
+  overflow: hidden;
+}
+
+.tool-call-row {
+  padding: 10px 14px;
+  font-size: 0.9em;
+  color: var(--prose);
+  border-bottom: 1px solid var(--divider);
+}
+
+.tool-call-row:last-child {
+  border-bottom: none;
 }
 
 .log-entry.assistant-text { color: var(--prose); }

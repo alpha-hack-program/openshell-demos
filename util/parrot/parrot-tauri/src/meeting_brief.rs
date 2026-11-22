@@ -696,7 +696,8 @@ async fn request_brief_insights(
     );
 
     // `evidence` is always empty here (no `mcp_config`, see this module's
-    // doc comment) -- not surfaced in `BriefInsights`, nothing to merge.
+    // doc comment) -- not surfaced in `BriefInsights`, nothing to merge, so
+    // `on_tool_call` (no tools to call) is a no-op.
     let result = parrot_core::run_structured_turn(
         exec_client,
         sandbox,
@@ -705,6 +706,7 @@ async fn request_brief_insights(
         None,
         environment,
         &prompt,
+        |_| {},
     )
     .await
     .map_err(|e| e.to_string())?;

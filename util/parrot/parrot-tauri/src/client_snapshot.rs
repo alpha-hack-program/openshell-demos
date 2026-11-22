@@ -27,9 +27,19 @@
 //! broken (see `parrot-core/src/exec.rs`'s live Codex resume test,
 //! which confirms the shared agent/exec resume logic itself is correct).
 
+use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::AppState;
+
+/// One tool call, sent to the webview the moment it starts (not after it
+/// finishes) -- the only way to drive a "Looking into X -> calling Y"
+/// progress line, since `build_client_snapshot` itself only resolves once
+/// the whole lookup is done.
+#[derive(Clone, serde::Serialize)]
+pub struct SnapshotProgress {
+    pub tool: String,
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotFact {
@@ -72,6 +82,7 @@ pub struct ClientSnapshot {
 #[tauri::command]
 pub async fn mcp_client_snapshot(
     query: String,
+    on_event: Channel<SnapshotProgress>,
     state: State<'_, AppState>,
 ) -> Result<ClientSnapshot, String> {
     let sandbox = state
@@ -92,6 +103,11 @@ pub async fn mcp_client_snapshot(
         state.agent,
         mcp_config.as_deref(),
         state.environment.clone(),
+        |tool| {
+            let _ = on_event.send(SnapshotProgress {
+                tool: tool.to_string(),
+            });
+        },
     )
     .await
 }
@@ -109,6 +125,7 @@ pub async fn build_client_snapshot(
     agent: parrot_core::Agent,
     mcp_config: Option<&str>,
     environment: std::collections::HashMap<String, String>,
+    on_tool_call: impl FnMut(&str),
 ) -> Result<ClientSnapshot, String> {
     let prompt = format!(
         "A private banker wants a quick snapshot of one of their clients, referred to \
@@ -136,6 +153,7 @@ pub async fn build_client_snapshot(
         mcp_config,
         environment,
         &prompt,
+        on_tool_call,
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -189,6 +207,7 @@ mod tests {
             parrot_core::Agent::ClaudeCode,
             parrot_core::Agent::ClaudeCode.default_mcp_config(),
             parrot_core::detect_passthrough_environment(),
+            |tool| eprintln!("tool call: {tool}"),
         )
         .await
         .expect("build_client_snapshot");

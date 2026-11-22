@@ -29,6 +29,14 @@ let cachedBrief = null;
 let briefRequested = false; // true once "Generate brief" has been clicked at least once
 let turnsCompleted = 0; // drives the composer placeholder ("Ask a question" -> "Reply")
 
+// Tracks the current turn's thinking phase so the live "agent-group"
+// summary can show "Thinking for Ns…" while it's ongoing and freeze into
+// "Thought for Ns" once real content (a tool call/assistant text/result)
+// follows -- set/reset in submit()'s channel.onmessage, not derivable from
+// a pure re-render since the backend doesn't timestamp events itself.
+let turnThinkingStartedAt = null;
+let turnThinkingEndedAt = null;
+
 // --- Connection heartbeat ---------------------------------------------
 //
 // Neither the sandbox exec channel nor the MCP Gateway session is ever
@@ -118,11 +126,6 @@ function applySandboxInfo(sandbox, phase) {
   lastSandboxOkAt = Date.now();
 
   document.getElementById("splash-sandbox").textContent = `Sandbox: ${sandbox} (${phase})`;
-
-  document.getElementById("header-sandbox").textContent = `sandbox ${sandbox} — `;
-  const phaseEl = document.getElementById("header-sandbox-phase");
-  phaseEl.textContent = `${phase} — `;
-  phaseEl.className = `status ${sandboxPhaseClass(phase)}`;
 
   updateConnectionHeader();
   if (!sandboxPollStarted) {
@@ -303,7 +306,7 @@ function classifyEntry(entry) {
     case "AssistantText":
       return { cls: "assistant-text", text: `${data}`, markdown: true };
     case "ToolCall":
-      return { cls: "tool-call", text: `→ tool call: ${data.name}` };
+      return { cls: "tool-call", text: `→ ${capitalize(humanizeToolName(data.name))}` };
     case "ToolResult": {
       if (data.is_error) {
         const text = toolResultText(data.content);
@@ -376,42 +379,101 @@ const COLLAPSIBLE_AGENT_EVENT_TYPES = new Set([
 // observeTimelineUnits() below) should show once that unit scrolls into
 // view -- an assistant-text bubble's evidence is the tool calls that
 // immediately preceded it, not the whole session's.
+// A model that narrates while it works ("I'll check X, then Y...") sends
+// several AssistantText events per turn, not just its one real final
+// answer -- only the *last* AssistantText before the next UserPrompt (or
+// end of log) is that real answer; every earlier one in the same turn is
+// "thinking out loud" and should fold into the turn's single collapsible
+// alongside its tool calls, not fragment it into several back-to-back
+// disclosures (mirrors Claude's own UI: one collapsible per turn).
+function markFinalAssistantTexts(timeline) {
+  const isFinal = new Array(timeline.length).fill(false);
+  let lastIdxInTurn = -1;
+  timeline.forEach((item, i) => {
+    if (item.kind !== "agent") return;
+    const type = item.data.event.type;
+    if (type === "UserPrompt") {
+      lastIdxInTurn = -1;
+    } else if (type === "AssistantText") {
+      if (lastIdxInTurn !== -1) isFinal[lastIdxInTurn] = false;
+      isFinal[i] = true;
+      lastIdxInTurn = i;
+    }
+  });
+  return isFinal;
+}
+
 function buildTimelineUnits(timeline) {
   const units = [];
   let pendingGroup = [];
+  const isFinalAssistantText = markFinalAssistantTexts(timeline);
+  // Once a turn's `Result` event has been seen, any further collapsible
+  // events are trailing noise (e.g. Codex's own "fail to delete session:
+  // ... HTTP 403" line emitted to stderr after the turn is already done) --
+  // not real content, so they're dropped rather than appended. Reset on the
+  // next real-content boundary (a new turn/response).
+  let suppressAfterResult = false;
 
   function flushGroup() {
+    suppressAfterResult = false;
     if (pendingGroup.length === 0) return [];
-    const evidence = evidenceRowsFromLog(pendingGroup);
-    units.push({ kind: "agent-group", items: pendingGroup, evidence });
+    // `Result` almost always arrives right after the final AssistantText
+    // (which already flushed the real tool-call/thinking group), landing
+    // alone in a fresh, otherwise-empty group of its own -- rather than
+    // show that as a content-free "1 step" disclosure, drop it: the turn's
+    // actual answer is already the AssistantText bubble right above it.
+    const meaningful = pendingGroup.filter((i) => i.event.type !== "Result");
     pendingGroup = [];
+    if (meaningful.length === 0) return [];
+    const evidence = evidenceRowsFromLog(meaningful);
+    units.push({ kind: "agent-group", items: meaningful, evidence });
     return evidence;
   }
 
-  for (const item of timeline) {
+  timeline.forEach((item, i) => {
     if (item.kind !== "agent") {
       flushGroup();
       units.push({ kind: item.kind, data: item.data, evidence: evidenceForEntry(item) });
-      continue;
+      return;
     }
     const type = item.data.event.type;
     if (type === "UserPrompt") {
       flushGroup();
       units.push({ kind: "user-prompt", data: item.data, evidence: [] });
-    } else if (type === "AssistantText") {
+    } else if (type === "AssistantText" && isFinalAssistantText[i]) {
       const evidence = flushGroup();
       units.push({ kind: "assistant-text", data: item.data, evidence });
     } else if (type === "Error") {
-      flushGroup();
-      units.push({ kind: "agent-error", data: item.data, evidence: [] });
-    } else if (COLLAPSIBLE_AGENT_EVENT_TYPES.has(type)) {
+      // Silenced entirely, not even folded into the collapsible -- in
+      // practice these are transient infra/model warnings (a model-
+      // metadata fallback notice, a stream-reconnect retry), not content
+      // the user needs to act on; a genuine fatal failure still surfaces
+      // via the turn's own RunStatus ("crashed").
+      return;
+    } else if (COLLAPSIBLE_AGENT_EVENT_TYPES.has(type) || type === "AssistantText") {
+      if (suppressAfterResult) return;
       pendingGroup.push(item.data);
+      if (type === "Result") suppressAfterResult = true;
     } else {
       flushGroup();
       units.push({ kind: "agent-error", data: item.data, evidence: [] });
     }
-  }
+  });
   flushGroup();
+
+  // Mark which agent-group units belong to the most recent turn (occur
+  // after the last UserPrompt) -- deliberately not just "is this the last
+  // unit overall", since an AssistantText bubble commonly renders *after*
+  // its own turn's tool-call group, which shouldn't make that group's
+  // thinking-duration revert to a generic, non-timed label.
+  let lastUserPromptIndex = -1;
+  units.forEach((u, i) => {
+    if (u.kind === "user-prompt") lastUserPromptIndex = i;
+  });
+  units.forEach((u, i) => {
+    if (u.kind === "agent-group") u.isLatestTurn = i > lastUserPromptIndex;
+  });
+
   return units;
 }
 
@@ -421,24 +483,101 @@ function evidenceForEntry(item) {
   return [];
 }
 
-function renderAgentGroupHtml(items, openByDefault) {
-  const toolCalls = items.filter((i) => i.event.type === "ToolCall").length;
+// `openByDefault` (the newest group, turn still running) gets a *live*
+// summary naming whatever's happening right now -- the most recent tool
+// call, or a running thinking-duration counter -- instead of a static
+// count, so the summary line visibly updates as the turn progresses
+// (mirrors Claude's own collapsed tool-use summary). Once the turn/group
+// is done, it freezes into a short recap instead.
+// Shared by the chat log's agent-group recap and the client-snapshot
+// progress feed's own collapsed summary (see renderSnapshotEntryHtml) --
+// both describe "which tools were called" the same way: name them if
+// there are only a couple, otherwise just a count.
+function summarizeToolNames(names) {
+  const unique = [...new Set(names.map((n) => capitalize(humanizeToolName(n))))];
+  // The count must match `names.length` (one row per call, e.g. the same
+  // "get_performance" called separately for MTD/QTD/YTD), not
+  // `unique.length` -- counting distinct tool names undercounts whenever a
+  // tool is called more than once, showing "Ran 6 tools" for what the
+  // table actually lists as 8 rows.
+  return unique.length > 2 ? `Ran ${names.length} tool call${names.length === 1 ? "" : "s"}` : unique.join(", ");
+}
+
+// Trailing chevron (not a leading triangle) -- rotates 90° via the
+// `.turn-details[open]` CSS rule, pointing right collapsed / down open.
+const CHEVRON_SVG =
+  '<svg class="turn-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="m9 18 6-6-6-6"/></svg>';
+
+// One row in the activity table per tool call -- deliberately just
+// "Calling {name}", not the raw arrow/checkmark log lines or a tool's
+// actual error text (a failed attempt and a retried one render
+// identically; the point is "what was attempted", not a verbose success/
+// failure transcript -- `hasError`, computed by the caller, still drives
+// the disclosure's own border color for an at-a-glance signal).
+function toolCallRowHtml(name) {
+  return `<div class="tool-call-row">Calling ${escapeHtml(capitalize(humanizeToolName(name)))}</div>`;
+}
+
+// Shared by the chat log's agent-group and the client-snapshot progress
+// feed: collapsed by default always (never auto-opened, even while live --
+// the one-line summary is what updates in place), a trailing chevron
+// instead of a leading triangle, and a single rounded-corner table of rows
+// for the body instead of a stack of separate bubbles.
+function activityDisclosureHtml(summaryText, rowsHtml, hasError) {
+  const tableHtml = rowsHtml ? `<div class="tool-call-table">${rowsHtml}</div>` : "";
+  return `<details class="turn-details${hasError ? " turn-details-error" : ""}">
+    <summary><span>${escapeHtml(summaryText)}</span>${CHEVRON_SVG}</summary>
+    ${tableHtml}
+  </details>`;
+}
+
+function renderAgentGroupHtml(items, isLive, isMostRecentTurnGroup) {
+  const toolCalls = items.filter((i) => i.event.type === "ToolCall");
   const isThinking = items.some((i) => i.event.type === "Thinking" || i.event.type === "ThinkingTokens");
   const hasError = items.some((i) => i.event.type === "ToolResult" && i.event.data.is_error);
+
   const parts = [];
-  if (isThinking) parts.push("Thinking");
-  if (toolCalls) parts.push(`${toolCalls} tool call${toolCalls === 1 ? "" : "s"}`);
+  if (isThinking) {
+    // turnThinkingStartedAt/EndedAt only ever describe the most recent
+    // turn -- an older, already-closed group from an earlier turn in this
+    // session falls back to a plain label instead of that stale timing.
+    if (!isMostRecentTurnGroup || turnThinkingStartedAt === null) {
+      parts.push("Thinking");
+    } else if (turnThinkingEndedAt !== null) {
+      const secs = Math.max(1, Math.round((turnThinkingEndedAt - turnThinkingStartedAt) / 1000));
+      parts.push(`Thought for ${secs}s`);
+    } else {
+      const secs = Math.max(1, Math.round((Date.now() - turnThinkingStartedAt) / 1000));
+      parts.push(`Thinking for ${secs}s…`);
+    }
+  }
+  if (toolCalls.length) {
+    if (isLive) {
+      const current = capitalize(humanizeToolName(toolCalls[toolCalls.length - 1].event.data.name));
+      parts.push(`Running ${current}…`);
+    } else {
+      parts.push(summarizeToolNames(toolCalls.map((c) => c.event.data.name)));
+    }
+  }
   const summaryText = parts.length ? parts.join(" · ") : `${items.length} step${items.length === 1 ? "" : "s"}`;
-  const bodyHtml = items
+  // Body only ever shows tool-call rows and the model's own "thinking out
+  // loud" narration (non-final AssistantText, folded in here by
+  // buildTimelineUnits) -- ToolResult/Thinking/Info/Unknown/Unparseable/
+  // Result carry no useful standalone text to a banker (raw Rust/MCP error
+  // chains, token-heartbeat spam, protocol bookkeeping), so they're
+  // dropped rather than rendered line-by-line.
+  const rowsHtml = items
     .map((entry) => {
-      const { cls, text } = classifyEntry(entry);
-      return `<div class="log-entry ${cls}">${escapeHtml(text)}</div>`;
+      if (entry.event.type === "ToolCall") return toolCallRowHtml(entry.event.data.name);
+      if (entry.event.type === "AssistantText") {
+        return `<div class="tool-call-row">${renderMarkdown(escapeHtml(entry.event.data))}</div>`;
+      }
+      return "";
     })
     .join("");
-  return `<details class="turn-details${hasError ? " turn-details-error" : ""}"${openByDefault ? " open" : ""}>
-    <summary>${escapeHtml(summaryText)}</summary>
-    ${bodyHtml}
-  </details>`;
+  return activityDisclosureHtml(summaryText, rowsHtml, hasError);
 }
 
 function renderUnitHtml(unit, isLast) {
@@ -454,11 +593,15 @@ function renderUnitHtml(unit, isLast) {
       return `<div class="log-entry ${cls}">${html}</div>`;
     }
     case "agent-group":
-      // Open while it's the newest thing in the log and the turn is still
-      // running, so progress is visible live -- collapses on the next
-      // render once the turn finishes (see requirement: "otherwise you
-      // don't know if something is going on").
-      return renderAgentGroupHtml(unit.items, isLast && turnRunning);
+      // Always collapsed by default (never auto-opened) -- `isLast &&
+      // turnRunning` only picks the summary's tense ("Running X…" live vs.
+      // a frozen recap once done), not whether the disclosure is open.
+      // `unit.isLatestTurn` (not `isLast`) separately gates the thinking-
+      // duration display, since the group belonging to the current turn
+      // commonly isn't the very last unit (an AssistantText bubble renders
+      // after it) -- older groups from earlier turns fall back to a plain
+      // "Thinking".
+      return renderAgentGroupHtml(unit.items, isLast && turnRunning, unit.isLatestTurn);
     case "snapshot":
       return renderSnapshotEntryHtml(unit.data);
     case "brief":
@@ -575,24 +718,6 @@ function renderStatus(status) {
   }
 }
 
-function sandboxPhaseClass(phase) {
-  switch (phase) {
-    case "ready":
-    case "completed":
-      return "status-completed";
-    case "error":
-    case "stopped":
-    case "deleting":
-      return "status-crashed";
-    case "provisioning":
-    case "starting":
-    case "stopping":
-    case "suspending":
-      return "status-running";
-    default:
-      return "";
-  }
-}
 
 function applyTheme(theme) {
   const apply = (mode) => {
@@ -641,7 +766,7 @@ function renderEvidenceRows(rows) {
         <div class="evidence-n">${row.n}</div>
         <div class="evidence-body">
           <div class="evidence-top-row">
-            <span class="evidence-tool">${escapeHtml(stripMcpPrefix(row.tool))}</span>
+            <span class="evidence-tool">${escapeHtml(humanizeToolName(row.tool))}</span>
             ${row.time ? `<span class="evidence-time">${escapeHtml(row.time)}</span>` : ""}
           </div>
           <div class="evidence-detail">${escapeHtml(row.detail)}</div>
@@ -652,8 +777,43 @@ function renderEvidenceRows(rows) {
     .join("");
 }
 
-function stripMcpPrefix(name) {
-  return name.replace(/^mcp_/, "");
+// Populated from `mcp_list_tools`' grouped response (see
+// `loadMcpToolsAndToday`), longest-prefix-first -- mirrors parrot-core's
+// own `group_by_server` longest-prefix-wins rule, needed because some
+// server names are themselves multi-word (e.g. "mcp-crm-calendar"), so a
+// single generic `mcp_<word>_` strip isn't enough to fully remove it.
+let knownServerPrefixes = [];
+
+// Turns a gateway tool name into a short, readable label. Two shapes seen
+// in practice:
+//   - Claude Code's flat, gateway-prefixed name, e.g.
+//     "mcp_portfolio_list_my_clients".
+//   - Codex's own `{server}::{tool}` item naming (parrot-core's
+//     `codex_mcp_tool_call_event`), e.g.
+//     "gateway::mcp_kyc_compliance_check_suitability" or
+//     "codex::list_mcp_resources" for its *built-in* MCP introspection
+//     tools -- the "{server}::" part is always just "gateway"/"codex" and
+//     adds nothing, so it's dropped unconditionally.
+//
+// `dropServer` additionally strips the gateway server segment itself
+// (`knownServerPrefixes`) -- used by the Tools list, where the server name
+// is already the card's own heading, so repeating it in every row's label
+// is redundant. Left `false` (default) for standalone text with no such
+// heading (chat log, evidence rows, live progress), where keeping it
+// (e.g. "kyc compliance check suitability") is the only thing that says
+// which service was actually called.
+function humanizeToolName(name, { dropServer = false } = {}) {
+  const withoutItemServer = name.includes("::") ? name.split("::").pop() : name;
+  if (dropServer) {
+    const prefix = knownServerPrefixes.find((p) => withoutItemServer.startsWith(p));
+    const stripped = prefix ? withoutItemServer.slice(prefix.length) : withoutItemServer.replace(/^mcp_/, "");
+    return stripped.replace(/_/g, " ");
+  }
+  return withoutItemServer.replace(/^mcp_/, "").replace(/_/g, " ");
+}
+
+function capitalize(s) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 // Builds evidence rows from the chat transcript's own ToolCall/ToolResult
@@ -690,9 +850,8 @@ function evidenceRowsFromBrief(brief) {
 
 // --- View switching -------------------------------------------------------
 
-function clearNavActive() {
-  document.getElementById("nav-chat").classList.remove("nav-item-active");
-  document.querySelectorAll(".tool-item").forEach((el) => el.classList.remove("nav-item-active"));
+function clearToolActive() {
+  document.querySelectorAll(".tool-client").forEach((el) => el.classList.remove("tool-client-active"));
 }
 
 function setHeaderViewToggleLabel(label) {
@@ -700,14 +859,17 @@ function setHeaderViewToggleLabel(label) {
   if (toggle) toggle.textContent = label;
 }
 
+// Tools is a separate full-width takeover of the play area (its own
+// `#tools-layout`, not a third pane squeezed in alongside chat's sidebar/
+// evidence panel) -- these three functions toggle which of
+// `#chat-layout`/`#tools-layout` is visible, not individual panes within
+// one shared layout.
 function showChatView() {
   activeTool = null;
   activeForm = null;
-  document.getElementById("playground-view").classList.add("hidden");
-  document.getElementById("chat-view").classList.remove("hidden");
+  document.getElementById("tools-layout").classList.add("hidden");
+  document.getElementById("chat-layout").classList.remove("hidden");
   document.getElementById("regulatory-card").classList.toggle("hidden", !cachedBrief?.regulatory);
-  clearNavActive();
-  document.getElementById("nav-chat").classList.add("nav-item-active");
   setHeaderViewToggleLabel("Tools");
   if (lastBackendLog.length || syntheticEntries.length) {
     renderEvidenceRows(cachedBrief ? evidenceRowsFromBrief(cachedBrief) : evidenceRowsFromLog(lastBackendLog));
@@ -716,63 +878,73 @@ function showChatView() {
 
 function showPlaygroundView(tool, toolButton) {
   activeTool = tool;
-  document.getElementById("chat-view").classList.add("hidden");
-  document.getElementById("playground-view").classList.remove("hidden");
-  document.getElementById("regulatory-card").classList.add("hidden");
-  clearNavActive();
-  if (toolButton) toolButton.classList.add("nav-item-active");
+  document.getElementById("chat-layout").classList.add("hidden");
+  document.getElementById("tools-layout").classList.remove("hidden");
+  document.getElementById("tools-empty-state").classList.add("hidden");
+  document.getElementById("tools-active-panel").classList.remove("hidden");
+  clearToolActive();
+  if (toolButton) toolButton.classList.add("tool-client-active");
   setHeaderViewToggleLabel("Chat");
 
   document.getElementById("playground-tool-name").textContent = tool.title || tool.name;
   document.getElementById("playground-tool-description").textContent = tool.description || "";
   document.getElementById("playground-result").innerHTML = "";
   activeForm = renderToolForm(document.getElementById("playground-form"), tool.inputSchema);
-  renderEvidenceRows([]);
 }
 
 // Landing state for the header's "Tools" toggle when no specific tool has
-// been picked yet from the sidebar -- showPlaygroundView() always expects a
+// been picked yet from the list -- showPlaygroundView() always expects a
 // tool object, which doesn't exist on a fresh toggle click.
 function showPlaygroundLanding() {
   activeTool = null;
   activeForm = null;
-  document.getElementById("chat-view").classList.add("hidden");
-  document.getElementById("playground-view").classList.remove("hidden");
-  document.getElementById("regulatory-card").classList.add("hidden");
-  clearNavActive();
+  document.getElementById("chat-layout").classList.add("hidden");
+  document.getElementById("tools-layout").classList.remove("hidden");
+  document.getElementById("tools-empty-state").classList.remove("hidden");
+  document.getElementById("tools-active-panel").classList.add("hidden");
+  clearToolActive();
   setHeaderViewToggleLabel("Chat");
-
-  document.getElementById("playground-tool-name").textContent = "Tools";
-  document.getElementById("playground-tool-description").textContent =
-    "Pick a tool from the sidebar to run it directly.";
-  document.getElementById("playground-form").innerHTML = "";
-  document.getElementById("playground-result").innerHTML = "";
-  renderEvidenceRows([]);
 }
 
 
 // --- MCP Gateway toolbar/playground ----------------------------------
 
+// One `.card` per MCP server, "Your book"-styled (see `renderToday`'s
+// `.book-client` buttons) -- each tool is a clickable row with an avatar,
+// name, and truncated description, instead of the "list of clients" data.
 function renderToolGroups(groups) {
-  document.getElementById("tools-disclosure").classList.remove("hidden");
-  const container = document.getElementById("tool-groups");
+  const container = document.getElementById("tools-list");
   container.innerHTML = "";
   for (const group of groups) {
     if (group.tools.length === 0) continue;
-    const details = document.createElement("details");
-    details.open = true;
-    const summary = document.createElement("summary");
-    summary.textContent = `${group.server || "(other)"} (${group.tools.length})`;
-    details.appendChild(summary);
+    const card = document.createElement("section");
+    card.className = "card";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "card-title-row";
+    titleRow.innerHTML = `<h2 class="card-title">${escapeHtml(group.server || "(other)")}</h2><span class="mcp-status">${group.tools.length}</span>`;
+    card.appendChild(titleRow);
+
     for (const tool of group.tools) {
       const button = document.createElement("button");
-      button.className = "nav-item tool-item";
-      button.textContent = tool.title || tool.name;
-      button.title = tool.description || "";
+      button.type = "button";
+      button.className = "book-client tool-client";
+      if (tool.description) button.title = tool.description;
+      // `tool.name` is gateway-prefixed with its server name (e.g.
+      // "mcp_portfolio_list_my_clients") -- humanized for display so
+      // labels fit the sidebar card; `mcp_call_tool` itself still gets the
+      // full, unstripped `tool.name` (see showPlaygroundView/runActiveTool).
+      const label = tool.title || capitalize(humanizeToolName(tool.name, { dropServer: true }));
+      button.innerHTML = `
+        <div class="avatar-circle">${escapeHtml(initialsFor(label))}</div>
+        <div style="flex:1; min-width:0;">
+          <div class="book-client-name">${escapeHtml(label)}</div>
+          ${tool.description ? `<div class="tool-client-desc">${escapeHtml(tool.description)}</div>` : ""}
+        </div>`;
       button.addEventListener("click", () => showPlaygroundView(tool, button));
-      details.appendChild(button);
+      card.appendChild(button);
     }
-    container.appendChild(details);
+    container.appendChild(card);
   }
 }
 
@@ -887,7 +1059,10 @@ function renderToday(today) {
       </button>`;
     })
     .join("");
-  document.querySelectorAll(".book-client").forEach((el) => {
+  // Scoped to #book-clients, not a bare `.book-client` query -- the Tools
+  // list's buttons reuse the same `.book-client` CSS class for styling and
+  // would otherwise also get wired to generateClientSnapshot() here.
+  document.querySelectorAll("#book-clients .book-client").forEach((el) => {
     el.addEventListener("click", () => generateClientSnapshot(el.dataset.clientName));
   });
 }
@@ -1115,15 +1290,31 @@ function buildClientSnapshotArticleHtml(snapshot) {
 
 // Renders one synthetic "snapshot" timeline entry -- same loading/error/
 // ready states as renderBriefEntryHtml.
+// `entry.toolsCalled` accumulates live as `mcp_client_snapshot`'s progress
+// channel reports each tool call (see generateClientSnapshot) -- same
+// row/summary language as the chat log's agent-group (toolCallRowHtml/
+// activityDisclosureHtml/summarizeToolNames), so a lookup in progress
+// looks like a live turn
+// instead of a frozen "Looking into X…" string with no visible progress.
 function renderSnapshotEntryHtml(entry) {
   const promptHtml = `<div class="log-entry user-prompt">${escapeHtml(entry.prompt)}</div>`;
+  const rowsHtml = entry.toolsCalled.map(toolCallRowHtml).join("");
+
   if (entry.loading) {
-    return `${promptHtml}<div class="field-hint">Looking into ${escapeHtml(entry.query)}…</div>`;
+    const summary = entry.toolsCalled.length
+      ? `Running ${capitalize(humanizeToolName(entry.toolsCalled[entry.toolsCalled.length - 1]))}…`
+      : `Looking into ${entry.query}…`;
+    return `${promptHtml}${activityDisclosureHtml(summary, rowsHtml, false)}`;
   }
+
+  const recapHtml = entry.toolsCalled.length
+    ? activityDisclosureHtml(summarizeToolNames(entry.toolsCalled), rowsHtml, false)
+    : "";
+
   if (entry.error) {
-    return `${promptHtml}<div class="playground-error">${escapeHtml(entry.error)}</div>`;
+    return `${promptHtml}${recapHtml}<div class="playground-error">${escapeHtml(entry.error)}</div>`;
   }
-  return `${promptHtml}${buildClientSnapshotArticleHtml(entry.snapshot)}`;
+  return `${promptHtml}${recapHtml}${buildClientSnapshotArticleHtml(entry.snapshot)}`;
 }
 
 // Triggered by clicking a client in the sidebar's book (see renderToday())
@@ -1143,12 +1334,19 @@ async function generateClientSnapshot(clientName) {
     snapshot: null,
     error: null,
     loading: true,
+    toolsCalled: [],
   };
   syntheticEntries.push(entry);
   renderChatLog();
 
+  const channel = new Channel();
+  channel.onmessage = (progress) => {
+    entry.toolsCalled.push(progress.tool);
+    renderChatLog();
+  };
+
   try {
-    const snapshot = await invoke("mcp_client_snapshot", { query: clientName });
+    const snapshot = await invoke("mcp_client_snapshot", { query: clientName, onEvent: channel });
     entry.loading = false;
     entry.snapshot = snapshot;
   } catch (err) {
@@ -1343,6 +1541,10 @@ async function mcpLogin() {
 async function loadMcpToolsAndToday() {
   try {
     const groups = await invoke("mcp_list_tools");
+    knownServerPrefixes = groups
+      .map((g) => `${(g.server || "").replace(/-/g, "_")}_`)
+      .filter((p) => p !== "_")
+      .sort((a, b) => b.length - a.length);
     renderToolGroups(groups);
     noteMcpOk();
   } catch (err) {
@@ -1381,32 +1583,65 @@ async function submit(promptText) {
   input.value = "";
   input.style.height = "auto";
   turnRunning = true;
+  turnThinkingStartedAt = null;
+  turnThinkingEndedAt = null;
   document.getElementById("composer-hint").textContent = "running…";
 
+  // `submit_turn` returns as soon as it has *spawned* the exec (fire-and-
+  // forget `runtime.spawn`, not awaited) -- its own promise resolves long
+  // before the turn actually finishes streaming. So `turnRunning` is only
+  // ever cleared from here, off the channel's own terminal status, not
+  // from an `invoke().finally()` -- otherwise this flips false (and the
+  // agent-group summary below stops being "live") while the turn is still
+  // very much in progress.
   const channel = new Channel();
   let sawTerminalStatus = false;
   channel.onmessage = (snapshot) => {
-    lastBackendLog = snapshot.log;
-    renderChatLog();
-    if (!document.getElementById("chat-view").classList.contains("hidden")) {
-      renderEvidenceRows(evidenceRowsFromLog(lastBackendLog));
+    // Detect this turn's thinking phase incrementally (only in newly
+    // arrived entries) -- see turnThinkingStartedAt/turnThinkingEndedAt's
+    // doc comment for why this can't be derived from a pure re-render.
+    for (const entry of snapshot.log.slice(lastBackendLog.length)) {
+      const type = entry.event.type;
+      const isThinking = type === "Thinking" || type === "ThinkingTokens";
+      if (isThinking && turnThinkingStartedAt === null) {
+        turnThinkingStartedAt = Date.now();
+      } else if (!isThinking && turnThinkingStartedAt !== null && turnThinkingEndedAt === null) {
+        turnThinkingEndedAt = Date.now();
+      }
     }
-    renderStatus(snapshot.status);
+    lastBackendLog = snapshot.log;
+
     if (snapshot.status.type !== "Running" && !sawTerminalStatus) {
       sawTerminalStatus = true;
+      turnRunning = false;
+      document.getElementById("composer-hint").textContent = "";
       noteSandboxOk();
       turnsCompleted += 1;
       updateComposerPlaceholder();
     }
+
+    // Render after the turnRunning update above, not before -- the
+    // agent-group unit needs the up-to-date value to collapse on this
+    // same render instead of staying open until some unrelated later
+    // render happens to fire.
+    renderChatLog();
+    if (!document.getElementById("chat-layout").classList.contains("hidden")) {
+      renderEvidenceRows(evidenceRowsFromLog(lastBackendLog));
+    }
+    renderStatus(snapshot.status);
   };
 
   try {
     await invoke("submit_turn", { prompt, onEvent: channel });
   } catch (err) {
     console.error("parrot-tauri: submit_turn failed", err);
-  } finally {
-    turnRunning = false;
-    document.getElementById("composer-hint").textContent = "";
+    // Only reachable if submit_turn itself returned Err before spawning
+    // (e.g. "not connected"/"a turn is already running") -- in that case
+    // no channel message ever arrives to clear this otherwise.
+    if (!sawTerminalStatus) {
+      turnRunning = false;
+      document.getElementById("composer-hint").textContent = "";
+    }
   }
 }
 
@@ -1432,9 +1667,8 @@ async function main() {
   document.getElementById("mcp-login-modal-btn").addEventListener("click", attemptMcpLogin);
   document.getElementById("mcp-login-modal-dismiss").addEventListener("click", hideMcpLoginModal);
 
-  document.getElementById("nav-chat").addEventListener("click", showChatView);
   document.getElementById("header-view-toggle").addEventListener("click", () => {
-    const inChat = !document.getElementById("chat-view").classList.contains("hidden");
+    const inChat = !document.getElementById("chat-layout").classList.contains("hidden");
     if (inChat) {
       if (!mcpConnected) {
         showMcpLoginModal();
