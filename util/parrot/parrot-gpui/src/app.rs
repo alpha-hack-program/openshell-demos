@@ -365,6 +365,7 @@ impl ParrotWindow {
                 } else {
                     None
                 },
+                no_builtin_tools: false,
             };
             let command = agent.build_turn(&turn_opts);
             let exec_opts = StreamedExecOptions {

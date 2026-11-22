@@ -635,6 +635,31 @@ a {
   width: fit-content;
 }
 
+.turn-details {
+  margin: 0.3rem 0;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+.turn-details summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--alt-bg);
+  width: fit-content;
+}
+
+.turn-details summary::-webkit-details-marker { display: none; }
+.turn-details summary::before { content: "▸ "; }
+.turn-details[open] summary::before { content: "▾ "; }
+
+.turn-details-error summary { color: var(--badge-red-text); }
+
+.turn-details .log-entry {
+  margin: 0.2rem 0 0.2rem 14px;
+}
+
 .log-entry.assistant-text { color: var(--prose); }
 .log-entry.tool-call { color: var(--accent-ink); font-size: 0.9em; }
 .log-entry.tool-result-ok { color: var(--badge-green-text); font-size: 0.9em; }
@@ -1106,6 +1131,35 @@ a {
   font-size: 13px;
   line-height: 1.3;
   color: var(--muted);
+  margin-top: 2px;
+}
+
+/* --- Client snapshot (src/client_snapshot.rs) -- shares .brief/.brief-head/
+   .brief-points* above, these are the only shapes unique to it. */
+
+.snapshot-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--divider);
+  border-bottom: 1px solid var(--divider);
+}
+
+.snapshot-fact {
+  padding: 10px 16px;
+  background: var(--card-bg);
+}
+
+.snapshot-fact-label {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.snapshot-fact-value {
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 500;
   margin-top: 2px;
 }
 

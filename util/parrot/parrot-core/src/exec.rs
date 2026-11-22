@@ -185,3 +185,118 @@ async fn flush_remainder(buf: Vec<u8>, tx: &mpsc::Sender<String>) {
         let _ = tx.send(String::from_utf8_lossy(&buf).into_owned()).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::{Agent, TurnOptions};
+    use crate::jsonl::extract_session_id;
+
+    /// Drains one exec to completion, returning (session_id, exit_code) --
+    /// the same sequential, blocking pattern `parrot-tui`'s `run_turn`
+    /// uses (await exec_streamed, then drain the whole stream before
+    /// returning), as opposed to `parrot-tauri`'s `submit_turn`, which
+    /// spawns this same loop into the background and returns immediately.
+    async fn drain_turn(exec: &mut ExecStream) -> (Option<String>, Option<i32>) {
+        let mut session_id = None;
+        // Must drain stderr too, not just stdout: it's a bounded channel
+        // (capacity 64, see `exec_streamed`), so leaving it unread risks
+        // the producer task blocking on a full channel if the process
+        // writes enough to stderr, hanging this whole function.
+        let mut stdout_done = false;
+        let mut stderr_done = false;
+        let mut outcome_done = false;
+        let mut exit_code = None;
+        loop {
+            tokio::select! {
+                biased;
+                line = exec.stdout.next(), if !stdout_done => match line {
+                    Some(line) => {
+                        if let Some(id) = extract_session_id(&line) {
+                            session_id = Some(id);
+                        }
+                    }
+                    None => stdout_done = true,
+                },
+                line = exec.stderr.next(), if !stderr_done => match line {
+                    Some(_) => {}
+                    None => stderr_done = true,
+                },
+                outcome = &mut exec.outcome, if !outcome_done => {
+                    if let Ok(outcome) = outcome {
+                        exit_code = outcome.exit_code;
+                    }
+                    outcome_done = true;
+                }
+            }
+            if stdout_done && stderr_done && outcome_done {
+                break;
+            }
+        }
+        (session_id, exit_code)
+    }
+
+    /// Reproduces `parrot-tui`'s exact sequential pattern against a real
+    /// Codex sandbox: turn 1 with no `--resume`, capture the `thread_id`
+    /// Codex reports, then turn 2 with `exec resume <thread_id>` --
+    /// confirming whether the *shared* `agent.rs`/`exec.rs` resume
+    /// mechanism itself threads sessions correctly when driven
+    /// sequentially (one turn fully awaited before the next starts),
+    /// independent of either frontend's own UI-layer code. Run manually:
+    ///
+    /// ```sh
+    /// SANDBOX_NAME=aud-codex-bob WORKSPACE=bob \
+    /// cargo test -p parrot-core exec::tests::live -- --ignored --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore]
+    async fn live_codex_resume_threads_one_session_when_sequential() {
+        let sandbox = std::env::var("SANDBOX_NAME").unwrap_or_else(|_| "aud-codex-bob".to_string());
+        let workspace = std::env::var("WORKSPACE").unwrap_or_else(|_| "bob".to_string());
+        let client = ParrotClient::connect(None, None)
+            .await
+            .expect("connect to OpenShell gateway");
+        let environment = crate::agent::detect_passthrough_environment();
+
+        let turn1_opts = TurnOptions {
+            prompt: "Remember the word 'parrot-resume-test'. Reply with just 'ok'.",
+            mcp_config: None,
+            session_id: None,
+            no_builtin_tools: true,
+        };
+        let command1 = Agent::Codex.build_turn(&turn1_opts);
+        let mut exec1 = client
+            .exec_streamed(&sandbox, Some(workspace.as_str()), &command1, StreamedExecOptions {
+                environment: environment.clone(),
+                ..Default::default()
+            })
+            .await
+            .expect("exec_streamed turn 1");
+        let (session_id_1, exit_code_1) = drain_turn(&mut exec1).await;
+        println!("turn 1: session_id={session_id_1:?} exit_code={exit_code_1:?}");
+        let session_id_1 = session_id_1.expect("turn 1 should report a thread_id");
+
+        let turn2_opts = TurnOptions {
+            prompt: "What word did I just ask you to remember?",
+            mcp_config: None,
+            session_id: Some(&session_id_1),
+            no_builtin_tools: true,
+        };
+        let command2 = Agent::Codex.build_turn(&turn2_opts);
+        let mut exec2 = client
+            .exec_streamed(&sandbox, Some(workspace.as_str()), &command2, StreamedExecOptions {
+                environment,
+                ..Default::default()
+            })
+            .await
+            .expect("exec_streamed turn 2");
+        let (session_id_2, exit_code_2) = drain_turn(&mut exec2).await;
+        println!("turn 2: session_id={session_id_2:?} exit_code={exit_code_2:?}");
+        let session_id_2 = session_id_2.expect("turn 2 should report a thread_id");
+
+        assert_eq!(
+            session_id_1, session_id_2,
+            "resuming with turn 1's thread_id should keep the same session, not start a new one"
+        );
+    }
+}

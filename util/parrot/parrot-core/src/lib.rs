@@ -19,6 +19,7 @@ pub mod markdown;
 pub mod mcp_auth;
 pub mod mcp_client;
 pub mod state;
+pub mod structured_turn;
 pub mod theme;
 
 pub use agent::{detect_passthrough_environment, Agent, TurnOptions};
@@ -32,6 +33,7 @@ pub use markdown::{render_inline_markdown, InlineRun, InlineStyle};
 pub use mcp_auth::{start_login, McpAuthConfig, McpToken, PendingLogin};
 pub use mcp_client::{unwrap_tool_output, McpGatewayClient, McpServerName};
 pub use state::{LogEntry, RunStatus, SessionState, StreamSource};
+pub use structured_turn::{run_structured_turn, StructuredTurnResult, ToolEvidence};
 pub use theme::{Palette, Rgb, ThemeMode};
 
 // Re-exported so frontends can name `rmcp::model::{Tool, CallToolResult}`

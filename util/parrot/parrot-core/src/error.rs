@@ -46,6 +46,12 @@ pub enum ParrotError {
     #[error("MCP Gateway error: {0}")]
     Mcp(String),
 
+    /// Errors from [`crate::structured_turn::run_structured_turn`]: the
+    /// exec stream itself failing, or the agent's final text not being
+    /// parseable as JSON.
+    #[error("agent turn error: {0}")]
+    AgentTurn(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

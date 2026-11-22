@@ -15,7 +15,7 @@
 // no-LLM report for the next meeting). The evidence panel's content
 // depends on which one is active.
 
-import { renderToolForm } from "./schema-form.js?v=3";
+import { renderToolForm } from "./schema-form.js?v=4";
 
 const { invoke, Channel } = window.__TAURI__.core;
 
@@ -30,13 +30,14 @@ let briefRequested = false; // true once "Generate brief" has been clicked at le
 
 // The chat transcript is a merge of two independent sources: the backend's
 // own cumulative `SessionState.log` (real sandbox-exec'd turns) and
-// locally-synthesized "brief" entries (src/meeting_brief.rs's output,
-// never sent through the sandbox at all -- see generateBrief() below).
-// Each synthetic entry records how many backend log entries existed when
-// it was created, so re-merging after a later real turn still places it
-// correctly instead of always jumping to the end.
+// locally-synthesized entries: "brief" (src/meeting_brief.rs's output) and
+// "snapshot" (src/client_snapshot.rs's output) -- neither is ever sent
+// through the sandbox at all, see generateBrief()/generateClientSnapshot()
+// below. Each synthetic entry records how many backend log entries existed
+// when it was created, so re-merging after a later real turn still places
+// it correctly instead of always jumping to the end.
 let lastBackendLog = [];
-const syntheticEntries = []; // { afterCount, prompt, brief, error, loading }
+const syntheticEntries = []; // { kind, afterCount, prompt, brief|snapshot, error, loading }
 
 // Escapes quotes too, not just &/</> -- this gets used inside HTML
 // attribute values (e.g. the suitability verdict's title="..."), where an
@@ -188,7 +189,7 @@ function mergedTimeline() {
   let si = 0;
   for (let i = 0; i <= lastBackendLog.length; i++) {
     while (si < synthByPosition.length && synthByPosition[si].afterCount === i) {
-      merged.push({ kind: "brief", data: synthByPosition[si] });
+      merged.push({ kind: synthByPosition[si].kind, data: synthByPosition[si] });
       si++;
     }
     if (i < lastBackendLog.length) {
@@ -198,22 +199,201 @@ function mergedTimeline() {
   return merged;
 }
 
-function renderChatLog() {
-  const scroller = document.getElementById("log");
-  const entries = document.getElementById("log-entries");
-  const timeline = mergedTimeline();
-  document.getElementById("log-empty-state").classList.toggle("hidden", timeline.length > 0);
-  entries.innerHTML = timeline
-    .map((item) => {
-      if (item.kind === "agent") {
-        const { cls, text, markdown } = classifyEntry(item.data);
-        const html = markdown ? renderMarkdown(escapeHtml(text)) : escapeHtml(text);
-        return `<div class="log-entry ${cls}">${html}</div>`;
-      }
-      return renderBriefEntryHtml(item.data);
+// Agent event types that collapse into one "N steps" disclosure between
+// the real content (UserPrompt/AssistantText/Error) around them -- mirrors
+// Claude's own UI, where tool calls/thinking are a small expandable
+// summary rather than permanent inline noise. UserPrompt/AssistantText/
+// Error always get their own visible bubble.
+const COLLAPSIBLE_AGENT_EVENT_TYPES = new Set([
+  "ToolCall",
+  "ToolResult",
+  "Thinking",
+  "ThinkingTokens",
+  "Result",
+  "Info",
+  "Unknown",
+  "Unparseable",
+]);
+
+// Turns the flat merged timeline into render units: agent/brief/snapshot
+// entries pass through, but runs of collapsible agent events between two
+// pieces of real content become one "agent-group" unit. Each unit also
+// gets its own `evidence` rows precomputed here, since that's exactly the
+// scope the IntersectionObserver-driven evidence panel (see
+// observeTimelineUnits() below) should show once that unit scrolls into
+// view -- an assistant-text bubble's evidence is the tool calls that
+// immediately preceded it, not the whole session's.
+function buildTimelineUnits(timeline) {
+  const units = [];
+  let pendingGroup = [];
+
+  function flushGroup() {
+    if (pendingGroup.length === 0) return [];
+    const evidence = evidenceRowsFromLog(pendingGroup);
+    units.push({ kind: "agent-group", items: pendingGroup, evidence });
+    pendingGroup = [];
+    return evidence;
+  }
+
+  for (const item of timeline) {
+    if (item.kind !== "agent") {
+      flushGroup();
+      units.push({ kind: item.kind, data: item.data, evidence: evidenceForEntry(item) });
+      continue;
+    }
+    const type = item.data.event.type;
+    if (type === "UserPrompt") {
+      flushGroup();
+      units.push({ kind: "user-prompt", data: item.data, evidence: [] });
+    } else if (type === "AssistantText") {
+      const evidence = flushGroup();
+      units.push({ kind: "assistant-text", data: item.data, evidence });
+    } else if (type === "Error") {
+      flushGroup();
+      units.push({ kind: "agent-error", data: item.data, evidence: [] });
+    } else if (COLLAPSIBLE_AGENT_EVENT_TYPES.has(type)) {
+      pendingGroup.push(item.data);
+    } else {
+      flushGroup();
+      units.push({ kind: "agent-error", data: item.data, evidence: [] });
+    }
+  }
+  flushGroup();
+  return units;
+}
+
+function evidenceForEntry(item) {
+  if (item.kind === "brief") return item.data.brief ? evidenceRowsFromBrief(item.data.brief) : [];
+  if (item.kind === "snapshot") return item.data.snapshot ? item.data.snapshot.evidence || [] : [];
+  return [];
+}
+
+function renderAgentGroupHtml(items, openByDefault) {
+  const toolCalls = items.filter((i) => i.event.type === "ToolCall").length;
+  const isThinking = items.some((i) => i.event.type === "Thinking" || i.event.type === "ThinkingTokens");
+  const hasError = items.some((i) => i.event.type === "ToolResult" && i.event.data.is_error);
+  const parts = [];
+  if (isThinking) parts.push("Thinking");
+  if (toolCalls) parts.push(`${toolCalls} tool call${toolCalls === 1 ? "" : "s"}`);
+  const summaryText = parts.length ? parts.join(" · ") : `${items.length} step${items.length === 1 ? "" : "s"}`;
+  const bodyHtml = items
+    .map((entry) => {
+      const { cls, text } = classifyEntry(entry);
+      return `<div class="log-entry ${cls}">${escapeHtml(text)}</div>`;
     })
     .join("");
-  scroller.scrollTop = scroller.scrollHeight;
+  return `<details class="turn-details${hasError ? " turn-details-error" : ""}"${openByDefault ? " open" : ""}>
+    <summary>${escapeHtml(summaryText)}</summary>
+    ${bodyHtml}
+  </details>`;
+}
+
+function renderUnitHtml(unit, isLast) {
+  switch (unit.kind) {
+    case "user-prompt":
+    case "agent-error": {
+      const { cls, text } = classifyEntry(unit.data);
+      return `<div class="log-entry ${cls}">${escapeHtml(text)}</div>`;
+    }
+    case "assistant-text": {
+      const { cls, text, markdown } = classifyEntry(unit.data);
+      const html = markdown ? renderMarkdown(escapeHtml(text)) : escapeHtml(text);
+      return `<div class="log-entry ${cls}">${html}</div>`;
+    }
+    case "agent-group":
+      // Open while it's the newest thing in the log and the turn is still
+      // running, so progress is visible live -- collapses on the next
+      // render once the turn finishes (see requirement: "otherwise you
+      // don't know if something is going on").
+      return renderAgentGroupHtml(unit.items, isLast && turnRunning);
+    case "snapshot":
+      return renderSnapshotEntryHtml(unit.data);
+    case "brief":
+      return renderBriefEntryHtml(unit.data);
+    default:
+      return "";
+  }
+}
+
+let timelineUnitsEvidence = [];
+let timelineObserver = null;
+const visibleUnitRatios = new Map();
+
+function updateEvidenceForVisibleUnit() {
+  if (visibleUnitRatios.size === 0) return;
+  let bestIndex = null;
+  let bestRatio = -1;
+  for (const [index, ratio] of visibleUnitRatios) {
+    // Ties go to the most recent (highest-index) unit, not whichever the
+    // Map happened to report first -- matters when a short thread fits
+    // entirely in the viewport and everything is simultaneously at
+    // ratio 1, where "most visible" alone can't distinguish them and
+    // defaulting to the newest message is the more useful behavior.
+    if (ratio > bestRatio || (ratio === bestRatio && index > bestIndex)) {
+      bestRatio = ratio;
+      bestIndex = index;
+    }
+  }
+  if (bestIndex === null) return;
+  renderEvidenceRows(timelineUnitsEvidence[bestIndex] || []);
+}
+
+// Re-attached after every renderChatLog() rebuild, since replacing
+// #log-entries' innerHTML destroys the previously observed elements.
+// IntersectionObserver fires with each element's *current* state as soon
+// as observe() is called, so the evidence panel stays in sync with
+// scroll position across re-renders too, not just live scrolling.
+function observeTimelineUnits() {
+  if (timelineObserver) timelineObserver.disconnect();
+  visibleUnitRatios.clear();
+  // The actual scrolling container is #chat-view (`.view`'s
+  // `overflow-y: auto`), not #log itself -- #log just grows to fit its
+  // content (see its own CSS comment on why it has no min-height/overflow
+  // of its own).
+  const root = document.getElementById("chat-view");
+  timelineObserver = new IntersectionObserver(
+    (observerEntries) => {
+      for (const e of observerEntries) {
+        const index = Number(e.target.dataset.unitIndex);
+        if (e.isIntersecting) {
+          visibleUnitRatios.set(index, e.intersectionRatio);
+        } else {
+          visibleUnitRatios.delete(index);
+        }
+      }
+      updateEvidenceForVisibleUnit();
+    },
+    { root, threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] },
+  );
+  document.querySelectorAll(".timeline-unit").forEach((el) => timelineObserver.observe(el));
+}
+
+function renderChatLog() {
+  const scroller = document.getElementById("chat-view");
+  const entries = document.getElementById("log-entries");
+  // Sticky auto-scroll: only follow new content if the user was already
+  // at (or very near) the bottom before this render. Otherwise force-
+  // scrolling on every update (this fires on every streamed line) would
+  // yank anyone trying to scroll up and read an earlier message/evidence
+  // straight back down.
+  const wasNearBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 48;
+
+  const timeline = mergedTimeline();
+  document.getElementById("log-empty-state").classList.toggle("hidden", timeline.length > 0);
+
+  const units = buildTimelineUnits(timeline);
+  timelineUnitsEvidence = units.map((u) => u.evidence);
+  entries.innerHTML = units
+    .map(
+      (unit, i) =>
+        `<div class="timeline-unit" data-unit-index="${i}">${renderUnitHtml(unit, i === units.length - 1)}</div>`,
+    )
+    .join("");
+  observeTimelineUnits();
+
+  if (wasNearBottom) {
+    scroller.scrollTop = scroller.scrollHeight;
+  }
 }
 
 function renderStatus(status) {
@@ -478,6 +658,7 @@ function renderToday(today) {
   document.getElementById("today-panel").classList.remove("hidden");
   document.getElementById("today-date").textContent =
     `Today · ${new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`;
+  refreshSavedBriefs();
 
   const nextMeeting = today.meetings[0];
   const card = document.getElementById("next-meeting-card");
@@ -511,7 +692,7 @@ function renderToday(today) {
         `<span class="badge ${c.kyc_status === "complete" ? "badge-green" : "badge-red"}">${escapeHtml(c.kyc_status || "unknown")}</span>`,
       ];
       badges.push(`<span class="badge ${c.pep_flag ? "badge-red" : "badge-neutral"}">${c.pep_flag ? "PEP" : "No PEP"}</span>`);
-      return `<button class="book-client" type="button" data-prompt="Tell me about ${escapeHtml(c.name)}">
+      return `<button class="book-client" type="button" data-client-name="${escapeHtml(c.name)}">
         <div class="avatar-circle">${escapeHtml(initialsFor(c.name))}</div>
         <div style="flex:1; min-width:0;">
           <div class="book-client-name">${escapeHtml(c.name)}</div>
@@ -521,10 +702,7 @@ function renderToday(today) {
     })
     .join("");
   document.querySelectorAll(".book-client").forEach((el) => {
-    el.addEventListener("click", () => {
-      showChatView();
-      submit(el.dataset.prompt);
-    });
+    el.addEventListener("click", () => generateClientSnapshot(el.dataset.clientName));
   });
 }
 
@@ -704,6 +882,96 @@ function renderBriefEntryHtml(entry) {
     </div>`;
 }
 
+// Builds the client-snapshot <article> as an HTML string -- same card
+// language as buildBriefArticleHtml (reusing its CSS classes) but for
+// src/client_snapshot.rs's smaller, LLM-filled-in shape: a summary, a
+// handful of facts, and a few talking points. See that file's doc comment
+// for why this one lets the model use tools instead of pre-fetching facts.
+function buildClientSnapshotArticleHtml(snapshot) {
+  const factsHtml = snapshot.facts
+    .map(
+      (f) => `<div class="snapshot-fact">
+        <p class="snapshot-fact-label">${escapeHtml(f.label)}</p>
+        <p class="snapshot-fact-value">${escapeHtml(f.value)}</p>
+      </div>`,
+    )
+    .join("");
+
+  const talkingPointsHtml = snapshot.talking_points
+    .map(
+      (p, i) => `<li class="brief-point">
+        <span class="brief-point-n">${i + 1}</span>
+        <p class="brief-point-title">${escapeHtml(p.title)}</p>
+        <p class="brief-point-detail">${escapeHtml(p.detail)}</p>
+      </li>`,
+    )
+    .join("");
+
+  return `<article class="brief">
+    <header class="brief-head">
+      <p class="brief-eyebrow">Client snapshot</p>
+      <div class="brief-title-row">
+        <h1 class="brief-title">${escapeHtml(snapshot.client_name)}</h1>
+      </div>
+      <p class="brief-summary">${escapeHtml(snapshot.summary)}</p>
+    </header>
+    ${factsHtml ? `<div class="snapshot-facts">${factsHtml}</div>` : ""}
+    ${
+      snapshot.talking_points.length
+        ? `<section class="brief-points-section">
+      <h2 class="brief-panel-title">Talking points</h2>
+      <ol class="brief-points">${talkingPointsHtml}</ol>
+    </section>`
+        : ""
+    }
+  </article>`;
+}
+
+// Renders one synthetic "snapshot" timeline entry -- same loading/error/
+// ready states as renderBriefEntryHtml.
+function renderSnapshotEntryHtml(entry) {
+  const promptHtml = `<div class="log-entry user-prompt">${escapeHtml(entry.prompt)}</div>`;
+  if (entry.loading) {
+    return `${promptHtml}<div class="field-hint">Looking into ${escapeHtml(entry.query)}…</div>`;
+  }
+  if (entry.error) {
+    return `${promptHtml}<div class="playground-error">${escapeHtml(entry.error)}</div>`;
+  }
+  return `${promptHtml}${buildClientSnapshotArticleHtml(entry.snapshot)}`;
+}
+
+// Triggered by clicking a client in the sidebar's book (see renderToday())
+// instead of the old free-text `submit("Tell me about {name}")`, which ran
+// the full interactive chat and rendered plain markdown. This asks for a
+// client snapshot instead: a one-shot, schema-constrained LLM call
+// (mcp_client_snapshot) rendered through the same card template as the
+// Meeting Brief, inline in the chat log like generateBrief() does.
+async function generateClientSnapshot(clientName) {
+  showChatView();
+
+  const entry = {
+    kind: "snapshot",
+    afterCount: lastBackendLog.length,
+    prompt: `Tell me about ${clientName}`,
+    query: clientName,
+    snapshot: null,
+    error: null,
+    loading: true,
+  };
+  syntheticEntries.push(entry);
+  renderChatLog();
+
+  try {
+    const snapshot = await invoke("mcp_client_snapshot", { query: clientName });
+    entry.loading = false;
+    entry.snapshot = snapshot;
+  } catch (err) {
+    entry.loading = false;
+    entry.error = String(err);
+  }
+  renderChatLog();
+}
+
 // Dummy per the spec ("not implemented") -- present so the template looks
 // right, deliberately inert. Event delegation since brief cards are
 // rebuilt via innerHTML on every renderChatLog() call, which would drop
@@ -718,7 +986,8 @@ async function generateBrief() {
   const btn = document.getElementById("brief-open-btn");
   if (briefRequested) {
     showChatView();
-    document.getElementById("log").scrollTo({ top: document.getElementById("log").scrollHeight, behavior: "smooth" });
+    const view = document.getElementById("chat-view");
+    view.scrollTo({ top: view.scrollHeight, behavior: "smooth" });
     return;
   }
   briefRequested = true;
@@ -727,6 +996,7 @@ async function generateBrief() {
   showChatView();
 
   const entry = {
+    kind: "brief",
     afterCount: lastBackendLog.length,
     prompt: "I have an upcoming meeting with one of my clients. Catch me up.",
     brief: null,
@@ -740,27 +1010,93 @@ async function generateBrief() {
     const brief = await invoke("mcp_meeting_brief");
     entry.loading = false;
     entry.brief = brief;
-    cachedBrief = brief;
-    renderEvidenceRows(evidenceRowsFromBrief(brief));
-    const reg = brief.regulatory;
-    document.getElementById("regulatory-card").classList.toggle("hidden", !reg);
-    if (reg) {
-      document.getElementById("regulatory-text").textContent = reg.text;
-      // Just the source filename -- "fictional corpus" was the mockup's
-      // own flavor text for its hand-written illustrative example; this
-      // is a real search_regulatory_guidance result, not fabricated, and
-      // labeling it otherwise would be actively misleading.
-      document.getElementById("regulatory-source").textContent = reg.source;
-    }
-    renderAttention(brief);
+    applyBriefToSidebar(brief);
     btn.textContent = "Brief ready · open";
     btn.disabled = false;
+    refreshSavedBriefs(); // the backend auto-saves on generate; pick up the new entry
   } catch (err) {
     entry.loading = false;
     entry.error = String(err);
     briefRequested = false;
     btn.textContent = "Generate brief";
     btn.disabled = false;
+  }
+  renderChatLog();
+}
+
+// Shared by generateBrief() and loadSavedBrief() -- everything outside the
+// chat log itself (cachedBrief, evidence panel default, regulatory card,
+// attention card) that a freshly generated or recovered brief updates.
+function applyBriefToSidebar(brief) {
+  cachedBrief = brief;
+  renderEvidenceRows(evidenceRowsFromBrief(brief));
+  const reg = brief.regulatory;
+  document.getElementById("regulatory-card").classList.toggle("hidden", !reg);
+  if (reg) {
+    document.getElementById("regulatory-text").textContent = reg.text;
+    // Just the source filename -- "fictional corpus" was the mockup's own
+    // flavor text for its hand-written illustrative example; this is a
+    // real search_regulatory_guidance result, not fabricated, and
+    // labeling it otherwise would be actively misleading.
+    document.getElementById("regulatory-source").textContent = reg.source;
+  }
+  renderAttention(brief);
+}
+
+// --- Saved briefs -------------------------------------------------------
+
+async function refreshSavedBriefs() {
+  const container = document.getElementById("saved-briefs-list");
+  if (!container) return;
+  try {
+    const briefs = await invoke("list_saved_briefs");
+    if (briefs.length === 0) {
+      container.innerHTML = '<p class="field-hint">No saved briefs yet.</p>';
+      return;
+    }
+    container.innerHTML = briefs
+      .map(
+        (b) =>
+          `<a href="#" data-client-id="${escapeHtml(b.client_id)}" data-date="${escapeHtml(b.date)}">${escapeHtml(b.client_name)} &middot; ${escapeHtml(b.date)}</a>`,
+      )
+      .join("");
+    container.querySelectorAll("a").forEach((el) => {
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        loadSavedBrief(el.dataset.clientId, el.dataset.date);
+      });
+    });
+  } catch (err) {
+    console.error("parrot-tauri: list_saved_briefs failed", err);
+  }
+}
+
+// Recovers a previously generated brief from disk (src/meeting_brief.rs's
+// `load_saved_brief`) -- same inline-in-chat rendering as a freshly
+// generated one, just sourced from the saved-briefs sidebar instead of
+// "Generate brief".
+async function loadSavedBrief(clientId, date) {
+  showChatView();
+
+  const entry = {
+    kind: "brief",
+    afterCount: lastBackendLog.length,
+    prompt: `Show me the saved brief for ${clientId} on ${date}.`,
+    brief: null,
+    error: null,
+    loading: true,
+  };
+  syntheticEntries.push(entry);
+  renderChatLog();
+
+  try {
+    const brief = await invoke("load_saved_brief", { clientId, date });
+    entry.loading = false;
+    entry.brief = brief;
+    applyBriefToSidebar(brief);
+  } catch (err) {
+    entry.loading = false;
+    entry.error = String(err);
   }
   renderChatLog();
 }

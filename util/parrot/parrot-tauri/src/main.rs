@@ -20,6 +20,7 @@
 //! Claude Code/Codex JSONL classification in JavaScript.
 
 mod cli;
+mod client_snapshot;
 mod mcp;
 mod meeting_brief;
 
@@ -202,6 +203,7 @@ async fn submit_turn(
             prompt: &prompt,
             mcp_config: mcp_config.as_deref(),
             session_id: resume_session_id.as_deref(),
+            no_builtin_tools: false,
         };
         let command = agent.build_turn(&turn_opts);
         let exec_opts = StreamedExecOptions {
@@ -351,7 +353,10 @@ fn main() {
             mcp::mcp_list_tools,
             mcp::mcp_call_tool,
             mcp::mcp_today,
-            meeting_brief::mcp_meeting_brief
+            meeting_brief::mcp_meeting_brief,
+            meeting_brief::list_saved_briefs,
+            meeting_brief::load_saved_brief,
+            client_snapshot::mcp_client_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running parrot-tauri");

@@ -23,6 +23,18 @@ pub struct TurnOptions<'a> {
     pub mcp_config: Option<&'a str>,
     /// A prior turn's session id, to continue the same conversation.
     pub session_id: Option<&'a str>,
+    /// Claude Code only: force `--tools ""` (no built-in Bash/Read/
+    /// WebSearch/...) even when `mcp_config` is `None`. Ignored when
+    /// `mcp_config` is `Some` -- built-ins are already disabled in that
+    /// case (see the comment where `--tools` is pushed below). For
+    /// one-shot structured-JSON turns (`structured_turn::run_structured_turn`)
+    /// that should only reason over the prompt's own content, not explore
+    /// anything -- confirmed live that leaving this `false` with no MCP
+    /// config lets the model reach for a built-in tool (most likely
+    /// WebSearch) that then hard-fails against this demo's on-cluster
+    /// vLLM backend, surfacing as a broken-pipe exec-stream failure
+    /// rather than a clean error.
+    pub no_builtin_tools: bool,
 }
 
 impl Agent {
@@ -79,6 +91,9 @@ impl Agent {
                     // backends (they reject the web_search_20250305 server
                     // tool type). Confirmed live against keycloak-oidc's
                     // Lysmark tax scenario.
+                    args.push("--tools".to_string());
+                    args.push(String::new());
+                } else if opts.no_builtin_tools {
                     args.push("--tools".to_string());
                     args.push(String::new());
                 }
@@ -150,6 +165,7 @@ mod tests {
             prompt: "hi",
             mcp_config: Some("/sandbox/.claude/mcp-servers.json"),
             session_id: None,
+            no_builtin_tools: false,
         };
         let args = Agent::ClaudeCode.build_turn(&opts);
         assert!(!args.iter().any(|a| a == "--resume"));
@@ -162,6 +178,7 @@ mod tests {
             prompt: "hi",
             mcp_config: Some("/sandbox/.claude/mcp-servers.json"),
             session_id: None,
+            no_builtin_tools: false,
         };
         let args = Agent::ClaudeCode.build_turn(&opts);
         let tools_pos = args.iter().position(|a| a == "--tools").unwrap();
@@ -174,6 +191,7 @@ mod tests {
             prompt: "hi",
             mcp_config: None,
             session_id: None,
+            no_builtin_tools: false,
         };
         let args = Agent::Codex.build_turn(&opts);
         assert!(args.iter().any(|a| a == "--skip-git-repo-check"));
@@ -189,6 +207,7 @@ mod tests {
             prompt: "and then?",
             mcp_config: None,
             session_id: Some("01a07df3-c913-7602-b0eb-da2f407e44d5"),
+            no_builtin_tools: false,
         };
         let args = Agent::Codex.build_turn(&opts);
         assert_eq!(args[2], "resume");
@@ -202,6 +221,7 @@ mod tests {
             prompt: "and then?",
             mcp_config: None,
             session_id: Some("abc-123"),
+            no_builtin_tools: false,
         };
         let args = Agent::ClaudeCode.build_turn(&opts);
         let idx = args

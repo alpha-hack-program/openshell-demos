@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The "Meeting Brief" feature: a deterministic report for the banker's
-//! next upcoming meeting, assembled from a fixed recipe of direct MCP
-//! tool calls — no LLM, no agent loop. This is the thing the
-//! "Meridian Advisor Desk" mockup calls the copilot's output, but it's
-//! really just orchestration: every number and verdict here is exactly
-//! what the matching tool returned, with simple arithmetic (sector
-//! concentration %, ahead/behind benchmark) on top — nothing invented.
-//! The chat pane (main.rs) is the place for genuinely open-ended
-//! questions; this is for the one specific, well-known report a banker
-//! asks for dozens of times a day.
+//! The "Meeting Brief" feature: a report for the banker's next upcoming
+//! meeting. Every *fact* (performance, allocation, suitability, notes,
+//! news) comes from a fixed recipe of direct MCP tool calls — no LLM
+//! involved, nothing invented. The *headline*/*talking points* are the
+//! interpretive part: a one-shot, schema-constrained LLM call
+//! (`request_brief_insights`) is handed exactly those already-verified
+//! facts and asked to turn them into prose, with no tool access of its
+//! own (it can't go look up anything not already given to it, so it
+//! can't introduce a fact that isn't traceable to a tool result above).
+//! If that call fails or returns something unparseable,
+//! `build_headline`/`build_talking_points`'s plain Rust templating is the
+//! fallback — the brief never breaks because the LLM step had a bad day.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parrot_core::McpGatewayClient;
 use tauri::State;
 
 use crate::mcp::McpState;
+use crate::AppState;
 
 /// This demo's product catalog (`mcp-kyc-compliance`'s `check_suitability`
 /// takes a `product_id` but there's no `list_products` tool for the banker
@@ -43,46 +46,55 @@ const CONCENTRATION_LIMIT_PCT: f64 = 25.0;
 /// data for this client for this period — confirmed live (not every
 /// client/period combination in this demo's fixture data has one), so
 /// this is a real, expected case, not a call to fail the whole brief over.
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct PerformancePeriod {
     period: String,
     twr: Option<f64>,
     benchmark_twr: Option<f64>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AllocationSlice {
     sector: String,
     pct: f64,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct NewsItem {
     headline: String,
     ticker: Option<String>,
     sector: Option<String>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SuitabilityResult {
     product_name: String,
     potentially_suitable: bool,
     explanation: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct RegulatoryFragment {
     source: String,
     text: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TalkingPoint {
     title: String,
     detail: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+/// The shape `request_brief_insights`'s prompt asks the LLM to reply
+/// with, verbatim -- parsed straight out of `run_structured_turn`'s
+/// result.
+#[derive(serde::Deserialize)]
+struct BriefInsights {
+    headline: String,
+    talking_points: Vec<TalkingPoint>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct EvidenceCall {
     n: u32,
     tool: String,
@@ -90,7 +102,7 @@ pub struct EvidenceCall {
     source: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MeetingBrief {
     meeting_id: String,
     client_id: String,
@@ -130,18 +142,165 @@ impl EvidenceLog {
 }
 
 #[tauri::command]
-pub async fn mcp_meeting_brief(state: State<'_, McpState>) -> Result<MeetingBrief, String> {
-    let client = state
+pub async fn mcp_meeting_brief(
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpState>,
+) -> Result<MeetingBrief, String> {
+    let mcp_client = mcp_state
         .client()
         .await
         .ok_or_else(|| "not logged in to the MCP Gateway yet".to_string())?;
-    build_meeting_brief(&client).await
+    let brief = build_meeting_brief(
+        &mcp_client,
+        &state.client,
+        &state.sandbox,
+        state.workspace.as_deref(),
+        state.agent,
+        state.environment.clone(),
+    )
+    .await?;
+    // Best-effort: a brief that generated fine but failed to save to disk
+    // should still reach the UI -- only `list_saved_briefs`/
+    // `load_saved_brief` callers need to know persistence actually
+    // worked, and they'll see an empty/missing result if it didn't.
+    if let Err(err) = save_brief(&brief) {
+        eprintln!("parrot-tauri: failed to save meeting brief to disk: {err}");
+    }
+    Ok(brief)
+}
+
+/// `$XDG_STATE_HOME/parrot-tauri/briefs/` (falling back to
+/// `$HOME/.local/state` like the rest of the XDG base-dir spec) -- briefs
+/// are per-persona the same way the OpenShell CLI's own
+/// `$XDG_STATE_HOME`-scoped state already is, so alice's and bob's saved
+/// briefs never collide even launched from the same machine (each demo
+/// persona's `parrot.sh` invocation sets its own `XDG_STATE_HOME`).
+fn briefs_dir() -> Result<std::path::PathBuf, String> {
+    let state_home = std::env::var("XDG_STATE_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|home| std::path::PathBuf::from(home).join(".local").join("state"))
+        })
+        .ok_or_else(|| "neither XDG_STATE_HOME nor HOME is set".to_string())?;
+    Ok(state_home.join("parrot-tauri").join("briefs"))
+}
+
+/// Keeps only characters safe in a filename -- `client_id`/`date` come
+/// from tool-returned data, not arbitrary user text, but this is cheap
+/// insurance against a stray `/` turning into a path traversal.
+fn sanitize_filename_component(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Just the `YYYY-MM-DD` portion of an RFC 3339 `datetime` -- the key a
+/// saved brief is recovered by, alongside `client_id`. Falls back to the
+/// whole string if it doesn't contain a `T` (shouldn't happen for real
+/// tool-returned datetimes, but keeps this infallible either way).
+fn date_of(datetime: &str) -> &str {
+    datetime.split('T').next().unwrap_or(datetime)
+}
+
+fn brief_path(client_id: &str, date: &str) -> Result<std::path::PathBuf, String> {
+    Ok(briefs_dir()?.join(format!(
+        "{}__{}.json",
+        sanitize_filename_component(client_id),
+        sanitize_filename_component(date)
+    )))
+}
+
+fn save_brief(brief: &MeetingBrief) -> Result<(), String> {
+    let path = brief_path(&brief.client_id, date_of(&brief.datetime))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_vec_pretty(brief).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct SavedBriefSummary {
+    client_id: String,
+    client_name: String,
+    date: String,
+}
+
+/// Lists every saved brief, newest meeting first -- used to populate the
+/// sidebar's "Saved briefs" section. Corrupt/unreadable files are skipped
+/// rather than failing the whole list, since this is a cache of past
+/// generations, not critical state.
+#[tauri::command]
+pub fn list_saved_briefs() -> Result<Vec<SavedBriefSummary>, String> {
+    let dir = briefs_dir()?;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.to_string()),
+    };
+
+    let mut summaries: Vec<(String, SavedBriefSummary)> = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(brief) = serde_json::from_slice::<MeetingBrief>(&bytes) else {
+            continue;
+        };
+        let date = date_of(&brief.datetime).to_string();
+        summaries.push((
+            brief.datetime.clone(),
+            SavedBriefSummary {
+                client_id: brief.client_id,
+                client_name: brief.client_name,
+                date,
+            },
+        ));
+    }
+    summaries.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(summaries.into_iter().map(|(_, s)| s).collect())
+}
+
+/// Recovers one previously generated brief by exactly the key it was
+/// saved under.
+#[tauri::command]
+pub fn load_saved_brief(client_id: String, date: String) -> Result<MeetingBrief, String> {
+    let path = brief_path(&client_id, &date)?;
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("no saved brief for {client_id} on {date}: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
 /// The actual orchestration, kept separate from the `#[tauri::command]`
 /// wrapper above so it can be exercised directly (see this crate's
 /// development notes) without needing a running Tauri app/webview.
-pub async fn build_meeting_brief(client: &Arc<McpGatewayClient>) -> Result<MeetingBrief, String> {
+/// `exec_client`/`sandbox`/`workspace`/`agent`/`environment` are only used
+/// for `request_brief_insights`'s one-shot LLM call -- deliberately no
+/// `mcp_config` parameter here, since that call must never get tool
+/// access (see this module's doc comment).
+#[allow(clippy::too_many_arguments)]
+pub async fn build_meeting_brief(
+    client: &Arc<McpGatewayClient>,
+    exec_client: &parrot_core::ParrotClient,
+    sandbox: &str,
+    workspace: Option<&str>,
+    agent: parrot_core::Agent,
+    environment: HashMap<String, String>,
+) -> Result<MeetingBrief, String> {
     let mut evidence = EvidenceLog(Vec::new());
 
     let meetings_out = call(
@@ -425,9 +584,33 @@ pub async fn build_meeting_brief(client: &Arc<McpGatewayClient>) -> Result<Meeti
             text: excerpt_regulatory_text(&field_str(&fragment, "text")),
         });
 
-    let talking_points =
-        build_talking_points(&over_limit_sectors, &allocation, &suitability, &performance);
-    let headline = build_headline(&client_name, &over_limit_sectors, &performance);
+    let insights = request_brief_insights(
+        exec_client,
+        sandbox,
+        workspace,
+        agent,
+        environment,
+        &client_name,
+        &performance,
+        &allocation,
+        &over_limit_sectors,
+        &suitability,
+        notes.as_deref(),
+    )
+    .await;
+    let (headline, talking_points) = match insights {
+        Ok(insights) => (insights.headline, insights.talking_points),
+        Err(err) => {
+            eprintln!(
+                "parrot-tauri: meeting-brief LLM insights failed, falling back to \
+                 deterministic templating: {err}"
+            );
+            (
+                build_headline(&client_name, &over_limit_sectors, &performance),
+                build_talking_points(&over_limit_sectors, &allocation, &suitability, &performance),
+            )
+        }
+    };
 
     Ok(MeetingBrief {
         meeting_id,
@@ -461,6 +644,64 @@ async fn call(
         .await
         .map_err(|e| e.to_string())?;
     Ok(parrot_core::unwrap_tool_output(&result))
+}
+
+/// One-shot, no-tools LLM call: hands the model exactly the facts already
+/// fetched above and asks it to turn them into a headline + talking
+/// points, as JSON matching [`BriefInsights`]. `mcp_config: None` on the
+/// underlying turn means the model has no tools to call -- it can only
+/// reason over what's in the prompt, so it can't introduce a claim that
+/// doesn't trace back to a fact this function was given.
+#[allow(clippy::too_many_arguments)]
+async fn request_brief_insights(
+    exec_client: &parrot_core::ParrotClient,
+    sandbox: &str,
+    workspace: Option<&str>,
+    agent: parrot_core::Agent,
+    environment: HashMap<String, String>,
+    client_name: &str,
+    performance: &[PerformancePeriod],
+    allocation: &[AllocationSlice],
+    over_limit_sectors: &[String],
+    suitability: &[SuitabilityResult],
+    notes: Option<&str>,
+) -> Result<BriefInsights, String> {
+    let facts = serde_json::json!({
+        "client_name": client_name,
+        "performance": performance,
+        "allocation": allocation,
+        "over_limit_sectors": over_limit_sectors,
+        "suitability": suitability,
+        "notes_from_last_meeting": notes,
+    });
+    let prompt = format!(
+        "You are drafting the headline and talking points for a private banker's \
+         pre-meeting brief. Use ONLY the facts in this JSON -- every one of them is \
+         already verified; do not invent any number, product, or claim that isn't in \
+         here:\n\n{facts}\n\n\
+         Respond with ONLY a JSON object, no markdown code fence and no text before or \
+         after it, matching exactly this shape:\n\
+         {{\"headline\": \"one or two sentences summarizing the meeting\", \
+         \"talking_points\": [{{\"title\": \"short title\", \"detail\": \"one sentence\"}}]}}\n\
+         Produce 2 to 4 talking points, ordered by priority (sector concentration or \
+         compliance flags first if present)."
+    );
+
+    // `evidence` is always empty here (no `mcp_config`, see this module's
+    // doc comment) -- not surfaced in `BriefInsights`, nothing to merge.
+    let result = parrot_core::run_structured_turn(
+        exec_client,
+        sandbox,
+        workspace,
+        agent,
+        None,
+        environment,
+        &prompt,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    serde_json::from_value(result.value).map_err(|e| e.to_string())
 }
 
 /// `search_regulatory_guidance` returns each hit's *entire* source
@@ -583,6 +824,21 @@ fn build_talking_points(
 mod tests {
     use super::*;
 
+    #[test]
+    fn sanitizes_unsafe_filename_characters() {
+        assert_eq!(sanitize_filename_component("cli-004"), "cli-004");
+        assert_eq!(
+            sanitize_filename_component("../../etc/passwd"),
+            "______etc_passwd"
+        );
+    }
+
+    #[test]
+    fn date_of_extracts_date_portion() {
+        assert_eq!(date_of("2026-11-22T10:30:00Z"), "2026-11-22");
+        assert_eq!(date_of("no-time-portion"), "no-time-portion");
+    }
+
     /// Exercises the real recipe against a live cluster — not run in CI
     /// (needs a logged-in Keycloak user via Playwright, same as the demo's
     /// own headless-browser-automation docs). Run manually:
@@ -592,13 +848,20 @@ mod tests {
     /// ```
     ///
     /// with `KEYCLOAK_HOST`, `MCP_GATEWAY_URL`, and `PLAYWRIGHT_LOGIN_SCRIPT`
-    /// set (see `docs/headless-browser-automation.md` for the script).
+    /// set (see `docs/headless-browser-automation.md` for the script), plus
+    /// `SANDBOX_NAME`/`WORKSPACE` for the exec client `request_brief_insights`
+    /// needs (defaults to alice's usual `claude-alice`/`alice`) — run with
+    /// the same `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`SSL_CERT_FILE` env a real
+    /// `parrot-tauri` launch for that workspace would use, so the OpenShell
+    /// gateway/sandbox lookup below resolves the same way `main()` does.
     #[tokio::test]
     #[ignore]
     async fn live_build_meeting_brief_against_alice() {
         let host = std::env::var("KEYCLOAK_HOST").expect("set KEYCLOAK_HOST");
         let gateway_url = std::env::var("MCP_GATEWAY_URL").expect("set MCP_GATEWAY_URL");
         let script = std::env::var("PLAYWRIGHT_LOGIN_SCRIPT").expect("set PLAYWRIGHT_LOGIN_SCRIPT");
+        let sandbox = std::env::var("SANDBOX_NAME").unwrap_or_else(|_| "claude-alice".to_string());
+        let workspace = std::env::var("WORKSPACE").unwrap_or_else(|_| "alice".to_string());
 
         let config = parrot_core::McpAuthConfig {
             issuer: format!("https://{host}/realms/openshell"),
@@ -627,10 +890,20 @@ mod tests {
                 .await
                 .expect("connect to MCP Gateway"),
         );
-
-        let brief = build_meeting_brief(&client)
+        let exec_client = parrot_core::ParrotClient::connect(None, None)
             .await
-            .expect("build_meeting_brief");
+            .expect("connect to OpenShell gateway");
+
+        let brief = build_meeting_brief(
+            &client,
+            &exec_client,
+            &sandbox,
+            Some(workspace.as_str()),
+            parrot_core::Agent::ClaudeCode,
+            parrot_core::detect_passthrough_environment(),
+        )
+        .await
+        .expect("build_meeting_brief");
 
         assert!(!brief.client_id.is_empty());
         assert!(!brief.evidence.is_empty());
