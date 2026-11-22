@@ -108,6 +108,42 @@ a {
   color: var(--header-muted);
 }
 
+.splash-connect-btn {
+  margin-top: 0.75rem;
+  padding: 10px 28px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-dark);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.splash-connect-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.splash-connect-btn.hidden {
+  display: none;
+}
+
+.splash-error {
+  color: var(--badge-red-text);
+  background: var(--badge-red-bg);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 420px;
+  text-align: center;
+}
+
+.splash-error:empty {
+  display: none;
+}
+
 /* --- App shell --- */
 
 .app {
@@ -159,37 +195,17 @@ a {
   text-transform: uppercase;
 }
 
-.app-header-search {
-  flex: 1 1 360px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 640px;
+.header-view-toggle {
   height: 40px;
-  padding: 0 14px;
+  padding: 0 18px;
   border-radius: 10px;
   background: var(--header-input-bg);
   border: 1px solid var(--header-input-border);
-  color: var(--header-muted);
-}
-
-.app-header-search input {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: 0;
-  outline: none;
   color: var(--bg);
   font-family: inherit;
-  font-size: 14px;
-}
-
-.app-header-search kbd {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--header-input-border);
-  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
 .app-header-right {
@@ -208,12 +224,27 @@ a {
   color: var(--header-muted-2);
 }
 
-.app-header-illustrative {
+.header-status-pill {
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: var(--badge-illustrative-bg);
-  color: var(--badge-illustrative-text);
+  background: var(--badge-neutral-bg);
+  color: var(--badge-neutral-text);
+}
+
+.header-status-pill.pill-online {
+  background: var(--badge-green-bg);
+  color: var(--badge-green-text);
+}
+
+.header-status-pill.pill-poor {
+  background: var(--badge-amber-bg);
+  color: var(--badge-amber-text);
+}
+
+.header-status-pill.pill-offline {
+  background: var(--badge-neutral-bg);
+  color: var(--badge-neutral-text);
 }
 
 .app-header-identity {
@@ -288,12 +319,6 @@ a {
   padding: 18px;
 }
 
-.mcp-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .mcp-connect-btn {
   width: 100%;
   height: 44px;
@@ -314,6 +339,68 @@ a {
 .mcp-status {
   color: var(--muted);
   font-size: 0.85em;
+}
+
+.header-view-toggle.muted {
+  opacity: 0.55;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 23, 38, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 360px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.modal-title {
+  margin: 0 0 8px;
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.modal-message {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-actions .mcp-connect-btn {
+  width: auto;
+  padding: 0 20px;
+}
+
+.modal-dismiss-btn {
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 0 16px;
+  height: 40px;
+  color: var(--muted);
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .next-meeting-top {

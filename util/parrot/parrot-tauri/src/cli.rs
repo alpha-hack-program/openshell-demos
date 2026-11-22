@@ -30,9 +30,12 @@ fn parse_agent(value: &str) -> Result<Agent, String> {
 /// parrot-tauri — a desktop (Tauri/WebView) frontend for streaming agent
 /// CLIs (Claude Code, Codex) running inside OpenShell sandboxes.
 ///
-/// Same connect-by-flags model as `parrot-tui`/`parrot-gpui`: there is no
-/// in-app login/picker screen, so `--sandbox` (and `--gateway`/`--workspace`
-/// when ambiguous) must be given at launch, same as the other two frontends.
+/// Unlike `parrot-tui`/`parrot-gpui`, `--sandbox` is optional: when omitted,
+/// the splash screen resolves identity first, then lets the user click
+/// Connect to attach to `{sandbox_prefix}{agent}-{workspace}` (an
+/// already-provisioned sandbox — this never creates one). Pass `--sandbox`
+/// explicitly to skip that screen entirely, same connect-by-flags behavior
+/// as the other two frontends (useful for scripted/CI launches).
 /// Interactive by default: type a prompt, press Enter, watch it stream,
 /// then type the next one. Pass `--prompt` to also submit one automatically
 /// as soon as the window opens (the window stays open afterward, same as
@@ -49,9 +52,19 @@ pub struct Cli {
     #[arg(long = "gateway-endpoint", env = "OPENSHELL_GATEWAY_ENDPOINT")]
     pub gateway_endpoint: Option<String>,
 
-    /// Sandbox to run the agent inside.
+    /// Sandbox to run the agent inside. Omit to resolve it from identity
+    /// via the splash screen's Connect button instead (see
+    /// `--sandbox-prefix`).
     #[arg(short = 's', long = "sandbox")]
-    pub sandbox: String,
+    pub sandbox: Option<String>,
+
+    /// Prefix used when computing the sandbox name for the splash screen's
+    /// Connect button (`{prefix}{agent}-{workspace}`), only consulted when
+    /// `--sandbox` is omitted. Matches `demos/keycloak-oidc/scripts/
+    /// parrot.sh`'s own naming split: `"aud-"` for audited launches, empty
+    /// otherwise.
+    #[arg(long = "sandbox-prefix", env = "OPENSHELL_SANDBOX_PREFIX")]
+    pub sandbox_prefix: Option<String>,
 
     /// Workspace the sandbox lives in. Auto-detected when you're only a
     /// member of one workspace (the common case); required via this flag

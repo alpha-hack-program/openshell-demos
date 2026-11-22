@@ -27,6 +27,159 @@ let activeTool = null;
 let activeForm = null;
 let cachedBrief = null;
 let briefRequested = false; // true once "Generate brief" has been clicked at least once
+let turnsCompleted = 0; // drives the composer placeholder ("Ask a question" -> "Reply")
+
+// --- Connection heartbeat ---------------------------------------------
+//
+// Neither the sandbox exec channel nor the MCP Gateway session is ever
+// re-checked once connected (sandbox_phase/mcp_login are both one-shot) --
+// this polls the sandbox on an interval and piggybacks on every successful
+// real call (a finished turn, a tool call) to mark both as freshly alive,
+// since those already prove liveness without a redundant round-trip.
+const SANDBOX_POLL_MS = 30000;
+let sandboxName = null;
+let mcpAvailable = false;
+let mcpConnected = false;
+let lastSandboxOkAt = null;
+let lastMcpOkAt = null;
+let sandboxPollStarted = false;
+let pendingPrompt = null; // --prompt, queued until connect_sandbox succeeds
+
+function noteSandboxOk() {
+  lastSandboxOkAt = Date.now();
+  updateConnectionHeader();
+}
+
+function noteMcpOk() {
+  lastMcpOkAt = Date.now();
+  updateConnectionHeader();
+}
+
+function timeAgo(ms) {
+  const seconds = Math.round((Date.now() - ms) / 1000);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes}m ago`;
+}
+
+function updateConnectionHeader() {
+  const readonlyEl = document.getElementById("header-readonly-text");
+  const pillEl = document.getElementById("header-status-pill");
+  if (!readonlyEl || !pillEl) return;
+
+  if (!sandboxName) {
+    readonlyEl.textContent = "SSO · not connected";
+    pillEl.textContent = "Offline";
+    pillEl.className = "header-status-pill pill-offline";
+    return;
+  }
+
+  const staleAfter = SANDBOX_POLL_MS * 2;
+  const sandboxAge = lastSandboxOkAt ? Date.now() - lastSandboxOkAt : Infinity;
+  const mcpAge = lastMcpOkAt ? Date.now() - lastMcpOkAt : Infinity;
+  const mcpOk = !mcpConnected || mcpAge < staleAfter;
+
+  let label;
+  let cls;
+  if (lastSandboxOkAt && sandboxAge < staleAfter && mcpOk) {
+    label = "online";
+    cls = "pill-online";
+  } else if (lastSandboxOkAt) {
+    label = "poor";
+    cls = "pill-poor";
+  } else {
+    label = "offline";
+    cls = "pill-offline";
+  }
+
+  const suffix = lastSandboxOkAt ? ` · ${timeAgo(lastSandboxOkAt)}` : "";
+  readonlyEl.textContent = `SSO · sandbox ${sandboxName} · ${label}${suffix}`;
+  pillEl.textContent = label === "online" ? "Online" : label === "poor" ? "Poor" : "Offline";
+  pillEl.className = `header-status-pill ${cls}`;
+}
+
+async function pollSandboxStatus() {
+  if (!sandboxName) return;
+  try {
+    await invoke("sandbox_status");
+    noteSandboxOk();
+  } catch (err) {
+    console.error("parrot-tauri: sandbox_status failed", err);
+    updateConnectionHeader();
+  }
+}
+
+// Shared by both attach paths -- an explicit --sandbox at launch, or a
+// successful connect_sandbox -- so the header/splash render identically
+// either way.
+function applySandboxInfo(sandbox, phase) {
+  sandboxName = sandbox;
+  lastSandboxOkAt = Date.now();
+
+  document.getElementById("splash-sandbox").textContent = `Sandbox: ${sandbox} (${phase})`;
+
+  document.getElementById("header-sandbox").textContent = `sandbox ${sandbox} — `;
+  const phaseEl = document.getElementById("header-sandbox-phase");
+  phaseEl.textContent = `${phase} — `;
+  phaseEl.className = `status ${sandboxPhaseClass(phase)}`;
+
+  updateConnectionHeader();
+  if (!sandboxPollStarted) {
+    sandboxPollStarted = true;
+    setInterval(pollSandboxStatus, SANDBOX_POLL_MS);
+  }
+}
+
+// The splash screen's Connect button. When MCP is configured for this
+// launch, identity comes from *there*: log into the MCP Gateway first (the
+// same interactive Keycloak flow as before), extract its
+// `preferred_username` (the stable login name -- NOT `display_name`, which
+// prefers "Alice Meridian" over "alice" and would produce a malformed
+// sandbox name), and pass that to `connect_sandbox` so it computes
+// `{sandbox_prefix}{agent}-{preferred_username}`. Only falls back to the
+// primary gateway's own `state.workspace` (server-side) when MCP isn't
+// configured at all -- there's no MCP identity to derive from in that
+// case. `connect_sandbox` only ever *reads*/verifies the sandbox (never
+// creates one); a specific failure (e.g. "ask your admin to provision
+// ...") surfaces inline.
+async function connectSandbox() {
+  const btn = document.getElementById("splash-connect-btn");
+  const errorEl = document.getElementById("splash-error");
+  btn.disabled = true;
+  errorEl.textContent = "";
+
+  let user = null;
+  if (mcpAvailable) {
+    try {
+      const identity = await mcpLogin();
+      user = identity.preferred_username || null;
+    } catch (err) {
+      errorEl.textContent = `Couldn't log in to the MCP Gateway: ${err}`;
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  try {
+    const result = await invoke("connect_sandbox", { user });
+    applySandboxInfo(result.sandbox, result.sandbox_phase);
+    dismissSplash();
+    if (pendingPrompt) {
+      const prompt = pendingPrompt;
+      pendingPrompt = null;
+      submit(prompt);
+    }
+  } catch (err) {
+    errorEl.textContent = String(err);
+    btn.disabled = false;
+    return;
+  }
+
+  if (mcpAvailable) {
+    loadMcpToolsAndToday();
+  }
+}
 
 // The chat transcript is a merge of two independent sources: the backend's
 // own cumulative `SessionState.log` (real sandbox-exec'd turns) and
@@ -462,6 +615,11 @@ function dismissSplash() {
   document.getElementById("app").classList.remove("hidden");
 }
 
+function updateComposerPlaceholder() {
+  const input = document.getElementById("composer-input");
+  if (input) input.placeholder = turnsCompleted > 0 ? "Reply" : "How can I help you today?";
+}
+
 function initialsFor(name) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -537,6 +695,11 @@ function clearNavActive() {
   document.querySelectorAll(".tool-item").forEach((el) => el.classList.remove("nav-item-active"));
 }
 
+function setHeaderViewToggleLabel(label) {
+  const toggle = document.getElementById("header-view-toggle");
+  if (toggle) toggle.textContent = label;
+}
+
 function showChatView() {
   activeTool = null;
   activeForm = null;
@@ -545,6 +708,7 @@ function showChatView() {
   document.getElementById("regulatory-card").classList.toggle("hidden", !cachedBrief?.regulatory);
   clearNavActive();
   document.getElementById("nav-chat").classList.add("nav-item-active");
+  setHeaderViewToggleLabel("Tools");
   if (lastBackendLog.length || syntheticEntries.length) {
     renderEvidenceRows(cachedBrief ? evidenceRowsFromBrief(cachedBrief) : evidenceRowsFromLog(lastBackendLog));
   }
@@ -557,11 +721,32 @@ function showPlaygroundView(tool, toolButton) {
   document.getElementById("regulatory-card").classList.add("hidden");
   clearNavActive();
   if (toolButton) toolButton.classList.add("nav-item-active");
+  setHeaderViewToggleLabel("Chat");
 
   document.getElementById("playground-tool-name").textContent = tool.title || tool.name;
   document.getElementById("playground-tool-description").textContent = tool.description || "";
   document.getElementById("playground-result").innerHTML = "";
   activeForm = renderToolForm(document.getElementById("playground-form"), tool.inputSchema);
+  renderEvidenceRows([]);
+}
+
+// Landing state for the header's "Tools" toggle when no specific tool has
+// been picked yet from the sidebar -- showPlaygroundView() always expects a
+// tool object, which doesn't exist on a fresh toggle click.
+function showPlaygroundLanding() {
+  activeTool = null;
+  activeForm = null;
+  document.getElementById("chat-view").classList.add("hidden");
+  document.getElementById("playground-view").classList.remove("hidden");
+  document.getElementById("regulatory-card").classList.add("hidden");
+  clearNavActive();
+  setHeaderViewToggleLabel("Chat");
+
+  document.getElementById("playground-tool-name").textContent = "Tools";
+  document.getElementById("playground-tool-description").textContent =
+    "Pick a tool from the sidebar to run it directly.";
+  document.getElementById("playground-form").innerHTML = "";
+  document.getElementById("playground-result").innerHTML = "";
   renderEvidenceRows([]);
 }
 
@@ -633,6 +818,7 @@ async function runActiveTool() {
       toolName: activeTool.name,
       arguments: collected.values,
     });
+    noteMcpOk();
     renderToolResult(resultEl, result);
   } catch (err) {
     resultEl.innerHTML = `<div class="playground-error">${escapeHtml(String(err))}</div>`;
@@ -1103,48 +1289,87 @@ async function loadSavedBrief(clientId, date) {
 
 // --- Connect / login --------------------------------------------------
 
-async function connectMcpGateway() {
-  const statusEl = document.getElementById("mcp-status");
-  const connectBtn = document.getElementById("mcp-connect-btn");
-  connectBtn.disabled = true;
-  statusEl.textContent = "Opening browser for Keycloak login…";
-  try {
-    const identity = await invoke("mcp_login");
-    // The MCP Gateway's own identity -- "your book only" refers to this
-    // login, which is the one that actually determines which tools/data
-    // the user sees, so the header should reflect it once known (it may
-    // differ from the OpenShell-sandbox identity main() set initially).
-    if (identity.display_name) {
-      document.getElementById("header-avatar").textContent = initialsFor(identity.display_name);
-      document.getElementById("header-identity-name").textContent = identity.display_name;
-    }
-    document.getElementById("header-readonly-text").textContent =
-      `SSO · ${identity.display_name || "connected"} · read-only`;
-  } catch (err) {
-    statusEl.textContent = `Error: ${err}`;
-    connectBtn.disabled = false;
+function showMcpLoginModal(reason) {
+  document.getElementById("mcp-login-modal-message").textContent = reason
+    ? `Tools, your book, and meeting briefs need a separate Keycloak login. (${reason})`
+    : "Tools, your book, and meeting briefs need a separate Keycloak login.";
+  document.getElementById("mcp-login-modal").classList.remove("hidden");
+}
+
+function hideMcpLoginModal() {
+  document.getElementById("mcp-login-modal").classList.add("hidden");
+}
+
+// The header's "Tools" toggle is only meaningfully clickable once MCP is
+// logged in (the sidebar's tool list/Today rail are both empty until
+// then) -- hidden entirely when this launch has no MCP Gateway configured
+// at all, muted (but still clickable, to offer the login modal) otherwise.
+function updateToolsToggleState() {
+  const toggle = document.getElementById("header-view-toggle");
+  if (!toggle) return;
+  if (!mcpAvailable) {
+    toggle.classList.add("hidden");
     return;
   }
+  toggle.classList.remove("hidden");
+  toggle.classList.toggle("muted", !mcpConnected);
+}
 
-  statusEl.textContent = "Loading…";
-  let toolCount = 0;
+// Does just the MCP Gateway's interactive Keycloak login, nothing else --
+// used both by `connectSandbox` (which needs the resulting identity's
+// `preferred_username` *before* it can resolve a sandbox) and by
+// `attemptMcpLogin` below. Throws on failure; callers decide how to
+// surface that (inline on the splash vs. the login modal).
+async function mcpLogin() {
+  const identity = await invoke("mcp_login");
+  // The MCP Gateway's own identity -- "your book only" refers to this
+  // login, which is the one that actually determines which tools/data
+  // the user sees, so the header should reflect it once known (it may
+  // differ from the OpenShell-sandbox identity main() set initially).
+  if (identity.display_name) {
+    document.getElementById("header-avatar").textContent = initialsFor(identity.display_name);
+    document.getElementById("header-identity-name").textContent = identity.display_name;
+  }
+  mcpConnected = true;
+  noteMcpOk();
+  updateToolsToggleState();
+  hideMcpLoginModal();
+  return identity;
+}
+
+// Loads the sidebar's tool list and Today rail -- soft-fails (logged, not
+// re-prompted) since a successful MCP login already proved the session is
+// good; a failure here is a data-fetch problem, not an auth problem.
+async function loadMcpToolsAndToday() {
   try {
     const groups = await invoke("mcp_list_tools");
     renderToolGroups(groups);
-    toolCount = groups.reduce((n, g) => n + g.tools.length, 0);
+    noteMcpOk();
   } catch (err) {
     console.error("parrot-tauri: mcp_list_tools failed", err);
   }
   try {
     const today = await invoke("mcp_today");
     renderToday(today);
+    noteMcpOk();
   } catch (err) {
     console.error("parrot-tauri: mcp_today failed", err);
-    statusEl.textContent += " (today's meetings/book failed to load — see console)";
   }
+}
 
-  statusEl.textContent = `Connected — ${toolCount} tools`;
-  connectBtn.classList.add("hidden");
+// Full MCP login + tools/Today, with failure surfaced via the login modal
+// instead of thrown -- used by the modal's own "Log in" retry button, and
+// by the explicit `--sandbox` startup path (main()) where the sandbox is
+// already known and MCP login is purely an add-on, not a prerequisite.
+async function attemptMcpLogin() {
+  try {
+    await mcpLogin();
+  } catch (err) {
+    console.error("parrot-tauri: mcp_login failed", err);
+    showMcpLoginModal(String(err));
+    return;
+  }
+  await loadMcpToolsAndToday();
 }
 
 async function submit(promptText) {
@@ -1159,6 +1384,7 @@ async function submit(promptText) {
   document.getElementById("composer-hint").textContent = "running…";
 
   const channel = new Channel();
+  let sawTerminalStatus = false;
   channel.onmessage = (snapshot) => {
     lastBackendLog = snapshot.log;
     renderChatLog();
@@ -1166,6 +1392,12 @@ async function submit(promptText) {
       renderEvidenceRows(evidenceRowsFromLog(lastBackendLog));
     }
     renderStatus(snapshot.status);
+    if (snapshot.status.type !== "Running" && !sawTerminalStatus) {
+      sawTerminalStatus = true;
+      noteSandboxOk();
+      turnsCompleted += 1;
+      updateComposerPlaceholder();
+    }
   };
 
   try {
@@ -1182,34 +1414,38 @@ async function main() {
   const greeting = await invoke("greeting");
   applyTheme(greeting.theme);
 
-  // Initial header identity comes from the OpenShell-sandbox session
-  // (whatever `greeting` resolved); `connectMcpGateway` overwrites this
-  // with the MCP Gateway's own identity once that login succeeds, since
-  // that's the one "your book only" actually refers to.
+  // Identity is resolved independently of any sandbox (see ParrotClient::
+  // connect/resolve_workspace), so this renders regardless of whether
+  // `greeting.sandbox` is set yet. `attemptMcpLogin` overwrites the
+  // avatar/name with the MCP Gateway's own identity once that login
+  // succeeds, since that's the one "your book only" actually refers to.
   const displayName = greeting.display_name || greeting.workspace || "Banker";
   document.getElementById("header-avatar").textContent = initialsFor(displayName);
   document.getElementById("header-identity-name").textContent = displayName;
-  document.getElementById("header-readonly-text").textContent =
-    `SSO · sandbox ${greeting.sandbox} · read-only`;
 
   document.getElementById("splash-greeting").textContent = greeting.identity_greeting;
   document.getElementById("splash-gateway").textContent =
     `Gateway: ${greeting.gateway_name} (${greeting.gateway_endpoint})`;
-  document.getElementById("splash-sandbox").textContent =
-    `Sandbox: ${greeting.sandbox} (${greeting.sandbox_phase})`;
 
-  document.getElementById("header-sandbox").textContent =
-    `sandbox ${greeting.sandbox} — `;
-  const phaseEl = document.getElementById("header-sandbox-phase");
-  phaseEl.textContent = `${greeting.sandbox_phase} — `;
-  phaseEl.className = `status ${sandboxPhaseClass(greeting.sandbox_phase)}`;
+  mcpAvailable = greeting.mcp_available;
+  updateToolsToggleState();
+  document.getElementById("mcp-login-modal-btn").addEventListener("click", attemptMcpLogin);
+  document.getElementById("mcp-login-modal-dismiss").addEventListener("click", hideMcpLoginModal);
 
-  if (greeting.mcp_available) {
-    document.getElementById("mcp-connect-btn").addEventListener("click", connectMcpGateway);
-  } else {
-    document.getElementById("mcp-panel").classList.add("hidden");
-  }
   document.getElementById("nav-chat").addEventListener("click", showChatView);
+  document.getElementById("header-view-toggle").addEventListener("click", () => {
+    const inChat = !document.getElementById("chat-view").classList.contains("hidden");
+    if (inChat) {
+      if (!mcpConnected) {
+        showMcpLoginModal();
+        return;
+      }
+      if (activeTool) showPlaygroundView(activeTool);
+      else showPlaygroundLanding();
+    } else {
+      showChatView();
+    }
+  });
   document.getElementById("playground-run-btn").addEventListener("click", runActiveTool);
   document.getElementById("brief-open-btn").addEventListener("click", generateBrief);
   document.getElementById("composer-send-btn").addEventListener("click", () => {
@@ -1225,8 +1461,12 @@ async function main() {
   });
 
   const input = document.getElementById("composer-input");
+  updateComposerPlaceholder();
   input.addEventListener("keydown", (event) => {
-    dismissSplash();
+    // Only reachable once a sandbox is attached -- #app (and this input)
+    // stays `display: none` until then, so this can't be used to bypass
+    // Connect.
+    if (sandboxName) dismissSplash();
     if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
       event.preventDefault();
       submit(input.value);
@@ -1237,14 +1477,30 @@ async function main() {
     input.style.height = `${input.scrollHeight}px`;
   });
 
-  if (greeting.no_splash) {
-    dismissSplash();
+  if (greeting.sandbox) {
+    // `--sandbox` was given explicitly at launch -- same auto-dismissing
+    // splash as before.
+    applySandboxInfo(greeting.sandbox, greeting.sandbox_phase);
+    if (greeting.no_splash) {
+      dismissSplash();
+    } else {
+      setTimeout(dismissSplash, SPLASH_DURATION_MS);
+    }
+    if (greeting.prompt) {
+      submit(greeting.prompt);
+    }
+    if (mcpAvailable) {
+      attemptMcpLogin();
+    }
   } else {
-    setTimeout(dismissSplash, SPLASH_DURATION_MS);
-  }
-
-  if (greeting.prompt) {
-    submit(greeting.prompt);
+    // No `--sandbox`: identity is known, but which sandbox to attach to
+    // isn't -- show the Connect button and wait for the user (ignoring
+    // `no_splash`, since there'd be nothing to auto-dismiss into).
+    pendingPrompt = greeting.prompt || null;
+    document.getElementById("header-readonly-text").textContent = "SSO · not connected";
+    const connectBtn = document.getElementById("splash-connect-btn");
+    connectBtn.classList.remove("hidden");
+    connectBtn.addEventListener("click", connectSandbox);
   }
 
   input.focus();

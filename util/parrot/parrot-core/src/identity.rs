@@ -55,6 +55,18 @@ pub fn identity_from_access_token(token: &str) -> Identity {
     }
 }
 
+/// Extract the `preferred_username` claim specifically -- unlike
+/// [`identity_from_access_token`]'s `display_name` (which prefers `name`,
+/// e.g. "Alice Meridian"), this is the stable Keycloak login username
+/// (e.g. "alice"), the only claim safe to use when deriving a resource
+/// name like a sandbox (`{agent}-{preferred_username}`) from a token.
+pub fn preferred_username_from_access_token(token: &str) -> Option<String> {
+    decode_jwt_claims(token)?
+        .get("preferred_username")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 fn decode_jwt_claims(token: &str) -> Option<serde_json::Map<String, Value>> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD

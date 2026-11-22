@@ -189,7 +189,19 @@ else
   echo "(close the parrot-tauri window once the turn finishes)"
 fi
 
-PARROT_ARGS=(--sandbox "$SANDBOX_NAME" --workspace "$USER_ID" --agent "$AGENT")
+# parrot-tauri resolves its own sandbox from identity via the splash
+# screen's Connect button (computing `{sandbox-prefix}{agent}-{user}`
+# itself -- see parrot-tauri/src/main.rs's `connect_sandbox`), so it's
+# launched without a pre-computed --sandbox; the TUI (`parrot`) has no such
+# screen and keeps attaching to $SANDBOX_NAME directly, as before.
+if [[ "$UI" == "parrot-tauri" ]]; then
+  PARROT_ARGS=(--workspace "$USER_ID" --agent "$AGENT")
+  if [ "$AUD" = true ]; then
+    PARROT_ARGS+=(--sandbox-prefix "aud-")
+  fi
+else
+  PARROT_ARGS=(--sandbox "$SANDBOX_NAME" --workspace "$USER_ID" --agent "$AGENT")
+fi
 PARROT_ARGS+=("${OTEL_ENV_ARGS[@]+"${OTEL_ENV_ARGS[@]}"}")
 PARROT_ARGS+=("${AUDITOR_ENV_ARGS[@]+"${AUDITOR_ENV_ARGS[@]}"}")
 PARROT_ARGS+=("${MLFLOW_ARGS[@]+"${MLFLOW_ARGS[@]}"}")

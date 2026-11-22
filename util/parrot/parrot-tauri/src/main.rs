@@ -82,7 +82,14 @@ fn sandbox_phase_str(phase: SandboxPhase) -> &'static str {
 struct AppState {
     client: Arc<ParrotClient>,
     runtime: Arc<Runtime>,
-    sandbox: String,
+    /// `None` until a sandbox is attached — either resolved eagerly at
+    /// startup (`--sandbox` was given) or via the `connect_sandbox` command
+    /// (the splash screen's Connect button).
+    sandbox: Mutex<Option<String>>,
+    /// Prefix used by `connect_sandbox` to compute
+    /// `{sandbox_prefix}{agent}-{workspace}`. Unused when `--sandbox` was
+    /// given explicitly.
+    sandbox_prefix: String,
     workspace: Option<String>,
     agent: Agent,
     mcp_config: Option<String>,
@@ -91,10 +98,10 @@ struct AppState {
     no_splash: bool,
     prompt: Option<String>,
     identity_greeting: String,
-    /// Fetched once at startup (see `main`'s connect block) so the splash
-    /// screen reports it before the user submits a first turn — previously
-    /// the only way to learn the sandbox wasn't `Ready` was an exec failing.
-    sandbox_phase: SandboxPhase,
+    /// Mirrors `sandbox`: `None` until a sandbox is attached. Re-fetched by
+    /// `connect_sandbox`/`sandbox_status` so the splash/header can report it
+    /// without waiting for an exec to fail first.
+    sandbox_phase: Mutex<Option<SandboxPhase>>,
     session: Arc<Mutex<SessionState>>,
     turn_running: Arc<AtomicBool>,
 }
@@ -108,8 +115,10 @@ struct Greeting {
     display_name: Option<String>,
     gateway_name: String,
     gateway_endpoint: String,
-    sandbox: String,
-    sandbox_phase: String,
+    /// `null` until a sandbox is attached — the webview shows the splash's
+    /// Connect button instead of auto-dismissing in that case.
+    sandbox: Option<String>,
+    sandbox_phase: Option<String>,
     agent: String,
     workspace: Option<String>,
     theme: String,
@@ -124,13 +133,20 @@ struct Greeting {
 
 #[tauri::command]
 fn greeting(state: State<'_, AppState>, mcp_state: State<'_, McpState>) -> Greeting {
+    let sandbox = state.sandbox.lock().expect("sandbox mutex poisoned").clone();
+    let sandbox_phase = state
+        .sandbox_phase
+        .lock()
+        .expect("sandbox_phase mutex poisoned")
+        .map(sandbox_phase_str)
+        .map(str::to_string);
     Greeting {
         identity_greeting: state.identity_greeting.clone(),
         display_name: state.client.identity.display_name.clone(),
         gateway_name: state.client.gateway.name.clone(),
         gateway_endpoint: state.client.gateway.endpoint.clone(),
-        sandbox: state.sandbox.clone(),
-        sandbox_phase: sandbox_phase_str(state.sandbox_phase).to_string(),
+        sandbox,
+        sandbox_phase,
         agent: agent_str(state.agent).to_string(),
         workspace: state.workspace.clone(),
         theme: theme_str(state.theme).to_string(),
@@ -138,6 +154,95 @@ fn greeting(state: State<'_, AppState>, mcp_state: State<'_, McpState>) -> Greet
         prompt: state.prompt.clone(),
         mcp_available: mcp_state.configured(),
     }
+}
+
+/// What `connect_sandbox`/`sandbox_status` report back to the webview.
+#[derive(serde::Serialize)]
+struct SandboxStatus {
+    sandbox: String,
+    sandbox_phase: String,
+}
+
+/// Resolves and verifies `{sandbox_prefix}{agent}-{user}` against an
+/// already-provisioned sandbox — the splash screen's Connect button.
+///
+/// `user` is the MCP Gateway login's `preferred_username` (the frontend
+/// logs into MCP first and passes it here) — the stable Keycloak login
+/// name, not `ParrotClient::identity`'s `display_name` (which prefers the
+/// human-readable `name` claim, e.g. "Alice Meridian" instead of "alice",
+/// and would produce a wrong/malformed sandbox name). Falls back to
+/// `state.workspace` (the primary gateway's own resolved workspace) when
+/// `user` is omitted — e.g. MCP isn't configured for this launch at all.
+/// The primary `ParrotClient`/its workspace scoping for the actual RPC
+/// call are unchanged either way; only the *name being looked up* can
+/// come from the MCP identity.
+///
+/// Per this demo's self-service-onboarding invariant (see
+/// `demos/keycloak-oidc/docs/self-service-onboarding.md`), this only ever
+/// *reads* sandbox state; it never creates one. If the computed name isn't
+/// provisioned, the error tells the user to ask an admin rather than
+/// failing generically.
+#[tauri::command]
+async fn connect_sandbox(user: Option<String>, state: State<'_, AppState>) -> Result<SandboxStatus, String> {
+    {
+        let sandbox = state.sandbox.lock().expect("sandbox mutex poisoned").clone();
+        if let Some(name) = sandbox {
+            let phase = state
+                .sandbox_phase
+                .lock()
+                .expect("sandbox_phase mutex poisoned")
+                .expect("sandbox_phase set whenever sandbox is");
+            return Ok(SandboxStatus {
+                sandbox: name,
+                sandbox_phase: sandbox_phase_str(phase).to_string(),
+            });
+        }
+    }
+
+    let user = user
+        .or_else(|| state.workspace.clone())
+        .ok_or_else(|| "can't determine your username — ask an admin to add you to a workspace".to_string())?;
+    let candidate = format!("{}{}-{}", state.sandbox_prefix, agent_str(state.agent), user);
+    let phase = state
+        .client
+        .sandbox_phase(&candidate, state.workspace.as_deref())
+        .await
+        .map_err(|_| {
+            format!(
+                "No sandbox named '{candidate}' is provisioned for your account yet. Ask an admin to provision it (see demos/keycloak-oidc/scripts/14-/15-/16-provision-*-sandbox.sh)."
+            )
+        })?;
+
+    *state.sandbox.lock().expect("sandbox mutex poisoned") = Some(candidate.clone());
+    *state.sandbox_phase.lock().expect("sandbox_phase mutex poisoned") = Some(phase);
+
+    Ok(SandboxStatus {
+        sandbox: candidate,
+        sandbox_phase: sandbox_phase_str(phase).to_string(),
+    })
+}
+
+/// Re-checks the already-attached sandbox's phase — the header's heartbeat
+/// poll. Errors if no sandbox is attached yet (call `connect_sandbox`
+/// first).
+#[tauri::command]
+async fn sandbox_status(state: State<'_, AppState>) -> Result<SandboxStatus, String> {
+    let sandbox = state
+        .sandbox
+        .lock()
+        .expect("sandbox mutex poisoned")
+        .clone()
+        .ok_or_else(|| "not connected to a sandbox yet".to_string())?;
+    let phase = state
+        .client
+        .sandbox_phase(&sandbox, state.workspace.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    *state.sandbox_phase.lock().expect("sandbox_phase mutex poisoned") = Some(phase);
+    Ok(SandboxStatus {
+        sandbox,
+        sandbox_phase: sandbox_phase_str(phase).to_string(),
+    })
 }
 
 /// A point-in-time view of the session, sent to the webview after every
@@ -168,6 +273,12 @@ async fn submit_turn(
     if prompt.is_empty() {
         return Err("empty prompt".to_string());
     }
+    let sandbox = state
+        .sandbox
+        .lock()
+        .expect("sandbox mutex poisoned")
+        .clone()
+        .ok_or_else(|| "not connected to a sandbox yet".to_string())?;
     if state.turn_running.swap(true, Ordering::SeqCst) {
         return Err("a turn is already running".to_string());
     }
@@ -182,7 +293,6 @@ async fn submit_turn(
 
     let client = state.client.clone();
     let runtime = state.runtime.clone();
-    let sandbox = state.sandbox.clone();
     let workspace = state.workspace.clone();
     let agent = state.agent;
     let mcp_config = state
@@ -280,29 +390,41 @@ fn main() {
     let cli = Cli::parse();
 
     // Same fail-fast-before-any-window behavior as parrot-tui/parrot-gpui:
-    // a banker with no active gateway or no sandbox access gets a message
-    // on the terminal, never a blank window.
+    // a banker with no active gateway gets a message on the terminal, never
+    // a blank window. Sandbox resolution is no longer part of this eager
+    // chain when `--sandbox` is omitted — identity/workspace are enough to
+    // open the window; the splash screen's Connect button resolves the
+    // sandbox afterward (see `connect_sandbox`).
     let runtime = Arc::new(Runtime::new().expect("failed to start tokio runtime"));
-    let (client, workspace, sandbox_phase) = runtime
+    let (client, workspace) = runtime
         .block_on(async {
             let client =
                 ParrotClient::connect(cli.gateway.as_deref(), cli.gateway_endpoint.as_deref())
                     .await?;
             let workspace = client.resolve_workspace(cli.workspace.as_deref()).await?;
-            let sandbox_phase = client
-                .sandbox_phase(&cli.sandbox, workspace.as_deref())
-                .await?;
-            Ok::<_, parrot_core::ParrotError>((client, workspace, sandbox_phase))
+            Ok::<_, parrot_core::ParrotError>((client, workspace))
         })
         .unwrap_or_else(|err| {
             eprintln!("parrot-tauri: {err}");
             std::process::exit(1);
         });
-    eprintln!(
-        "parrot-tauri: sandbox '{}' is {}",
-        cli.sandbox,
-        sandbox_phase_str(sandbox_phase)
-    );
+
+    let (sandbox, sandbox_phase) = match cli.sandbox.clone() {
+        Some(name) => {
+            let phase = runtime
+                .block_on(client.sandbox_phase(&name, workspace.as_deref()))
+                .unwrap_or_else(|err| {
+                    eprintln!("parrot-tauri: {err}");
+                    std::process::exit(1);
+                });
+            eprintln!("parrot-tauri: sandbox '{name}' is {}", sandbox_phase_str(phase));
+            (Some(name), Some(phase))
+        }
+        None => {
+            eprintln!("parrot-tauri: no --sandbox given; connect from the splash screen");
+            (None, None)
+        }
+    };
 
     let mut environment = detect_passthrough_environment();
     environment.extend(cli.env.iter().cloned());
@@ -321,7 +443,8 @@ fn main() {
     let state = AppState {
         client: Arc::new(client),
         runtime,
-        sandbox: cli.sandbox.clone(),
+        sandbox: Mutex::new(sandbox),
+        sandbox_prefix: cli.sandbox_prefix.clone().unwrap_or_default(),
         workspace,
         agent: cli.agent,
         mcp_config: cli.mcp_config.clone(),
@@ -330,7 +453,7 @@ fn main() {
         no_splash: cli.no_splash,
         prompt: cli.prompt.clone(),
         identity_greeting,
-        sandbox_phase,
+        sandbox_phase: Mutex::new(sandbox_phase),
         session: Arc::new(Mutex::new(SessionState::new())),
         turn_running: Arc::new(AtomicBool::new(false)),
     };
@@ -348,6 +471,8 @@ fn main() {
         .manage(mcp_state)
         .invoke_handler(tauri::generate_handler![
             greeting,
+            connect_sandbox,
+            sandbox_status,
             submit_turn,
             mcp::mcp_login,
             mcp::mcp_list_tools,

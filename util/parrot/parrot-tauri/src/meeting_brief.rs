@@ -150,10 +150,16 @@ pub async fn mcp_meeting_brief(
         .client()
         .await
         .ok_or_else(|| "not logged in to the MCP Gateway yet".to_string())?;
+    let sandbox = state
+        .sandbox
+        .lock()
+        .expect("sandbox mutex poisoned")
+        .clone()
+        .ok_or_else(|| "not connected to a sandbox yet".to_string())?;
     let brief = build_meeting_brief(
         &mcp_client,
         &state.client,
-        &state.sandbox,
+        &sandbox,
         state.workspace.as_deref(),
         state.agent,
         state.environment.clone(),
@@ -272,7 +278,9 @@ pub fn list_saved_briefs() -> Result<Vec<SavedBriefSummary>, String> {
         ));
     }
     summaries.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(summaries.into_iter().map(|(_, s)| s).collect())
+    // Sidebar only ever shows the 3 most recent — cap here rather than in
+    // the UI so there's a single source of truth for "recent".
+    Ok(summaries.into_iter().take(3).map(|(_, s)| s).collect())
 }
 
 /// Recovers one previously generated brief by exactly the key it was

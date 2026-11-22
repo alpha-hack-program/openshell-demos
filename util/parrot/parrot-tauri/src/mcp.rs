@@ -91,6 +91,11 @@ fn open_browser(url: &str) {
 #[derive(Clone, serde::Serialize)]
 pub struct McpIdentity {
     pub display_name: Option<String>,
+    /// The stable Keycloak login username (`preferred_username`), distinct
+    /// from `display_name` (which prefers the human-readable `name` claim)
+    /// -- the splash screen's Connect flow uses this, not `display_name`,
+    /// to compute `{sandbox_prefix}{agent}-{preferred_username}`.
+    pub preferred_username: Option<String>,
 }
 
 #[tauri::command]
@@ -123,6 +128,7 @@ pub async fn mcp_login(state: State<'_, McpState>) -> Result<McpIdentity, String
     open_browser(&pending.authorize_url);
     let token = pending.complete().await.map_err(|e| e.to_string())?;
     let identity = parrot_core::identity_from_access_token(&token.access_token);
+    let preferred_username = parrot_core::preferred_username_from_access_token(&token.access_token);
 
     let client = McpGatewayClient::connect(&gateway_url, &token)
         .await
@@ -130,6 +136,7 @@ pub async fn mcp_login(state: State<'_, McpState>) -> Result<McpIdentity, String
     *state.client.lock().await = Some(Arc::new(client));
     let identity = McpIdentity {
         display_name: identity.display_name,
+        preferred_username,
     };
     *state.identity.lock().await = Some(identity.clone());
     Ok(identity)

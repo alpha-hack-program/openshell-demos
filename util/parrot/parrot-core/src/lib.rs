@@ -27,7 +27,7 @@ pub use client::ParrotClient;
 pub use error::{ParrotError, Result};
 pub use exec::{ExecOutcome, ExecStream, StreamedExecOptions};
 pub use gateway::GatewayContext;
-pub use identity::{identity_from_access_token, Identity};
+pub use identity::{identity_from_access_token, preferred_username_from_access_token, Identity};
 pub use jsonl::{tool_result_text, AgentEvent};
 pub use markdown::{render_inline_markdown, InlineRun, InlineStyle};
 pub use mcp_auth::{start_login, McpAuthConfig, McpToken, PendingLogin};

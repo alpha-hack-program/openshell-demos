@@ -74,6 +74,12 @@ pub async fn mcp_client_snapshot(
     query: String,
     state: State<'_, AppState>,
 ) -> Result<ClientSnapshot, String> {
+    let sandbox = state
+        .sandbox
+        .lock()
+        .expect("sandbox mutex poisoned")
+        .clone()
+        .ok_or_else(|| "not connected to a sandbox yet".to_string())?;
     let mcp_config = state
         .mcp_config
         .clone()
@@ -81,7 +87,7 @@ pub async fn mcp_client_snapshot(
     build_client_snapshot(
         &query,
         &state.client,
-        &state.sandbox,
+        &sandbox,
         state.workspace.as_deref(),
         state.agent,
         mcp_config.as_deref(),
